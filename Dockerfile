@@ -18,5 +18,5 @@ RUN chmod +x /app/entrypoint.sh \
     && python manage.py collectstatic --noinput
 
 USER user
-EXPOSE 7860
+EXPOSE 8000
 CMD ["./entrypoint.sh"]

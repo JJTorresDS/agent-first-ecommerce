@@ -10,8 +10,8 @@ Django is the system of record. This milestone is one app, `tasks`, on Neon Post
 
 - Humans work the queue in Django admin.
 - Agents create and update tasks only through this app's HTTP API (`/api/tasks`), authenticated with a bearer token.
-- The app runs as a Hugging Face Docker Space on port 7860.
-- Postgres is Neon. Django reads `DATABASE_URL` from the environment (locally, from `.env`). The Space does not store the database on its disk.
+- The app runs as a Render Docker web service. Render sets `PORT`, and gunicorn binds to it.
+- Postgres is Neon. Django reads `DATABASE_URL` from the environment (locally, from `.env`). Render does not store the database on its disk.
 
 **What is deferred**
 
@@ -57,7 +57,7 @@ Mounted at `/api/`. Every route requires `Authorization: Bearer <TASKS_API_TOKEN
 
 ### Deploy
 
-Hugging Face Docker Space. Set Space secrets `DATABASE_URL` (the Neon connection string), `SECRET_KEY`, `TASKS_API_TOKEN`, `DJANGO_SUPERUSER_USERNAME`, `DJANGO_SUPERUSER_EMAIL`, `DJANGO_SUPERUSER_PASSWORD`, and `CSRF_TRUSTED_ORIGINS` (the Space origin, `https://<owner>-<space>.hf.space`).
+Render Docker web service, defined in `render.yaml`. Connect the GitHub repo and apply the blueprint. Paste `DATABASE_URL` (the Neon connection string) and `CSRF_TRUSTED_ORIGINS` (the service origin, `https://scent-tasks.onrender.com`). Render generates `SECRET_KEY` and `TASKS_API_TOKEN`. Do not set `DEBUG` or `DJANGO_SUPERUSER_*`. The admin user already in Neon is the login. A free instance spins down when idle. `GET /health/` returns `ok` and does not use the database; ping it from outside every 10 minutes to keep the instance awake. Tasks stay in Neon.
 
 ## Later: Mercado Libre platform
 

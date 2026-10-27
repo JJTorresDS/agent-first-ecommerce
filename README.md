@@ -1,12 +1,3 @@
----
-title: Scent tasks
-emoji: 📋
-colorFrom: blue
-colorTo: green
-sdk: docker
-app_port: 7860
----
-
 # Scent tasks
 
 Django is the system of record for one `tasks` table on Neon Postgres. Humans use the admin. A separate agents project creates and updates tasks through the HTTP API. Agents never touch the database.
@@ -30,18 +21,19 @@ Admin is at http://127.0.0.1:8000/admin/. OpenAPI is at http://127.0.0.1:8000/ap
 
 API calls send `Authorization: Bearer <TASKS_API_TOKEN>` from `.env`.
 
-## Hugging Face Space
+## Render
 
-Create a Docker Space from this repo. In Space settings, set these secrets:
+Connect the GitHub repo in the [Render dashboard](https://dashboard.render.com/blueprint/new) and apply `render.yaml`. The service is a Docker web service named `scent-tasks`.
 
-| Secret | Purpose |
-| --- | --- |
-| `DATABASE_URL` | Neon connection string, with `sslmode=require`. |
-| `SECRET_KEY` | Django secret. Required on the Space. |
-| `TASKS_API_TOKEN` | Bearer token for the agents project. |
-| `DJANGO_SUPERUSER_USERNAME` | Admin username created on startup. |
-| `DJANGO_SUPERUSER_EMAIL` | Admin email created on startup. |
-| `DJANGO_SUPERUSER_PASSWORD` | Admin password created on startup. |
-| `CSRF_TRUSTED_ORIGINS` | The Space origin, `https://<owner>-<space>.hf.space`. |
+Paste these two values when Render asks:
 
-`DEBUG` stays off on the Space unless you set it. Tasks live in Neon, so a Space restart does not erase them.
+- `DATABASE_URL`: the Neon connection string, with `sslmode=require`.
+- `CSRF_TRUSTED_ORIGINS`: the service origin only, `https://scent-tasks.onrender.com`, with no path. If Render assigns a different host, use that origin instead.
+
+Render generates `SECRET_KEY` and `TASKS_API_TOKEN`. Copy `TASKS_API_TOKEN` into the agents project. Leave `DEBUG` unset. Leave `DJANGO_SUPERUSER_USERNAME`, `DJANGO_SUPERUSER_EMAIL`, and `DJANGO_SUPERUSER_PASSWORD` unset. The admin user already in Neon is the login. Startup creates a superuser only when `DJANGO_SUPERUSER_PASSWORD` is set, and it does not change an existing user's password.
+
+After the first deploy, open `/admin/` and call `/api/tasks` with `Authorization: Bearer <TASKS_API_TOKEN>`.
+
+`GET /health/` returns `ok` and does not touch the database. Ping that URL from an outside scheduler every 10 minutes so the free instance does not spin down.
+
+A free Render web service spins down after inactivity. The first request after idle waits through a cold start. Tasks stay in Neon either way.

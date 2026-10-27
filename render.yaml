@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: scent-tasks
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health/
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: CSRF_TRUSTED_ORIGINS
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: TASKS_API_TOKEN
+        generateValue: true

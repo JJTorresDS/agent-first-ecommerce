@@ -1,4 +1,4 @@
-from django.test import TestCase, override_settings
+from django.test import SimpleTestCase, TestCase, override_settings
 from ninja.testing import TestClient
 
 from tasks.api import api
@@ -110,3 +110,10 @@ class TaskApiTests(TestCase):
             headers=self.auth,
         )
         self.assertEqual(response.status_code, 422)
+
+
+class HealthTests(SimpleTestCase):
+    def test_health_skips_the_database(self):
+        response = self.client.get("/health/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b"ok")
