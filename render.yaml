@@ -2,6 +2,9 @@ services:
   - type: web
     name: scent-tasks
     runtime: docker
+    plan: free
+    branch: main
+    autoDeploy: true
     dockerfilePath: ./Dockerfile
     dockerContext: .
     healthCheckPath: /health/
@@ -14,3 +17,9 @@ services:
         generateValue: true
       - key: TASKS_API_TOKEN
         generateValue: true
+      - key: DJANGO_SUPERUSER_USERNAME
+        value: admin
+      - key: DJANGO_SUPERUSER_EMAIL
+        value: admin@example.com
+      - key: DJANGO_SUPERUSER_PASSWORD
+        sync: false
