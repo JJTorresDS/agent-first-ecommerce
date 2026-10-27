@@ -1,6 +1,6 @@
-# Scent tasks
+# Vimple
 
-Django is the system of record for one `tasks` table on Neon Postgres. Humans use the admin. A separate agents project creates and updates tasks through the HTTP API. Agents never touch the database.
+Vimple is the backend. Scent is the first tenant. Django is the system of record for one `tasks` table on Neon Postgres. Humans use the admin. A separate agents project creates and updates tasks through the HTTP API. Agents never touch the database.
 
 ## Run locally
 
@@ -23,12 +23,12 @@ API calls send `Authorization: Bearer <TASKS_API_TOKEN>` from `.env`.
 
 ## Render
 
-Connect the GitHub repo in the [Render dashboard](https://dashboard.render.com/blueprint/new) and apply `render.yaml`. The service is a Docker web service named `scent-tasks`.
+Connect the GitHub repo in the [Render dashboard](https://dashboard.render.com/blueprint/new) and apply `render.yaml`. The service is a Docker web service named `vimple-backend`.
 
 Paste these two values when Render asks:
 
 - `DATABASE_URL`: the Neon connection string, with `sslmode=require`.
-- `CSRF_TRUSTED_ORIGINS`: the service origin only, `https://scent-tasks.onrender.com`, with no path. If Render assigns a different host, use that origin instead.
+- `CSRF_TRUSTED_ORIGINS`: the service origin only, `https://vimple-backend.onrender.com`, with no path. If Render assigns a different host, use that origin instead.
 
 Render generates `SECRET_KEY` and `TASKS_API_TOKEN`. Copy `TASKS_API_TOKEN` into the agents project. Leave `DEBUG` unset. Leave `DJANGO_SUPERUSER_USERNAME`, `DJANGO_SUPERUSER_EMAIL`, and `DJANGO_SUPERUSER_PASSWORD` unset. The admin user already in Neon is the login. Startup creates a superuser only when `DJANGO_SUPERUSER_PASSWORD` is set, and it does not change an existing user's password.
 

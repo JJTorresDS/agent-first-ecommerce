@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: scent-tasks
+    name: vimple-backend
     runtime: docker
     plan: free
     branch: main

@@ -1,10 +1,10 @@
-# Scent — Agent-First Platform Spec
+# Vimple — Agent-First Platform Spec
 
 _Last updated: Oct 27, 2026_
 
 ## Current milestone
 
-Django is the system of record. This milestone is one app, `tasks`, on Neon Postgres. Humans and agents share that table. Agents live in a separate project and never touch the database.
+Vimple is the backend. Scent is the first tenant. Django is the system of record. This milestone is one app, `tasks`, on Neon Postgres. Humans and agents share that table. Agents live in a separate project and never touch the database.
 
 **What this milestone is**
 
@@ -57,7 +57,7 @@ Mounted at `/api/`. Every route requires `Authorization: Bearer <TASKS_API_TOKEN
 
 ### Deploy
 
-Render Docker web service, defined in `render.yaml`. Connect the GitHub repo and apply the blueprint. Paste `DATABASE_URL` (the Neon connection string) and `CSRF_TRUSTED_ORIGINS` (the service origin, `https://scent-tasks.onrender.com`). Render generates `SECRET_KEY` and `TASKS_API_TOKEN`. Do not set `DEBUG` or `DJANGO_SUPERUSER_*`. The admin user already in Neon is the login. A free instance spins down when idle. `GET /health/` returns `ok` and does not use the database; ping it from outside every 10 minutes to keep the instance awake. Tasks stay in Neon.
+Render Docker web service, defined in `render.yaml`. Connect the GitHub repo and apply the blueprint. Paste `DATABASE_URL` (the Neon connection string) and `CSRF_TRUSTED_ORIGINS` (the service origin, `https://vimple-backend.onrender.com`). Render generates `SECRET_KEY` and `TASKS_API_TOKEN`. Do not set `DEBUG` or `DJANGO_SUPERUSER_*`. The admin user already in Neon is the login. A free instance spins down when idle. `GET /health/` returns `ok` and does not use the database; ping it from outside every 10 minutes to keep the instance awake. Tasks stay in Neon.
 
 ## Later: Mercado Libre platform
 

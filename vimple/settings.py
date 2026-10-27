@@ -1,4 +1,4 @@
-"""Django settings for the Scent tasks app."""
+"""Django settings for the Vimple backend."""
 
 import os
 import sys
@@ -57,7 +57,7 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
-ROOT_URLCONF = "scent.urls"
+ROOT_URLCONF = "vimple.urls"
 
 TEMPLATES = [
     {
@@ -74,7 +74,7 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = "scent.wsgi.application"
+WSGI_APPLICATION = "vimple.wsgi.application"
 
 
 def database_from_url(url):

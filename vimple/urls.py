@@ -5,8 +5,8 @@ from django.views.generic import RedirectView
 from tasks.api import api
 from tasks.views import health
 
-admin.site.site_header = "Scent tasks"
-admin.site.site_title = "Scent tasks"
+admin.site.site_header = "Vimple"
+admin.site.site_title = "Vimple"
 admin.site.index_title = "Tasks"
 
 urlpatterns = [
