@@ -1,8 +1,69 @@
 # Scent — Agent-First Platform Spec
 
-_Last updated: Oct 26, 2026_
+_Last updated: Oct 27, 2026_
 
-## Overview
+## Current milestone
+
+Django is the system of record. This milestone is one app, `tasks`, on Neon Postgres. Humans and agents share that table. Agents live in a separate project and never touch the database.
+
+**What this milestone is**
+
+- Humans work the queue in Django admin.
+- Agents create and update tasks only through this app's HTTP API (`/api/tasks`), authenticated with a bearer token.
+- The app runs as a Hugging Face Docker Space on port 7860.
+- Postgres is Neon. Django reads `DATABASE_URL` from the environment (locally, from `.env`). The Space does not store the database on its disk.
+
+**What is deferred**
+
+The twelve business apps, an in-repo FastAPI agents service, Celery, and the VPS Compose stack stay in [Later: Mercado Libre platform](#later-mercado-libre-platform). Do not build them in this milestone.
+
+```mermaid
+flowchart LR
+    human["You in Django admin"]
+    agents["Agents project"]
+    api["Tasks HTTP API"]
+    admin["Django admin"]
+    db["Neon Postgres tasks table"]
+
+    human --> admin --> db
+    agents --> api --> db
+```
+
+### Task
+
+Table name `tasks`. Django adds a numeric `id` primary key. The other columns match the original table. Priority, effort, status, and assignee are free text.
+
+| Column | Required | Notes |
+| --- | --- | --- |
+| `timestamp` | yes | Form submission time. Defaults to now; callers may set it. |
+| `email_address` | yes | Submitter, human or agent. |
+| `task_title` | yes | |
+| `priority` | no | e.g. `1-Low: can be pushed to next month`, `3-High: Do this week` |
+| `description` | no | |
+| `task_deepdive_link` | no | Google Docs or Drive URL |
+| `ticket_id` | no | Drive file id. Filled from the deepdive link when empty. |
+| `effort` | no | |
+| `status` | no | e.g. `Done` |
+| `assignee` | no | |
+
+### API
+
+Mounted at `/api/`. Every route requires `Authorization: Bearer <TASKS_API_TOKEN>`. OpenAPI is at `/api/docs` for the agents project.
+
+- `GET /api/tasks` — optional filters `status`, `assignee`, `priority`
+- `POST /api/tasks`
+- `GET /api/tasks/{id}`
+- `PATCH /api/tasks/{id}`
+
+### Deploy
+
+Hugging Face Docker Space. Set Space secrets `DATABASE_URL` (the Neon connection string), `SECRET_KEY`, `TASKS_API_TOKEN`, `DJANGO_SUPERUSER_USERNAME`, `DJANGO_SUPERUSER_EMAIL`, `DJANGO_SUPERUSER_PASSWORD`, and `CSRF_TRUSTED_ORIGINS` (the Space origin, `https://<owner>-<space>.hf.space`).
+
+## Later: Mercado Libre platform
+
+_The sections below are the previous design. They are not the current build._
+
+### Overview
 
 Scent is a perfume reseller on Mercado Libre (MLA), run by one person, built so that agents can operate it end to end. Django is the system of record that humans and agents both act through. Agents run in a FastAPI service and never touch the database directly. The first version targets 100–200 SKUs, 5–10 vendors and one Meli account. The design keeps a clean path to a multi-tenant SaaS, with Scent as the first tenant.
 
@@ -22,7 +83,7 @@ Scent is a perfume reseller on Mercado Libre (MLA), run by one person, built so 
 5. **Tenant-aware from day one.** Every business table carries an `organization` foreign key, even while there is only one organization.
 6. **LLM-agnostic.** Agents call models through one gateway, so Mistral, Claude or others can be swapped per task and costs are tracked per run.
 
-## Architecture
+### Architecture
 
 ```mermaid
 flowchart TB
@@ -63,7 +124,7 @@ flowchart TB
 
 Events enter through Meli webhooks, schedules or the admin, and Celery turns each into a job. Jobs run Django logic directly (stock sync, token refresh) or call an agent. Agents read context and submit proposed actions through the REST API. The policy engine applies, queues or rejects each one, and only Django's Meli client talks to Mercado Libre.
 
-## Tech stack and hosting
+### Tech stack and hosting
 
 Run everything on your VPS with Docker Compose. Meli webhooks need an always-on endpoint that answers fast, which rules out anything that sleeps. Render's paid instances don't sleep, but at this scale a VPS is cheaper and simpler.
 
@@ -83,7 +144,7 @@ Run everything on your VPS with Docker Compose. Meli webhooks need an always-on 
 
 Compose services: `caddy`, `django` (gunicorn), `worker` (celery), `beat`, `agents` (uvicorn), `postgres`, `redis`. Seven containers, one host, one `docker compose up`.
 
-## SaaS readiness
+### SaaS readiness
 
 Use a shared database with a shared schema and an `organization_id` on every business table. It is the cheapest model to build now and scales to hundreds of tenants. Schema-per-tenant (django-tenants) adds migration and tooling overhead you don't need yet.
 
@@ -97,24 +158,24 @@ What to do in v1, even with one tenant:
 
 What to defer: billing, self-serve signup, per-tenant LLM keys, row-level security in Postgres. Add these when the second tenant is real.
 
-## Django apps and data model
+### Django apps and data model
 
 Twelve apps, one per bounded context. All business models inherit `TenantModel` (organization FK, `created_at`, `updated_at`). Money is stored as `Decimal` in ARS with an `fx_rate_id` wherever the value comes from an external snapshot.
 
-### accounts
+#### accounts
 
 - **Organization**: name, slug, settings (JSON: margin floor, fee assumptions, LLM monthly budget).
 - **User** (custom from day one) + **Membership**: user, organization, role (owner, operator, viewer).
 - **AgentIdentity**: organization, name (`presales`, `pricing`…), scopes (list of allowed API actions), active, token hash.
 
-### catalog
+#### catalog
 
 - **Brand**: name, normalized_name.
 - **MasterProduct**: sku (unique per org), title, brand, line_name, concentration (EDP/EDT/Parfum/Extrait/Cologne), size_ml, gender, ean (nullable), is_tester, is_set, description, general_characteristics (JSON), meli_catalog_product_id (nullable), status (draft, in_review, approved, archived).
 - **ProductMedia**: product, cloudinary_public_id, url, role (main, gallery), is_white_background, source (meli, vendor, own), position.
 - **Bundle**: sku, title, description, status. **BundleComponent**: bundle, product, quantity.
 
-### discovery
+#### discovery
 
 - **Vendor**: name, website, scraper_key (which scraper module handles it), active, notes.
 - **FxRate**: date, source (e.g. BNA oficial, MEP), ars_per_usd.
@@ -124,60 +185,60 @@ Twelve apps, one per bounded context. All business models inherit `TenantModel` 
 - **ProductMatch**: master_product, source_type (vendor_offer, meli_snapshot), source_key, method (ean, rules, fuzzy, llm), confidence, status (proposed, confirmed, rejected), decided_by.
 - **Opportunity**: master_product, best_vendor_offer, reference_meli_snapshot, window_days, est_units, unit_margin_ars, total_margin_ars, score, status (new, approved, purchased, dismissed), computed_at.
 
-### purchasing
+#### purchasing
 
 - **PurchaseOrder**: vendor, status (draft, pending_approval, approved, ordered, received, cancelled), proposed_by, approved_by, approved_at, notes, total_ars.
 - **PurchaseOrderLine**: po, product, quantity, unit_cost_ars, vendor_offer (the offer it came from).
 
-### inventory
+#### inventory
 
 - **StockLot**: product, po_line, vendor, received_at, quantity_received, unit_cost_ars. One lot per received PO line.
 - **StockMovement**: product, lot, quantity (+/−), kind (receipt, sale, bundle_sale, adjustment, return), reference (order line, PO line, manual), created_by, created_at. Append-only; on-hand stock = sum of movements.
 - **StockReservation** (optional in v1): product, order, quantity, expires_at. Prevents overselling between paid and shipped.
 
-### listings
+#### listings
 
 - **ListingBlueprint**: product or bundle (one of), title, description, listing_type (gold_special, gold_pro), category_id, attributes (JSON), media (ordered list), price_strategy (JSON), shipping_mode, status.
 - **MeliListing**: blueprint, meli_item_id, kind (regular, catalog, placeholder), meli_catalog_product_id, status (active, paused, closed, under_review), price_ars, available_quantity, last_synced_at, sync_error.
 - **ListingSyncEvent**: listing, direction (push, pull), payload (JSON), result, created_at.
 
-### pricing
+#### pricing
 
 - **PricingRule**: scope (product, bundle, all), min_margin_pct, min_margin_ars, max_step_pct, strategy (match_buybox, undercut_by, fixed), active.
 - **PriceChange**: listing, old_price, new_price, reason, proposed_by, applied_at, agent_action.
 - **CompetitorSnapshot**: listing, meli_product_id, buybox_price, buybox_winner_is_us, competitor_count, captured_at.
 - **Promotion**: listing, meli_promotion_id, type, discount_pct, start, end, status, decided_by.
 
-### orders
+#### orders
 
 - **Order**: meli_order_id, buyer_nickname, status, total_ars, paid_at, shipping_id, shipping_status, raw_payload (JSON).
 - **OrderLine**: order, listing, product or bundle, quantity, unit_price_ars, fees (JSON: commission, shipping cost, payment fee), cogs_ars (filled from FIFO lots at sale time).
 
-### conversations
+#### conversations
 
 - **PreSaleQuestion**: meli_question_id, listing, text, asked_at, status (new, answered, escalated), answer_text, answered_by (agent or user), answered_at, agent_action.
 - **PostSaleMessage**: order, meli_message_id, direction, text, created_at, category, priority, routed_to (agent, human), status.
 - **AnswerExample**: kind (presale, postsale), question_text, answer_text, source (human_edit, approved_agent), embedding (pgvector, optional). Fuel for few-shot retrieval.
 
-### claims
+#### claims
 
 - **Claim**: meli_claim_id, order, reason (delay, wrong_item, damaged, not_received, other), stage, status, due_at, raw_payload (JSON).
 - **ClaimAction**: claim, kind (message, evidence, refund, return_label, escalate), payload (JSON), proposed_by, approved_by, executed_at.
 
-### integrations.meli
+#### integrations.meli
 
 - **MeliAccount**: organization, seller_id, nickname, access_token (encrypted), refresh_token (encrypted), expires_at.
 - **WebhookEvent**: topic, resource, raw_payload, received_at, processed_at, status, attempts. Every notification is stored before it is processed.
 
-### agent_ops
+#### agent_ops
 
 See *Agent framework* below for AgentRun, AgentAction, ApprovalRequest, AutonomyPolicy and PromptVersion.
 
-## Agent framework
+### Agent framework
 
 Every agent decision becomes an `AgentAction` that Django either applies, queues for approval, or rejects according to an `AutonomyPolicy`. This is the mechanism that lets the business move from supervised to autonomous one action type at a time.
 
-### agent_ops models
+#### agent_ops models
 
 - **AgentRun**: agent, trigger (webhook, schedule, manual), input_ref, status, started_at, finished_at, llm_model, tokens_in, tokens_out, cost_usd, prompt_version, trace (JSON: tool calls and intermediate steps).
 - **AgentAction**: run, action_type (e.g. `presale.answer`, `price.change`, `listing.create`, `claim.message`), target (generic FK), payload (JSON), confidence, rationale, status (proposed, auto_applied, pending_approval, approved, rejected, failed), decided_by, applied_at.
@@ -185,7 +246,7 @@ Every agent decision becomes an `AgentAction` that Django either applies, queues
 - **ApprovalRequest**: action, assigned_to, due_at, human_edit (JSON, what the human changed before approving).
 - **PromptVersion**: agent, name, template, model, created_at, active. Runs record the version they used.
 
-### Request lifecycle
+#### Request lifecycle
 
 1. A trigger (Meli webhook, Celery Beat schedule, or a button in the admin) enqueues a job naming an agent and an input.
 2. The worker calls the agents service: `POST /agents/{name}/run` with the input reference.
@@ -195,20 +256,20 @@ Every agent decision becomes an `AgentAction` that Django either applies, queues
 
 Agents never hold Meli tokens and never write directly to Postgres.
 
-### LLM gateway and budget
+#### LLM gateway and budget
 
 - One `llm.complete(task, messages, schema)` interface in the agents service, backed by LiteLLM. Each task names a default model; switch per task in config.
 - Defaults: Mistral Small for classification and pre-sales answers (cheap, fast, fits the free tier), a stronger model (Mistral Large or Claude) for catalog enrichment and claims, where quality matters more than cost.
 - Structured outputs everywhere: agents return Pydantic-validated JSON, never free text that Django has to parse.
 - Every call logs tokens and cost to its `AgentRun`. A daily job sums spend against the organization's monthly budget (USD 10 to start) and downgrades or pauses non-critical agents near the limit. Pre-sales stays on.
 
-### Learning from corrections
+#### Learning from corrections
 
 - When a human approves an action after editing it, the edited version is stored as an `AnswerExample` (or the equivalent for other action types).
 - Agents retrieve the closest examples for few-shot prompting: start with keyword and product matching in Postgres, add pgvector embeddings when the example set passes a few hundred.
 - Approval rate and edit distance per action type, tracked from `ApprovalRequest`, are the evidence for raising an action's autonomy mode.
 
-## Agent specifications
+### Agent specifications
 
 Eight agents, one module each in the FastAPI service. Only the pre-sales agent starts in full auto; the rest start in suggest mode.
 
@@ -223,7 +284,7 @@ Eight agents, one module each in the FastAPI service. Only the pre-sales agent s
 | Post-sale router | `messages` webhook | Order, shipping status, message history | Category + route; draft reply | Classification auto; replies suggest |
 | Claims | `claims` webhook | Claim, order, shipping, messages | `claim.message`, `claim.evidence`; refunds always human | Suggest |
 
-### Pre-sales guardrails (full auto from day one)
+#### Pre-sales guardrails (full auto from day one)
 
 - Answer only from retrieved facts: product data, stock, shipping mode, and approved examples. If a needed fact is missing, escalate instead of guessing.
 - Never promise delivery dates beyond what Meli shows, never confirm authenticity claims beyond an approved standard phrase, never include contact details or links (Meli rules forbid them).
@@ -231,13 +292,13 @@ Eight agents, one module each in the FastAPI service. Only the pre-sales agent s
 - Escalate when confidence is below the threshold, when the question mentions a complaint, or when the buyer asks about something not in the catalog. Escalations notify you (Telegram or email).
 - Target: answer within 5 minutes of the webhook.
 
-### Post-sale categories (v1)
+#### Post-sale categories (v1)
 
 `shipping_delay`, `wrong_item`, `damaged`, `authenticity`, `return_request`, `invoice_request`, `other`. Delays get an automatic status-based reply draft from shipping data; wrong item always routes to you and pre-fills the claims workflow.
 
-## Key process flows
+### Key process flows
 
-### 1. Discovery
+#### 1. Discovery
 
 1. You add a vendor URL or a Meli listing/catalog URL in the admin; this creates a `ScrapeJob`.
 2. The matching scraper (your existing automations, wrapped as scraper modules) runs and posts results to the API as `VendorOffer` or `MeliSnapshot` rows, each stamped with the day's `FxRate`.
@@ -255,38 +316,38 @@ For a window of `window_days` (default 15):
 
 Fees come from Meli's listing-price endpoint where possible, so they reflect the real category and listing type, with a configurable fallback per organization.
 
-### 2. Purchase
+#### 2. Purchase
 
 1. From an approved opportunity (or manually), a draft `PurchaseOrder` is created with lines priced from the vendor offer. An agent may propose POs later.
 2. Draft → `pending_approval` → you approve → `ordered`.
 3. On arrival you mark lines received; each line creates a `StockLot` and a `receipt` `StockMovement`. Stock sync to Meli runs automatically.
 
-### 3. Listing creation
+#### 3. Listing creation
 
 1. A confirmed `MasterProduct` (or `Bundle`) gets a `ListingBlueprint`, drafted by the listing agent from catalog data and approved by you.
 2. Depending on kind: a regular listing from the blueprint; a catalog listing tied to `meli_catalog_product_id`; or a placeholder catalog listing with 0 stock to keep the catalog slot.
 3. Media is pushed from Cloudinary URLs; the resulting `meli_item_id` is stored on `MeliListing`.
 
-### 4. Sale and stock sync
+#### 4. Sale and stock sync
 
 1. Meli sends an `orders_v2` notification; Django stores the `WebhookEvent` and fetches the order.
 2. For each line: a product consumes FIFO lots; a bundle explodes into its `BundleComponent`s and consumes each component's lots (`bundle_sale` movements). COGS is written on the `OrderLine`.
 3. Available stock is recomputed for every affected product and every bundle that contains it. Bundle availability = the minimum over components of floor(component stock ÷ component quantity).
 4. A sync job pushes `available_quantity` to every affected `MeliListing`. This step is deterministic code, not an agent.
 
-### 5. Pre-sales question
+#### 5. Pre-sales question
 
 1. `questions` webhook → stored → pre-sales agent run.
 2. Agent retrieves facts and similar `AnswerExample`s, drafts an answer with a confidence score.
 3. Post-check passes and confidence ≥ threshold → answer posted to Meli automatically. Otherwise → escalated to you with the draft pre-filled.
 4. Any answer you edit is saved as a new example.
 
-### 6. Post-sale and claims
+#### 6. Post-sale and claims
 
 1. `messages` webhook → the router classifies and prioritizes, then either drafts a reply (delays, invoices) or routes to you (wrong item, damaged, authenticity).
 2. `claims` webhook → the claims agent assembles the timeline (order, shipping events, messages) and proposes the next step before Meli's deadline. Refunds and returns always need your approval.
 
-## Mercado Libre integration
+### Mercado Libre integration
 
 All Meli access goes through one client in `integrations.meli`, owned by Django. Use the official API first and scrape only what it doesn't expose.
 
@@ -299,7 +360,7 @@ All Meli access goes through one client in `integrations.meli`, owned by Django.
 
 Verify endpoint names and topics against the current Meli developer docs during Phase 0; the API changes and some features are restricted by country or seller reputation.
 
-## Phased roadmap
+### Phased roadmap
 
 ```mermaid
 flowchart LR
@@ -316,7 +377,7 @@ flowchart LR
 
 Phase 0 is pure plumbing, so every later agent plugs into the same policy engine and audit trail. The pre-sales agent ships in Phase 1 on your live listings. Since you already sell, Phase 1 starts by importing existing Meli listings into MeliListing and linking each to a master product, so the agent answers real questions from the first week. Pricing comes last because it needs reliable FIFO costs and real competitor snapshots before it can be trusted.
 
-## Open questions and risks
+### Open questions and risks
 
 **Open questions**
 

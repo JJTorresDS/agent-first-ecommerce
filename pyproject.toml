@@ -1,0 +1,16 @@
+[project]
+name = "scent"
+version = "0.1.0"
+description = "Task queue shared by humans and agents"
+requires-python = ">=3.12"
+dependencies = [
+    "django==5.2.18",
+    "django-ninja==1.7.1",
+    "gunicorn==26.2.0",
+    "psycopg[binary]>=3.2",
+    "python-dotenv==1.2.4",
+    "whitenoise==6.12.0",
+]
+
+[tool.uv]
+package = false

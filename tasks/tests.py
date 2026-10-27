@@ -1,0 +1,112 @@
+from django.test import TestCase, override_settings
+from ninja.testing import TestClient
+
+from tasks.api import api
+from tasks.models import Task
+
+TOKEN = "test-token"
+
+
+@override_settings(TASKS_API_TOKEN=TOKEN)
+class TaskModelTests(TestCase):
+    def test_extracts_docs_file_id(self):
+        task = Task.objects.create(
+            email_address="a@example.com",
+            task_title="Write spec",
+            task_deepdive_link="https://docs.google.com/document/d/abc123_XYZ/edit",
+        )
+        self.assertEqual(task.ticket_id, "abc123_XYZ")
+
+    def test_extracts_open_query_id(self):
+        task = Task.objects.create(
+            email_address="a@example.com",
+            task_title="File",
+            task_deepdive_link="https://drive.google.com/open?id=fileId99",
+        )
+        self.assertEqual(task.ticket_id, "fileId99")
+
+    def test_keeps_explicit_ticket_id(self):
+        task = Task.objects.create(
+            email_address="a@example.com",
+            task_title="Write spec",
+            task_deepdive_link="https://docs.google.com/document/d/abc123/edit",
+            ticket_id="given",
+        )
+        self.assertEqual(task.ticket_id, "given")
+
+    def test_ignores_non_google_link(self):
+        task = Task.objects.create(
+            email_address="a@example.com",
+            task_title="Elsewhere",
+            task_deepdive_link="https://example.com/d/not-a-drive-id",
+        )
+        self.assertEqual(task.ticket_id, "")
+
+
+@override_settings(TASKS_API_TOKEN=TOKEN)
+class TaskApiTests(TestCase):
+    def setUp(self):
+        self.client = TestClient(api)
+        self.auth = {"Authorization": f"Bearer {TOKEN}"}
+
+    def test_rejects_missing_or_wrong_token(self):
+        missing = self.client.get("/tasks")
+        self.assertEqual(missing.status_code, 401)
+        wrong = self.client.get("/tasks", headers={"Authorization": "Bearer nope"})
+        self.assertEqual(wrong.status_code, 401)
+
+    def test_create_list_and_patch(self):
+        created = self.client.post(
+            "/tasks",
+            json={
+                "email_address": "agent@example.com",
+                "task_title": "Restock",
+                "priority": "3-High: Do this week",
+                "task_deepdive_link": "https://drive.google.com/file/d/driveFile1/view",
+            },
+            headers=self.auth,
+        )
+        self.assertEqual(created.status_code, 201)
+        body = created.json()
+        self.assertEqual(body["ticket_id"], "driveFile1")
+        self.assertEqual(body["task_title"], "Restock")
+        self.assertEqual(body["email_address"], "agent@example.com")
+
+        listed = self.client.get("/tasks", headers=self.auth)
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(len(listed.json()), 1)
+
+        by_priority = self.client.get(
+            "/tasks",
+            query_params={"priority": "3-High: Do this week"},
+            headers=self.auth,
+        )
+        self.assertEqual(len(by_priority.json()), 1)
+
+        done = self.client.get("/tasks?status=Done", headers=self.auth)
+        self.assertEqual(done.json(), [])
+
+        patched = self.client.patch(
+            f"/tasks/{body['id']}",
+            json={"status": "Done", "assignee": "jonas"},
+            headers=self.auth,
+        )
+        self.assertEqual(patched.status_code, 200)
+        self.assertEqual(patched.json()["status"], "Done")
+        self.assertEqual(patched.json()["assignee"], "jonas")
+        self.assertEqual(patched.json()["task_title"], "Restock")
+
+        assigned = self.client.get(
+            "/tasks",
+            query_params={"assignee": "jonas", "status": "Done"},
+            headers=self.auth,
+        )
+        self.assertEqual(len(assigned.json()), 1)
+
+    def test_rejects_invalid_email(self):
+        response = self.client.post(
+            "/tasks",
+            json={"email_address": "not-an-email", "task_title": "Bad"},
+            headers=self.auth,
+        )
+        self.assertEqual(response.status_code, 422)
