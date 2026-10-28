@@ -1,4 +1,5 @@
 import re
+import uuid
 from urllib.parse import urlparse
 
 from django.db import models
@@ -85,3 +86,52 @@ class Task(models.Model):
         if not self.ticket_id and self.task_deepdive_link:
             self.ticket_id = drive_file_id(self.task_deepdive_link)
         super().save(*args, **kwargs)
+
+
+def new_cashflow_id():
+    return uuid.uuid4().hex
+
+
+def email_from_account(user):
+    """Address stored on the user. Profile points at that same user."""
+    if not getattr(user, "is_authenticated", False):
+        return ""
+    getattr(user, "profile", None)
+    return user.email or ""
+
+
+class CashflowMovement(models.Model):
+    id = models.CharField(
+        primary_key=True,
+        max_length=32,
+        default=new_cashflow_id,
+        editable=False,
+    )
+    email_address = models.EmailField()
+    date = models.DateField()
+    category = models.CharField(max_length=100)
+    amount = models.DecimalField(max_digits=14, decimal_places=2)
+    currency = models.CharField(max_length=8)
+    exchange_rate_at_purchase = models.DecimalField(
+        max_digits=14,
+        decimal_places=4,
+        null=True,
+        blank=True,
+    )
+    counterparty_name = models.CharField(max_length=200, blank=True)
+    description = models.TextField(blank=True)
+    source_file_id = models.CharField(max_length=128, blank=True)
+    white = models.BooleanField(default=False)
+    doc_moved_to_date_folder = models.BooleanField(
+        default=False,
+        verbose_name="Moviste el doc a la carpeta con fecha?",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "cashflow_movement"
+        ordering = ["-date", "-created_at"]
+
+    def __str__(self):
+        return f"{self.date} {self.amount} {self.currency}"

@@ -1,9 +1,12 @@
+from datetime import date
+from decimal import Decimal
+
 from django.core.exceptions import ValidationError
 from django.test import SimpleTestCase, TestCase, override_settings
 from ninja.testing import TestClient
 
 from tasks.api import api
-from tasks.models import Task
+from tasks.models import CashflowMovement, Task
 
 TOKEN = "test-token"
 
@@ -154,6 +157,40 @@ class PriorityStatusTests(SimpleTestCase):
         task.clean_fields()
         self.assertEqual(task.priority, "3-High: Do this week")
         self.assertEqual(task.status, "Done")
+
+
+class CashflowMovementTests(SimpleTestCase):
+    def test_sample_row(self):
+        movement = CashflowMovement(
+            email_address="jonasjere@gmail.com",
+            date=date(2026, 10, 7),
+            category="compra",
+            amount=Decimal("-58000"),
+            currency="ARS",
+            exchange_rate_at_purchase=Decimal("1560.97"),
+            counterparty_name="Jonas Torres",
+            description="Compra SD",
+            source_file_id="1Vxe7xZSXwXVZG54KikowHsHpt_tjBBja4nCKPORqH2Q",
+            white=False,
+            doc_moved_to_date_folder=True,
+        )
+        movement.clean_fields()
+        self.assertEqual(movement.date, date(2026, 10, 7))
+        self.assertEqual(movement.amount, Decimal("-58000.00"))
+        self.assertEqual(movement.exchange_rate_at_purchase, Decimal("1560.9700"))
+        self.assertFalse(movement.white)
+        self.assertTrue(movement.doc_moved_to_date_folder)
+
+    def test_category_is_required(self):
+        movement = CashflowMovement(
+            email_address="jonasjere@gmail.com",
+            date=date(2026, 10, 7),
+            category="",
+            amount=Decimal("-58000"),
+            currency="ARS",
+        )
+        with self.assertRaises(ValidationError):
+            movement.clean_fields()
 
 
 class HealthTests(SimpleTestCase):

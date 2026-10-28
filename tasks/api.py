@@ -1,5 +1,7 @@
 import secrets
+from datetime import date as Date
 from datetime import datetime
+from decimal import Decimal
 from typing import Literal
 
 from django.conf import settings
@@ -10,7 +12,7 @@ from ninja import NinjaAPI, Schema
 from ninja.errors import HttpError
 from ninja.security import HttpBearer
 
-from .models import Task
+from .models import CashflowMovement, Task
 
 PriorityValue = Task.Priority | Literal[""]
 StatusValue = Task.Status | Literal[""]
@@ -134,3 +136,112 @@ def get_task(request, task_id: int):
 def patch_task(request, task_id: int, payload: TaskPatch):
     task = get_object_or_404(Task, pk=task_id)
     return _apply(task, payload.model_dump(exclude_unset=True))
+
+
+_MOVEMENT_TEXT = (
+    "counterparty_name",
+    "description",
+    "source_file_id",
+)
+
+
+class CashflowMovementIn(Schema):
+    email_address: str
+    date: Date
+    category: str
+    amount: Decimal
+    currency: str
+    exchange_rate_at_purchase: Decimal | None = None
+    counterparty_name: str = ""
+    description: str = ""
+    source_file_id: str = ""
+    white: bool = False
+    doc_moved_to_date_folder: bool = False
+
+
+class CashflowMovementPatch(Schema):
+    email_address: str | None = None
+    date: Date | None = None
+    category: str | None = None
+    amount: Decimal | None = None
+    currency: str | None = None
+    exchange_rate_at_purchase: Decimal | None = None
+    counterparty_name: str | None = None
+    description: str | None = None
+    source_file_id: str | None = None
+    white: bool | None = None
+    doc_moved_to_date_folder: bool | None = None
+
+
+class CashflowMovementOut(Schema):
+    id: str
+    email_address: str
+    date: Date
+    category: str
+    amount: Decimal
+    currency: str
+    exchange_rate_at_purchase: Decimal | None
+    counterparty_name: str
+    description: str
+    source_file_id: str
+    white: bool
+    doc_moved_to_date_folder: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+def _apply_movement(movement: CashflowMovement, data: dict) -> CashflowMovement:
+    for key, value in data.items():
+        if value is None and key in _MOVEMENT_TEXT:
+            value = ""
+        if value is None and key != "exchange_rate_at_purchase":
+            continue
+        setattr(movement, key, value)
+    try:
+        movement.full_clean()
+    except ValidationError as exc:
+        raise HttpError(422, _validation_message(exc)) from exc
+    movement.save()
+    return movement
+
+
+@api.get("/cashflow-movements", response=list[CashflowMovementOut], auth=TokenAuth())
+def list_cashflow_movements(
+    request,
+    category: str | None = None,
+    currency: str | None = None,
+):
+    movements = CashflowMovement.objects.all()
+    if category is not None:
+        movements = movements.filter(category=category)
+    if currency is not None:
+        movements = movements.filter(currency=currency)
+    return list(movements)
+
+
+@api.post("/cashflow-movements", response={201: CashflowMovementOut}, auth=TokenAuth())
+def create_cashflow_movement(request, payload: CashflowMovementIn):
+    movement = _apply_movement(
+        CashflowMovement(),
+        payload.model_dump(exclude_unset=True),
+    )
+    return 201, movement
+
+
+@api.get(
+    "/cashflow-movements/{movement_id}",
+    response=CashflowMovementOut,
+    auth=TokenAuth(),
+)
+def get_cashflow_movement(request, movement_id: str):
+    return get_object_or_404(CashflowMovement, pk=movement_id)
+
+
+@api.patch(
+    "/cashflow-movements/{movement_id}",
+    response=CashflowMovementOut,
+    auth=TokenAuth(),
+)
+def patch_cashflow_movement(request, movement_id: str, payload: CashflowMovementPatch):
+    movement = get_object_or_404(CashflowMovement, pk=movement_id)
+    return _apply_movement(movement, payload.model_dump(exclude_unset=True))
