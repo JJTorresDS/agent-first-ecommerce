@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError
 from django.test import SimpleTestCase, TestCase, override_settings
 from ninja.testing import TestClient
 
@@ -110,6 +111,49 @@ class TaskApiTests(TestCase):
             headers=self.auth,
         )
         self.assertEqual(response.status_code, 422)
+
+
+class EffortTests(SimpleTestCase):
+    def test_rejects_unknown_effort(self):
+        task = Task(
+            email_address="a@example.com",
+            task_title="Restock",
+            effort="2h",
+        )
+        with self.assertRaises(ValidationError):
+            task.clean_fields()
+
+    def test_accepts_a_listed_effort(self):
+        task = Task(
+            email_address="a@example.com",
+            task_title="Restock",
+            effort=Task.Effort.SHORT,
+        )
+        task.clean_fields()
+        self.assertEqual(task.effort, "Short: half a day")
+
+
+class PriorityStatusTests(SimpleTestCase):
+    def test_rejects_unknown_priority_and_status(self):
+        task = Task(
+            email_address="a@example.com",
+            task_title="Restock",
+            priority="urgent",
+            status="Later",
+        )
+        with self.assertRaises(ValidationError):
+            task.clean_fields()
+
+    def test_accepts_listed_priority_and_status(self):
+        task = Task(
+            email_address="a@example.com",
+            task_title="Restock",
+            priority=Task.Priority.HIGH,
+            status=Task.Status.DONE,
+        )
+        task.clean_fields()
+        self.assertEqual(task.priority, "3-High: Do this week")
+        self.assertEqual(task.status, "Done")
 
 
 class HealthTests(SimpleTestCase):

@@ -31,19 +31,19 @@ flowchart LR
 
 ### Task
 
-Table name `tasks`. Django adds a numeric `id` primary key. The other columns match the original table. Priority, effort, status, and assignee are free text.
+Table name `tasks`. Django adds a numeric `id` primary key. The other columns match the original table. Assignee is free text. Priority, status, and effort are dropdowns.
 
 | Column | Required | Notes |
 | --- | --- | --- |
 | `timestamp` | yes | Form submission time. Defaults to now; callers may set it. |
 | `email_address` | yes | Submitter, human or agent. |
 | `task_title` | yes | |
-| `priority` | no | e.g. `1-Low: can be pushed to next month`, `3-High: Do this week` |
+| `priority` | no | Dropdown: `1-Low: can be pushed to next month`, `2-Medium: Do this month`, `3-High: Do this week`, or empty. |
 | `description` | no | |
 | `task_deepdive_link` | no | Google Docs or Drive URL |
 | `ticket_id` | no | Drive file id. Filled from the deepdive link when empty. |
-| `effort` | no | |
-| `status` | no | e.g. `Done` |
+| `effort` | no | Dropdown. One of the five effort sizes, or empty. |
+| `status` | no | Dropdown: `To do`, `In progress`, `Blocked`, `Done`, or empty. |
 | `assignee` | no | |
 
 ### API

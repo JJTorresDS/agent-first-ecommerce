@@ -13,7 +13,7 @@ class TaskAdmin(admin.ModelAdmin):
         "assignee",
         "email_address",
     )
-    list_filter = ("priority", "status")
+    list_filter = ("priority", "status", "effort")
     search_fields = (
         "task_title",
         "email_address",

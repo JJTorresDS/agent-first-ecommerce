@@ -1,5 +1,6 @@
 import secrets
 from datetime import datetime
+from typing import Literal
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -10,6 +11,10 @@ from ninja.errors import HttpError
 from ninja.security import HttpBearer
 
 from .models import Task
+
+PriorityValue = Task.Priority | Literal[""]
+StatusValue = Task.Status | Literal[""]
+EffortValue = Task.Effort | Literal[""]
 
 api = NinjaAPI(title="Tasks", urls_namespace="tasks")
 
@@ -36,12 +41,12 @@ class TaskIn(Schema):
     email_address: str
     task_title: str
     timestamp: datetime | None = None
-    priority: str = ""
+    priority: PriorityValue = ""
     description: str = ""
     task_deepdive_link: str = ""
     ticket_id: str = ""
-    effort: str = ""
-    status: str = ""
+    effort: EffortValue = ""
+    status: StatusValue = ""
     assignee: str = ""
 
 
@@ -49,12 +54,12 @@ class TaskPatch(Schema):
     email_address: str | None = None
     task_title: str | None = None
     timestamp: datetime | None = None
-    priority: str | None = None
+    priority: PriorityValue | None = None
     description: str | None = None
     task_deepdive_link: str | None = None
     ticket_id: str | None = None
-    effort: str | None = None
-    status: str | None = None
+    effort: EffortValue | None = None
+    status: StatusValue | None = None
     assignee: str | None = None
 
 

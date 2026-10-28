@@ -20,6 +20,24 @@ def drive_file_id(url):
 
 
 class Task(models.Model):
+    class Priority(models.TextChoices):
+        LOW = "1-Low: can be pushed to next month", "1-Low: can be pushed to next month"
+        MEDIUM = "2-Medium: Do this month", "2-Medium: Do this month"
+        HIGH = "3-High: Do this week", "3-High: Do this week"
+
+    class Status(models.TextChoices):
+        TODO = "To do", "To do"
+        IN_PROGRESS = "In progress", "In progress"
+        BLOCKED = "Blocked", "Blocked"
+        DONE = "Done", "Done"
+
+    class Effort(models.TextChoices):
+        QUICK = "Quick: under an hour", "Quick: under an hour"
+        SHORT = "Short: half a day", "Short: half a day"
+        MEDIUM = "Medium: about a day", "Medium: about a day"
+        LARGE = "Large: a few days", "Large: a few days"
+        EPIC = "Epic: a week or more", "Epic: a week or more"
+
     timestamp = models.DateTimeField(
         default=timezone.now,
         help_text="Form submission time",
@@ -31,7 +49,7 @@ class Task(models.Model):
     priority = models.CharField(
         max_length=200,
         blank=True,
-        help_text="e.g. '1-Low: can be pushed to next month', '3-High: Do this week'",
+        choices=Priority.choices,
     )
     description = models.TextField(blank=True)
     task_deepdive_link = models.URLField(
@@ -44,11 +62,15 @@ class Task(models.Model):
         blank=True,
         help_text="Drive file ID taken from the deepdive link",
     )
-    effort = models.CharField(max_length=100, blank=True)
+    effort = models.CharField(
+        max_length=100,
+        blank=True,
+        choices=Effort.choices,
+    )
     status = models.CharField(
         max_length=100,
         blank=True,
-        help_text="e.g. 'Done'",
+        choices=Status.choices,
     )
     assignee = models.CharField(max_length=200, blank=True)
 
