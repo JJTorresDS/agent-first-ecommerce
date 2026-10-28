@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Profile</title>
+  <style>
+    body { font-family: sans-serif; max-width: 32rem; margin: 3rem auto; padding: 0 1rem; background: #fff; color: #1a1a1a; }
+    img { width: 96px; height: 96px; border-radius: 50%; object-fit: cover; }
+    dt { color: #555; font-size: 0.85rem; margin-top: 1rem; }
+    dd { margin: 0.25rem 0 0; }
+  </style>
+</head>
+<body>
+  <h1>Profile</h1>
+  {% if profile.avatar_url %}
+    <img src="{{ profile.avatar_url }}" alt="">
+  {% endif %}
+  <dl>
+    <dt>Email</dt>
+    <dd>{{ user.email }}</dd>
+    <dt>Name</dt>
+    <dd>{{ profile.display_name|default:user.get_username }}</dd>
+  </dl>
+  <form method="post" action="{% url 'account_logout' %}">
+    {% csrf_token %}
+    <button type="submit">Log out</button>
+  </form>
+</body>
+</html>

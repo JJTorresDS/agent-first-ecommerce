@@ -23,3 +23,7 @@ services:
         value: admin@example.com
       - key: DJANGO_SUPERUSER_PASSWORD
         sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false

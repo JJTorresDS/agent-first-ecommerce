@@ -1,0 +1,21 @@
+{% load i18n %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% trans "Sign In" %}</title>
+  <style>
+    body { font-family: sans-serif; max-width: 32rem; margin: 3rem auto; padding: 0 1rem; background: #fff; color: #1a1a1a; }
+    button { font: inherit; padding: 0.5rem 1rem; }
+  </style>
+</head>
+<body>
+  <h1>{% blocktrans with provider.name as provider %}Sign in with {{ provider }}{% endblocktrans %}</h1>
+  <p>{% blocktrans with provider.name as provider %}Continue to {{ provider }} to use your profile.{% endblocktrans %}</p>
+  <form method="post">
+    {% csrf_token %}
+    <button type="submit">{% trans "Continue" %}</button>
+  </form>
+</body>
+</html>

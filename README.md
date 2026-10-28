@@ -25,10 +25,13 @@ API calls send `Authorization: Bearer <TASKS_API_TOKEN>` from `.env`.
 
 Connect the GitHub repo in the [Render dashboard](https://dashboard.render.com/blueprint/new) and apply `render.yaml`. The service is a Docker web service named `vimple-backend`.
 
-Paste these two values when Render asks:
+Paste these values when Render asks:
 
 - `DATABASE_URL`: the Neon connection string, with `sslmode=require`.
 - `CSRF_TRUSTED_ORIGINS`: the service origin only, `https://vimple-backend.onrender.com`, with no path. If Render assigns a different host, use that origin instead.
+- `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`: the OAuth client from Google Cloud. Authorized redirect URIs are `http://127.0.0.1:8000/accounts/google/login/callback/` and `https://vimple-backend.onrender.com/accounts/google/login/callback/`.
+
+People sign in with Google at `/`. That opens their profile at `/profile/`. New Google accounts are not staff, so `/admin/` stays on the existing username and password.
 
 Render generates `SECRET_KEY` and `TASKS_API_TOKEN`. Copy `TASKS_API_TOKEN` into the agents project. Leave `DEBUG` unset. Leave `DJANGO_SUPERUSER_USERNAME`, `DJANGO_SUPERUSER_EMAIL`, and `DJANGO_SUPERUSER_PASSWORD` unset. The admin user already in Neon is the login. Startup creates a superuser only when `DJANGO_SUPERUSER_PASSWORD` is set, and it does not change an existing user's password.
 
