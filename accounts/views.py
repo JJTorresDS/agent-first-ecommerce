@@ -21,12 +21,26 @@ def home(request):
 
 @login_required
 def profile(request):
-    profile_row, _ = Profile.objects.get_or_create(user=request.user)
+    membership = membership_for(request.user)
+    if membership is None:
+        return redirect("organization_setup")
+    profile_row, _ = Profile.objects.get_or_create(
+        user=request.user,
+        defaults={"organization": membership.organization},
+    )
     return render(request, "accounts/profile.html", {"profile": profile_row})
 
 
 def _access_row(user):
-    granted = set(user.app_access.values_list("app", flat=True))
+    membership = membership_for(user)
+    if membership is None:
+        granted = set()
+    else:
+        granted = set(
+            user.app_access.filter(organization=membership.organization).values_list(
+                "app", flat=True
+            )
+        )
     return {
         "user": user,
         "tasks": AppAccess.App.TASKS in granted,
@@ -55,10 +69,21 @@ def set_app_access(request, user_id):
     app = request.POST.get("app", "")
     if app not in AppAccess.App.values:
         return HttpResponseBadRequest("Unknown app.")
+    membership = membership_for(user)
+    if membership is None:
+        return HttpResponseBadRequest("That user has no organization.")
     if request.POST.get("enabled") == "on":
-        AppAccess.objects.get_or_create(user=user, app=app)
+        AppAccess.objects.get_or_create(
+            user=user,
+            app=app,
+            organization=membership.organization,
+        )
     else:
-        AppAccess.objects.filter(user=user, app=app).delete()
+        AppAccess.objects.filter(
+            user=user,
+            app=app,
+            organization=membership.organization,
+        ).delete()
     if request.headers.get("HX-Request"):
         return render(
             request,

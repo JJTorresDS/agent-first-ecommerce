@@ -4,7 +4,7 @@ from django.http import HttpResponse
 from django.shortcuts import render
 
 from accounts.access import require_app
-from accounts.models import AppAccess
+from accounts.models import AppAccess, membership_for
 
 from .models import CashflowMovement
 
@@ -29,19 +29,21 @@ def cashflow_list(request):
     currency = request.GET.get("currency") or ""
     raw_date = request.GET.get("transaction_date") or ""
     chosen = _chosen_date(raw_date)
-    movements = CashflowMovement.objects.all()
+    membership = membership_for(request.user)
+    movements = CashflowMovement.objects.filter(organization=membership.organization)
     if category:
         movements = movements.filter(category=category)
     if currency:
         movements = movements.filter(currency=currency)
     if chosen:
         movements = movements.filter(transaction_date=chosen)
+    scoped = CashflowMovement.objects.filter(organization=membership.organization)
     context = {
         "movements": movements,
-        "categories": CashflowMovement.objects.order_by("category")
+        "categories": scoped.order_by("category")
         .values_list("category", flat=True)
         .distinct(),
-        "currencies": CashflowMovement.objects.order_by("currency")
+        "currencies": scoped.order_by("currency")
         .values_list("currency", flat=True)
         .distinct(),
         "category": category,

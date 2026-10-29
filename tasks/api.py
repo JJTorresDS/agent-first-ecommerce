@@ -1,4 +1,5 @@
 import secrets
+import uuid
 from datetime import date as Date
 from datetime import datetime
 from decimal import Decimal
@@ -12,6 +13,8 @@ from django.shortcuts import get_object_or_404
 from ninja import NinjaAPI, Schema
 from ninja.errors import HttpError
 from ninja.security import HttpBearer
+
+from accounts.models import Organization
 
 from .models import CashflowMovement, Task
 
@@ -40,7 +43,16 @@ class TokenAuth(HttpBearer):
         return None
 
 
+def _organization_or_404(organization_id: str) -> Organization:
+    try:
+        parsed = uuid.UUID(str(organization_id))
+    except ValueError:
+        raise HttpError(422, "organization: Enter a valid id.") from None
+    return get_object_or_404(Organization, pk=parsed)
+
+
 class TaskIn(Schema):
+    organization: str
     email_address: str
     task_title: str
     timestamp: datetime | None = None
@@ -54,6 +66,7 @@ class TaskIn(Schema):
 
 
 class TaskPatch(Schema):
+    organization: str
     email_address: str | None = None
     task_title: str | None = None
     timestamp: datetime | None = None
@@ -68,7 +81,12 @@ class TaskPatch(Schema):
 
 class TaskOut(Schema):
     id: int
+    organization: str
     timestamp: datetime
+
+    @staticmethod
+    def resolve_organization(obj):
+        return str(obj.organization_id)
     email_address: str
     task_title: str
     priority: str
@@ -108,11 +126,12 @@ def _apply(task: Task, data: dict) -> Task:
 @api.get("/tasks", response=list[TaskOut], auth=TokenAuth())
 def list_tasks(
     request,
+    organization: str,
     status: str | None = None,
     assignee: str | None = None,
     priority: str | None = None,
 ):
-    tasks = Task.objects.all()
+    tasks = Task.objects.filter(organization=_organization_or_404(organization))
     if status is not None:
         tasks = tasks.filter(status=status)
     if assignee is not None:
@@ -124,19 +143,30 @@ def list_tasks(
 
 @api.post("/tasks", response={201: TaskOut}, auth=TokenAuth())
 def create_task(request, payload: TaskIn):
-    task = _apply(Task(), payload.model_dump(exclude_unset=True))
+    data = payload.model_dump(exclude_unset=True)
+    data["organization"] = _organization_or_404(data.pop("organization"))
+    task = _apply(Task(), data)
     return 201, task
 
 
 @api.get("/tasks/{task_id}", response=TaskOut, auth=TokenAuth())
-def get_task(request, task_id: int):
-    return get_object_or_404(Task, pk=task_id)
+def get_task(request, task_id: int, organization: str):
+    return get_object_or_404(
+        Task,
+        pk=task_id,
+        organization=_organization_or_404(organization),
+    )
 
 
 @api.patch("/tasks/{task_id}", response=TaskOut, auth=TokenAuth())
 def patch_task(request, task_id: int, payload: TaskPatch):
-    task = get_object_or_404(Task, pk=task_id)
-    return _apply(task, payload.model_dump(exclude_unset=True))
+    data = payload.model_dump(exclude_unset=True)
+    task = get_object_or_404(
+        Task,
+        pk=task_id,
+        organization=_organization_or_404(data.pop("organization")),
+    )
+    return _apply(task, data)
 
 
 _MOVEMENT_TEXT = (
@@ -147,6 +177,7 @@ _MOVEMENT_TEXT = (
 
 
 class CashflowMovementIn(Schema):
+    organization: str
     uploader_email: str
     transaction_date: Date
     category: str
@@ -158,10 +189,10 @@ class CashflowMovementIn(Schema):
     description: str = ""
     source_file_id: str = ""
     white: bool = False
-    doc_moved_to_date_folder: bool = False
 
 
 class CashflowMovementPatch(Schema):
+    organization: str
     uploader_email: str | None = None
     transaction_date: Date | None = None
     category: str | None = None
@@ -177,7 +208,12 @@ class CashflowMovementPatch(Schema):
 
 class CashflowMovementOut(Schema):
     id: str
+    organization: str
     uploader_email: str
+
+    @staticmethod
+    def resolve_organization(obj):
+        return str(obj.organization_id)
     transaction_date: Date
     category: str
     sub_category: str | None
@@ -188,7 +224,6 @@ class CashflowMovementOut(Schema):
     description: str
     source_file_id: str
     white: bool
-    doc_moved_to_date_folder: bool
     created_at: datetime
     updated_at: datetime
 
@@ -214,10 +249,13 @@ def _apply_movement(movement: CashflowMovement, data: dict) -> CashflowMovement:
 @api.get("/cashflow-movements", response=list[CashflowMovementOut], auth=TokenAuth())
 def list_cashflow_movements(
     request,
+    organization: str,
     category: str | None = None,
     currency: str | None = None,
 ):
-    movements = CashflowMovement.objects.all()
+    movements = CashflowMovement.objects.filter(
+        organization=_organization_or_404(organization)
+    )
     if category is not None:
         movements = movements.filter(category=category)
     if currency is not None:
@@ -227,25 +265,23 @@ def list_cashflow_movements(
 
 @api.post("/cashflow-movements", response={201: CashflowMovementOut}, auth=TokenAuth())
 def create_cashflow_movement(request, payload: CashflowMovementIn):
-    movement = _apply_movement(
-        CashflowMovement(),
-        payload.model_dump(exclude_unset=True),
-    )
+    data = payload.model_dump(exclude_unset=True)
+    data["organization"] = _organization_or_404(data.pop("organization"))
+    movement = _apply_movement(CashflowMovement(), data)
     return 201, movement
 
 
 def _upsert_movement(source_file_id: str, data: dict) -> tuple[CashflowMovement, bool]:
+    organization = data["organization"]
     with transaction.atomic():
         movement = (
             CashflowMovement.objects.select_for_update()
-            .filter(source_file_id=source_file_id)
+            .filter(source_file_id=source_file_id, organization=organization)
             .first()
         )
         created = movement is None
         if created:
             movement = CashflowMovement()
-        else:
-            data.pop("doc_moved_to_date_folder", None)
         return _apply_movement(movement, data), created
 
 
@@ -258,15 +294,18 @@ def upsert_cashflow_movement(request, source_file_id: str, payload: CashflowMove
     if not source_file_id.strip():
         raise HttpError(422, "source_file_id: This field is required.")
     data = payload.model_dump(exclude_unset=True)
+    data["organization"] = _organization_or_404(data.pop("organization"))
     data["source_file_id"] = source_file_id
     try:
         movement, created = _upsert_movement(source_file_id, data)
     except IntegrityError:
-        data.pop("doc_moved_to_date_folder", None)
         with transaction.atomic():
             movement = (
                 CashflowMovement.objects.select_for_update()
-                .filter(source_file_id=source_file_id)
+                .filter(
+                    source_file_id=source_file_id,
+                    organization=data["organization"],
+                )
                 .first()
             )
             if movement is None:
@@ -281,8 +320,12 @@ def upsert_cashflow_movement(request, source_file_id: str, payload: CashflowMove
     response=CashflowMovementOut,
     auth=TokenAuth(),
 )
-def get_cashflow_movement(request, movement_id: str):
-    return get_object_or_404(CashflowMovement, pk=movement_id)
+def get_cashflow_movement(request, movement_id: str, organization: str):
+    return get_object_or_404(
+        CashflowMovement,
+        pk=movement_id,
+        organization=_organization_or_404(organization),
+    )
 
 
 @api.patch(
@@ -291,5 +334,10 @@ def get_cashflow_movement(request, movement_id: str):
     auth=TokenAuth(),
 )
 def patch_cashflow_movement(request, movement_id: str, payload: CashflowMovementPatch):
-    movement = get_object_or_404(CashflowMovement, pk=movement_id)
-    return _apply_movement(movement, payload.model_dump(exclude_unset=True))
+    data = payload.model_dump(exclude_unset=True)
+    movement = get_object_or_404(
+        CashflowMovement,
+        pk=movement_id,
+        organization=_organization_or_404(data.pop("organization")),
+    )
+    return _apply_movement(movement, data)

@@ -8,7 +8,6 @@
       <th>Counterparty</th>
       <th>Description</th>
       <th>White</th>
-      <th>Doc moved</th>
     </tr>
   </thead>
   <tbody>
@@ -21,11 +20,10 @@
         <td>{{ movement.counterparty_name }}</td>
         <td>{{ movement.description }}</td>
         <td>{% if movement.white %}Yes{% else %}No{% endif %}</td>
-        <td>{% if movement.doc_moved_to_date_folder %}Yes{% else %}No{% endif %}</td>
       </tr>
     {% empty %}
       <tr>
-        <td colspan="8">No movements.</td>
+        <td colspan="7">No movements.</td>
       </tr>
     {% endfor %}
   </tbody>

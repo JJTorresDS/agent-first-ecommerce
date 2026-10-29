@@ -67,12 +67,11 @@ class ProfileAccessTests(TestCase):
             email="ada@example.com",
             password="not-used-for-google",
         )
-        Profile.objects.create(
-            user=user,
-            display_name="Ada Lovelace",
-            avatar_url="https://example.com/ada.jpg",
-        )
         assign_default_organization(user)
+        profile = Profile.objects.get(user=user)
+        profile.display_name = "Ada Lovelace"
+        profile.avatar_url = "https://example.com/ada.jpg"
+        profile.save()
         self.client.force_login(user)
 
         home = self.client.get("/")
@@ -86,6 +85,7 @@ class ProfileAccessTests(TestCase):
 
     def test_google_signup_copies_name_and_picture(self):
         user = User.objects.create_user("ada", email="ada@example.com")
+        assign_default_organization(user)
         sociallogin = SimpleNamespace(
             account=SimpleNamespace(
                 provider="google",
@@ -106,33 +106,23 @@ class ProfileAccessTests(TestCase):
         self.assertEqual(profile.avatar_url, "https://example.com/ada.jpg")
 
 
-def google_signup(user):
-    sociallogin = SimpleNamespace(
-        account=SimpleNamespace(provider="google", extra_data={})
-    )
-    user_signed_up.send(
-        sender=user.__class__,
-        request=None,
-        user=user,
-        sociallogin=sociallogin,
-    )
-
-
 class SignupTaskTests(TestCase):
-    def test_google_signup_assigns_the_task_to_the_superuser(self):
+    def test_default_organization_assigns_the_task_to_the_superuser(self):
         User.objects.create_superuser("admin", "admin@example.com", "secret")
         user = User.objects.create_user("ada", email="ada@example.com")
-        google_signup(user)
+        organization = assign_default_organization(user)
         task = Task.objects.get()
+        self.assertEqual(task.organization, organization)
         self.assertEqual(task.task_title, "Grant access to ada@example.com")
         self.assertEqual(task.email_address, "ada@example.com")
         self.assertEqual(task.assignee, "admin@example.com")
         self.assertEqual(task.status, Task.Status.TODO)
 
-    def test_google_signup_without_a_superuser_leaves_the_assignee_blank(self):
+    def test_organization_without_a_superuser_leaves_the_assignee_blank(self):
         user = User.objects.create_user("ada", email="ada@example.com")
-        google_signup(user)
+        organization = assign_default_organization(user)
         task = Task.objects.get()
+        self.assertEqual(task.organization, organization)
         self.assertEqual(task.assignee, "")
 
 
@@ -148,8 +138,9 @@ class AccessPageTests(TestCase):
         admin = User.objects.create_superuser("admin", "admin@example.com", "secret")
         user = User.objects.create_user("ada", email="ada@example.com")
         assign_default_organization(admin)
-        assign_default_organization(user)
+        user_org = assign_default_organization(user)
         CashflowMovement.objects.create(
+            organization=user_org,
             uploader_email="ada@example.com",
             transaction_date=date(2026, 10, 7),
             category="compra",
@@ -197,6 +188,9 @@ class OrganizationTests(TestCase):
         self.assertEqual(membership.organization.name, "Vimple")
         self.assertEqual(membership.role, Membership.Role.OWNER)
         self.assertIsNotNone(membership.organization.id)
+        task = Task.objects.get()
+        self.assertEqual(task.organization, membership.organization)
+        self.assertEqual(task.task_title, "Grant access to ada@example.com")
 
     def test_blank_name_is_rejected(self):
         user = User.objects.create_user("ada", email="ada@example.com")

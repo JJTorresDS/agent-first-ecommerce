@@ -5,6 +5,8 @@ from urllib.parse import urlparse
 from django.db import models
 from django.utils import timezone
 
+from accounts.models import TenantModel
+
 _DRIVE_ID = re.compile(r"(?:/d/|/folders/|[?&]id=)([a-zA-Z0-9_-]+)")
 _GOOGLE_HOSTS = {"docs.google.com", "drive.google.com"}
 
@@ -20,7 +22,7 @@ def drive_file_id(url):
     return match.group(1) if match else ""
 
 
-class Task(models.Model):
+class Task(TenantModel):
     class Priority(models.TextChoices):
         LOW = "1-Low: can be pushed to next month", "1-Low: can be pushed to next month"
         MEDIUM = "2-Medium: Do this month", "2-Medium: Do this month"
@@ -100,7 +102,7 @@ def email_from_account(user):
     return user.email or ""
 
 
-class CashflowMovement(models.Model):
+class CashflowMovement(TenantModel):
     id = models.CharField(
         primary_key=True,
         max_length=32,
@@ -131,9 +133,9 @@ class CashflowMovement(models.Model):
         ordering = ["-transaction_date", "-created_at"]
         constraints = [
             models.UniqueConstraint(
-                fields=["source_file_id"],
+                fields=["organization", "source_file_id"],
                 condition=~models.Q(source_file_id=""),
-                name="uniq_cashflow_source_file_id",
+                name="uniq_cashflow_org_source_file_id",
             ),
         ]
 

@@ -6,7 +6,7 @@ from django.core.exceptions import ValidationError
 from django.test import SimpleTestCase, TestCase, override_settings
 from ninja.testing import TestClient
 
-from accounts.models import AppAccess, assign_default_organization
+from accounts.models import AppAccess, Organization, assign_default_organization
 from tasks.api import api
 from tasks.models import CashflowMovement, Task
 
@@ -17,8 +17,12 @@ TOKEN = "test-token"
 
 @override_settings(TASKS_API_TOKEN=TOKEN)
 class TaskModelTests(TestCase):
+    def setUp(self):
+        self.organization = Organization.objects.create(name="Vimple")
+
     def test_extracts_docs_file_id(self):
         task = Task.objects.create(
+            organization=self.organization,
             email_address="a@example.com",
             task_title="Write spec",
             task_deepdive_link="https://docs.google.com/document/d/abc123_XYZ/edit",
@@ -27,6 +31,7 @@ class TaskModelTests(TestCase):
 
     def test_extracts_open_query_id(self):
         task = Task.objects.create(
+            organization=self.organization,
             email_address="a@example.com",
             task_title="File",
             task_deepdive_link="https://drive.google.com/open?id=fileId99",
@@ -35,6 +40,7 @@ class TaskModelTests(TestCase):
 
     def test_keeps_explicit_ticket_id(self):
         task = Task.objects.create(
+            organization=self.organization,
             email_address="a@example.com",
             task_title="Write spec",
             task_deepdive_link="https://docs.google.com/document/d/abc123/edit",
@@ -44,6 +50,7 @@ class TaskModelTests(TestCase):
 
     def test_ignores_non_google_link(self):
         task = Task.objects.create(
+            organization=self.organization,
             email_address="a@example.com",
             task_title="Elsewhere",
             task_deepdive_link="https://example.com/d/not-a-drive-id",
@@ -56,6 +63,8 @@ class TaskApiTests(TestCase):
     def setUp(self):
         self.client = TestClient(api)
         self.auth = {"Authorization": f"Bearer {TOKEN}"}
+        self.organization = Organization.objects.create(name="Vimple")
+        self.org_id = str(self.organization.id)
 
     def test_rejects_missing_or_wrong_token(self):
         missing = self.client.get("/tasks")
@@ -67,6 +76,7 @@ class TaskApiTests(TestCase):
         created = self.client.post(
             "/tasks",
             json={
+                "organization": self.org_id,
                 "email_address": "agent@example.com",
                 "task_title": "Restock",
                 "priority": "3-High: Do this week",
@@ -79,24 +89,33 @@ class TaskApiTests(TestCase):
         self.assertEqual(body["ticket_id"], "driveFile1")
         self.assertEqual(body["task_title"], "Restock")
         self.assertEqual(body["email_address"], "agent@example.com")
+        self.assertEqual(body["organization"], self.org_id)
 
-        listed = self.client.get("/tasks", headers=self.auth)
+        listed = self.client.get(
+            "/tasks",
+            query_params={"organization": self.org_id},
+            headers=self.auth,
+        )
         self.assertEqual(listed.status_code, 200)
         self.assertEqual(len(listed.json()), 1)
 
         by_priority = self.client.get(
             "/tasks",
-            query_params={"priority": "3-High: Do this week"},
+            query_params={"organization": self.org_id, "priority": "3-High: Do this week"},
             headers=self.auth,
         )
         self.assertEqual(len(by_priority.json()), 1)
 
-        done = self.client.get("/tasks?status=Done", headers=self.auth)
+        done = self.client.get(
+            "/tasks",
+            query_params={"organization": self.org_id, "status": "Done"},
+            headers=self.auth,
+        )
         self.assertEqual(done.json(), [])
 
         patched = self.client.patch(
             f"/tasks/{body['id']}",
-            json={"status": "Done", "assignee": "jonas"},
+            json={"organization": self.org_id, "status": "Done", "assignee": "jonas"},
             headers=self.auth,
         )
         self.assertEqual(patched.status_code, 200)
@@ -106,7 +125,11 @@ class TaskApiTests(TestCase):
 
         assigned = self.client.get(
             "/tasks",
-            query_params={"assignee": "jonas", "status": "Done"},
+            query_params={
+                "organization": self.org_id,
+                "assignee": "jonas",
+                "status": "Done",
+            },
             headers=self.auth,
         )
         self.assertEqual(len(assigned.json()), 1)
@@ -114,15 +137,32 @@ class TaskApiTests(TestCase):
     def test_rejects_invalid_email(self):
         response = self.client.post(
             "/tasks",
-            json={"email_address": "not-an-email", "task_title": "Bad"},
+            json={
+                "organization": self.org_id,
+                "email_address": "not-an-email",
+                "task_title": "Bad",
+            },
             headers=self.auth,
         )
         self.assertEqual(response.status_code, 422)
 
+    def test_create_without_an_organization_is_rejected(self):
+        response = self.client.post(
+            "/tasks",
+            json={"email_address": "agent@example.com", "task_title": "Restock"},
+            headers=self.auth,
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(Task.objects.count(), 0)
 
-class EffortTests(SimpleTestCase):
+
+class EffortTests(TestCase):
+    def setUp(self):
+        self.organization = Organization.objects.create(name="Vimple")
+
     def test_rejects_unknown_effort(self):
         task = Task(
+            organization=self.organization,
             email_address="a@example.com",
             task_title="Restock",
             effort="2h",
@@ -132,6 +172,7 @@ class EffortTests(SimpleTestCase):
 
     def test_accepts_a_listed_effort(self):
         task = Task(
+            organization=self.organization,
             email_address="a@example.com",
             task_title="Restock",
             effort=Task.Effort.SHORT,
@@ -140,9 +181,13 @@ class EffortTests(SimpleTestCase):
         self.assertEqual(task.effort, "Short: half a day")
 
 
-class PriorityStatusTests(SimpleTestCase):
+class PriorityStatusTests(TestCase):
+    def setUp(self):
+        self.organization = Organization.objects.create(name="Vimple")
+
     def test_rejects_unknown_priority_and_status(self):
         task = Task(
+            organization=self.organization,
             email_address="a@example.com",
             task_title="Restock",
             priority="urgent",
@@ -153,6 +198,7 @@ class PriorityStatusTests(SimpleTestCase):
 
     def test_accepts_listed_priority_and_status(self):
         task = Task(
+            organization=self.organization,
             email_address="a@example.com",
             task_title="Restock",
             priority=Task.Priority.HIGH,
@@ -163,9 +209,13 @@ class PriorityStatusTests(SimpleTestCase):
         self.assertEqual(task.status, "Done")
 
 
-class CashflowMovementTests(SimpleTestCase):
+class CashflowMovementTests(TestCase):
+    def setUp(self):
+        self.organization = Organization.objects.create(name="Vimple")
+
     def test_sample_row(self):
         movement = CashflowMovement(
+            organization=self.organization,
             uploader_email="jonasjere@gmail.com",
             transaction_date=date(2026, 10, 7),
             category="compra",
@@ -176,17 +226,41 @@ class CashflowMovementTests(SimpleTestCase):
             description="Compra SD",
             source_file_id="1Vxe7xZSXwXVZG54KikowHsHpt_tjBBja4nCKPORqH2Q",
             white=False,
-            doc_moved_to_date_folder=True,
         )
         movement.clean_fields()
         self.assertEqual(movement.transaction_date, date(2026, 10, 7))
         self.assertEqual(movement.amount, Decimal("-58000.00"))
         self.assertEqual(movement.exchange_rate_at_purchase, Decimal("1560.9700"))
         self.assertFalse(movement.white)
-        self.assertTrue(movement.doc_moved_to_date_folder)
+
+    def test_organization_is_required(self):
+        movement = CashflowMovement(
+            uploader_email="jonasjere@gmail.com",
+            transaction_date=date(2026, 10, 7),
+            category="compra",
+            amount=Decimal("-58000"),
+            currency="ARS",
+        )
+        with self.assertRaises(ValidationError):
+            movement.full_clean()
+
+    def test_same_source_file_is_allowed_in_another_organization(self):
+        other = Organization.objects.create(name="Other")
+        shared = {
+            "uploader_email": "ada@example.com",
+            "transaction_date": date(2026, 10, 7),
+            "category": "compra",
+            "amount": Decimal("-10"),
+            "currency": "ARS",
+            "source_file_id": "same-file",
+        }
+        CashflowMovement.objects.create(organization=self.organization, **shared)
+        CashflowMovement.objects.create(organization=other, **shared)
+        self.assertEqual(CashflowMovement.objects.filter(source_file_id="same-file").count(), 2)
 
     def test_category_is_required(self):
         movement = CashflowMovement(
+            organization=self.organization,
             uploader_email="jonasjere@gmail.com",
             transaction_date=date(2026, 10, 7),
             category="",
@@ -217,12 +291,14 @@ class CashflowApiTests(TestCase):
     def setUp(self):
         self.client = TestClient(api)
         self.auth = {"Authorization": f"Bearer {TOKEN}"}
+        self.organization = Organization.objects.create(name="Vimple")
+        self.org_id = str(self.organization.id)
         self.url = f"/cashflow-movements/by-source/{SOURCE_FILE_ID}"
 
     def test_put_creates_then_updates_same_movement(self):
         created = self.client.put(
             self.url,
-            json=cashflow_payload(),
+            json=cashflow_payload(organization=self.org_id),
             headers=self.auth,
         )
         self.assertEqual(created.status_code, 201)
@@ -231,10 +307,15 @@ class CashflowApiTests(TestCase):
         self.assertEqual(body["source_file_id"], SOURCE_FILE_ID)
         self.assertEqual(body["amount"], "-58000.00")
         self.assertIsNone(body["sub_category"])
+        self.assertEqual(body["organization"], self.org_id)
 
         updated = self.client.put(
             self.url,
-            json=cashflow_payload(amount="-100.00", sub_category="insumos"),
+            json=cashflow_payload(
+                organization=self.org_id,
+                amount="-100.00",
+                sub_category="insumos",
+            ),
             headers=self.auth,
         )
         self.assertEqual(updated.status_code, 200)
@@ -243,24 +324,14 @@ class CashflowApiTests(TestCase):
         self.assertEqual(updated.json()["sub_category"], "insumos")
         self.assertEqual(CashflowMovement.objects.count(), 1)
 
-    def test_reparse_keeps_doc_moved_to_date_folder(self):
-        created = self.client.put(
-            self.url,
-            json=cashflow_payload(doc_moved_to_date_folder=True),
+    def test_create_without_an_organization_is_rejected(self):
+        response = self.client.post(
+            "/cashflow-movements",
+            json=cashflow_payload(),
             headers=self.auth,
         )
-        self.assertEqual(created.status_code, 201)
-        self.assertTrue(created.json()["doc_moved_to_date_folder"])
-
-        updated = self.client.put(
-            self.url,
-            json=cashflow_payload(amount="-100.00", doc_moved_to_date_folder=False),
-            headers=self.auth,
-        )
-        self.assertEqual(updated.status_code, 200)
-        self.assertEqual(updated.json()["id"], created.json()["id"])
-        self.assertEqual(updated.json()["amount"], "-100.00")
-        self.assertTrue(updated.json()["doc_moved_to_date_folder"])
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(CashflowMovement.objects.count(), 0)
 
 
 def movement(**overrides):
@@ -273,7 +344,6 @@ def movement(**overrides):
         "counterparty_name": "Jonas Torres",
         "description": "Compra SD",
         "white": False,
-        "doc_moved_to_date_folder": True,
     }
     data.update(overrides)
     return CashflowMovement.objects.create(**data)
@@ -282,16 +352,20 @@ def movement(**overrides):
 class CashflowPageTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user("ada", email="ada@example.com")
-        assign_default_organization(self.user)
-        AppAccess.objects.create(user=self.user, app=AppAccess.App.CASHFLOW)
-        movement()
+        self.organization = assign_default_organization(self.user)
+        AppAccess.objects.create(
+            user=self.user,
+            app=AppAccess.App.CASHFLOW,
+            organization=self.organization,
+        )
+        movement(organization=self.organization)
         movement(
+            organization=self.organization,
             transaction_date=date(2026, 10, 8),
             category="venta",
             amount=Decimal("10.00"),
             currency="USD",
             description="Sale",
-            doc_moved_to_date_folder=False,
         )
         self.client.force_login(self.user)
 
@@ -332,7 +406,31 @@ class CashflowPageTests(TestCase):
         assign_default_organization(admin)
         self.client.force_login(admin)
         response = self.client.get("/cashflow/")
-        self.assertContains(response, "Compra SD")
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Compra SD")
+
+    def test_user_does_not_see_another_organizations_rows(self):
+        other_user = User.objects.create_user("bea", email="bea@example.com")
+        other = assign_default_organization(other_user)
+        AppAccess.objects.create(
+            user=other_user,
+            app=AppAccess.App.CASHFLOW,
+            organization=other,
+        )
+        movement(
+            organization=other,
+            description="Other books",
+            category="venta",
+            currency="USD",
+        )
+        self.client.force_login(self.user)
+        own = self.client.get("/cashflow/")
+        self.assertContains(own, "Compra SD")
+        self.assertNotContains(own, "Other books")
+        self.client.force_login(other_user)
+        theirs = self.client.get("/cashflow/")
+        self.assertContains(theirs, "Other books")
+        self.assertNotContains(theirs, "Compra SD")
 
 
 class HealthTests(SimpleTestCase):
