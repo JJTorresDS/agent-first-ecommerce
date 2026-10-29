@@ -6,6 +6,7 @@ from typing import Literal
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
 from django.http import HttpRequest
 from django.shortcuts import get_object_or_404
 from ninja import NinjaAPI, Schema
@@ -146,8 +147,8 @@ _MOVEMENT_TEXT = (
 
 
 class CashflowMovementIn(Schema):
-    email_address: str
-    date: Date
+    uploader_email: str
+    transaction_date: Date
     category: str
     amount: Decimal
     currency: str
@@ -160,8 +161,8 @@ class CashflowMovementIn(Schema):
 
 
 class CashflowMovementPatch(Schema):
-    email_address: str | None = None
-    date: Date | None = None
+    uploader_email: str | None = None
+    transaction_date: Date | None = None
     category: str | None = None
     amount: Decimal | None = None
     currency: str | None = None
@@ -175,8 +176,8 @@ class CashflowMovementPatch(Schema):
 
 class CashflowMovementOut(Schema):
     id: str
-    email_address: str
-    date: Date
+    uploader_email: str
+    transaction_date: Date
     category: str
     amount: Decimal
     currency: str
@@ -226,6 +227,48 @@ def create_cashflow_movement(request, payload: CashflowMovementIn):
         payload.model_dump(exclude_unset=True),
     )
     return 201, movement
+
+
+def _upsert_movement(source_file_id: str, data: dict) -> tuple[CashflowMovement, bool]:
+    with transaction.atomic():
+        movement = (
+            CashflowMovement.objects.select_for_update()
+            .filter(source_file_id=source_file_id)
+            .first()
+        )
+        created = movement is None
+        if created:
+            movement = CashflowMovement()
+        else:
+            data.pop("doc_moved_to_date_folder", None)
+        return _apply_movement(movement, data), created
+
+
+@api.put(
+    "/cashflow-movements/by-source/{source_file_id}",
+    response={200: CashflowMovementOut, 201: CashflowMovementOut},
+    auth=TokenAuth(),
+)
+def upsert_cashflow_movement(request, source_file_id: str, payload: CashflowMovementIn):
+    if not source_file_id.strip():
+        raise HttpError(422, "source_file_id: This field is required.")
+    data = payload.model_dump(exclude_unset=True)
+    data["source_file_id"] = source_file_id
+    try:
+        movement, created = _upsert_movement(source_file_id, data)
+    except IntegrityError:
+        data.pop("doc_moved_to_date_folder", None)
+        with transaction.atomic():
+            movement = (
+                CashflowMovement.objects.select_for_update()
+                .filter(source_file_id=source_file_id)
+                .first()
+            )
+            if movement is None:
+                raise
+            movement = _apply_movement(movement, data)
+        created = False
+    return (201 if created else 200), movement
 
 
 @api.get(

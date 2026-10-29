@@ -162,8 +162,8 @@ class PriorityStatusTests(SimpleTestCase):
 class CashflowMovementTests(SimpleTestCase):
     def test_sample_row(self):
         movement = CashflowMovement(
-            email_address="jonasjere@gmail.com",
-            date=date(2026, 10, 7),
+            uploader_email="jonasjere@gmail.com",
+            transaction_date=date(2026, 10, 7),
             category="compra",
             amount=Decimal("-58000"),
             currency="ARS",
@@ -175,7 +175,7 @@ class CashflowMovementTests(SimpleTestCase):
             doc_moved_to_date_folder=True,
         )
         movement.clean_fields()
-        self.assertEqual(movement.date, date(2026, 10, 7))
+        self.assertEqual(movement.transaction_date, date(2026, 10, 7))
         self.assertEqual(movement.amount, Decimal("-58000.00"))
         self.assertEqual(movement.exchange_rate_at_purchase, Decimal("1560.9700"))
         self.assertFalse(movement.white)
@@ -183,14 +183,78 @@ class CashflowMovementTests(SimpleTestCase):
 
     def test_category_is_required(self):
         movement = CashflowMovement(
-            email_address="jonasjere@gmail.com",
-            date=date(2026, 10, 7),
+            uploader_email="jonasjere@gmail.com",
+            transaction_date=date(2026, 10, 7),
             category="",
             amount=Decimal("-58000"),
             currency="ARS",
         )
         with self.assertRaises(ValidationError):
             movement.clean_fields()
+
+
+SOURCE_FILE_ID = "1Vxe7xZSXwXVZG54KikowHsHpt_tjBBja4nCKPORqH2Q"
+
+
+def cashflow_payload(**overrides):
+    payload = {
+        "uploader_email": "jonasjere@gmail.com",
+        "transaction_date": "2026-10-07",
+        "category": "compra",
+        "amount": "-58000.00",
+        "currency": "ARS",
+    }
+    payload.update(overrides)
+    return payload
+
+
+@override_settings(TASKS_API_TOKEN=TOKEN)
+class CashflowApiTests(TestCase):
+    def setUp(self):
+        self.client = TestClient(api)
+        self.auth = {"Authorization": f"Bearer {TOKEN}"}
+        self.url = f"/cashflow-movements/by-source/{SOURCE_FILE_ID}"
+
+    def test_put_creates_then_updates_same_movement(self):
+        created = self.client.put(
+            self.url,
+            json=cashflow_payload(),
+            headers=self.auth,
+        )
+        self.assertEqual(created.status_code, 201)
+        body = created.json()
+        self.assertTrue(body["id"])
+        self.assertEqual(body["source_file_id"], SOURCE_FILE_ID)
+        self.assertEqual(body["amount"], "-58000.00")
+
+        updated = self.client.put(
+            self.url,
+            json=cashflow_payload(amount="-100.00"),
+            headers=self.auth,
+        )
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.json()["id"], body["id"])
+        self.assertEqual(updated.json()["amount"], "-100.00")
+        self.assertEqual(CashflowMovement.objects.count(), 1)
+
+    def test_reparse_keeps_doc_moved_to_date_folder(self):
+        created = self.client.put(
+            self.url,
+            json=cashflow_payload(doc_moved_to_date_folder=True),
+            headers=self.auth,
+        )
+        self.assertEqual(created.status_code, 201)
+        self.assertTrue(created.json()["doc_moved_to_date_folder"])
+
+        updated = self.client.put(
+            self.url,
+            json=cashflow_payload(amount="-100.00", doc_moved_to_date_folder=False),
+            headers=self.auth,
+        )
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.json()["id"], created.json()["id"])
+        self.assertEqual(updated.json()["amount"], "-100.00")
+        self.assertTrue(updated.json()["doc_moved_to_date_folder"])
 
 
 class HealthTests(SimpleTestCase):
