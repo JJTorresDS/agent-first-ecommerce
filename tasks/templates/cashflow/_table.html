@@ -1,0 +1,32 @@
+<table id="cashflow-table">
+  <thead>
+    <tr>
+      <th>Date</th>
+      <th>Category</th>
+      <th>Amount</th>
+      <th>Currency</th>
+      <th>Counterparty</th>
+      <th>Description</th>
+      <th>White</th>
+      <th>Doc moved</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for movement in movements %}
+      <tr>
+        <td>{{ movement.transaction_date|date:"Y-m-d" }}</td>
+        <td>{{ movement.category }}</td>
+        <td>{{ movement.amount }}</td>
+        <td>{{ movement.currency }}</td>
+        <td>{{ movement.counterparty_name }}</td>
+        <td>{{ movement.description }}</td>
+        <td>{% if movement.white %}Yes{% else %}No{% endif %}</td>
+        <td>{% if movement.doc_moved_to_date_folder %}Yes{% else %}No{% endif %}</td>
+      </tr>
+    {% empty %}
+      <tr>
+        <td colspan="8">No movements.</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>

@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block title %}Access{% endblock %}
+
+{% block content %}
+  <h1>Access</h1>
+  <table>
+    <thead>
+      <tr>
+        <th>User</th>
+        <th>Tasks</th>
+        <th>Cashflow</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+        {% include "accounts/_access_user.html" %}
+      {% empty %}
+        <tr>
+          <td colspan="3">No users.</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endblock %}

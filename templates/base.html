@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Vimple{% endblock %}</title>
+  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  <style>
+    body { font-family: sans-serif; max-width: 64rem; margin: 2rem auto; padding: 0 1rem; background: #fff; color: #1a1a1a; }
+    nav { display: flex; gap: 1rem; align-items: center; margin-bottom: 2rem; }
+    nav form { margin: 0; }
+    a { color: inherit; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid #ddd; vertical-align: top; }
+    img.avatar { width: 96px; height: 96px; border-radius: 50%; object-fit: cover; }
+    button, select, input { font: inherit; }
+    .filters { display: flex; gap: 1rem; align-items: end; margin-bottom: 1rem; flex-wrap: wrap; }
+    .filters label { display: block; font-size: 0.85rem; color: #555; margin-bottom: 0.25rem; }
+    dt { color: #555; font-size: 0.85rem; margin-top: 1rem; }
+    dd { margin: 0.25rem 0 0; }
+  </style>
+</head>
+<body>
+  <nav>
+    <a href="{% url 'profile' %}">Profile</a>
+    {% if can_open_cashflow %}
+      <a href="{% url 'cashflow' %}">Cashflow</a>
+    {% endif %}
+    {% if can_grant_access %}
+      <a href="{% url 'access' %}">Access</a>
+    {% endif %}
+    <form method="post" action="{% url 'account_logout' %}">
+      {% csrf_token %}
+      <button type="submit">Log out</button>
+    </form>
+  </nav>
+  {% block content %}{% endblock %}
+</body>
+</html>

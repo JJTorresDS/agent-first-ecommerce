@@ -1,12 +1,16 @@
 from datetime import date
 from decimal import Decimal
 
+from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.test import SimpleTestCase, TestCase, override_settings
 from ninja.testing import TestClient
 
+from accounts.models import AppAccess
 from tasks.api import api
 from tasks.models import CashflowMovement, Task
+
+User = get_user_model()
 
 TOKEN = "test-token"
 
@@ -255,6 +259,75 @@ class CashflowApiTests(TestCase):
         self.assertEqual(updated.json()["id"], created.json()["id"])
         self.assertEqual(updated.json()["amount"], "-100.00")
         self.assertTrue(updated.json()["doc_moved_to_date_folder"])
+
+
+def movement(**overrides):
+    data = {
+        "uploader_email": "ada@example.com",
+        "transaction_date": date(2026, 10, 7),
+        "category": "compra",
+        "amount": Decimal("-58000.50"),
+        "currency": "ARS",
+        "counterparty_name": "Jonas Torres",
+        "description": "Compra SD",
+        "white": False,
+        "doc_moved_to_date_folder": True,
+    }
+    data.update(overrides)
+    return CashflowMovement.objects.create(**data)
+
+
+class CashflowPageTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user("ada", email="ada@example.com")
+        AppAccess.objects.create(user=self.user, app=AppAccess.App.CASHFLOW)
+        movement()
+        movement(
+            transaction_date=date(2026, 10, 8),
+            category="venta",
+            amount=Decimal("10.00"),
+            currency="USD",
+            description="Sale",
+            doc_moved_to_date_folder=False,
+        )
+        self.client.force_login(self.user)
+
+    def test_granted_user_sees_rows_and_filters(self):
+        page = self.client.get("/cashflow/")
+        self.assertContains(page, "Compra SD")
+        self.assertContains(page, "Sale")
+        self.assertContains(page, "-58000.50")
+        self.assertContains(page, "htmx.org")
+
+        by_category = self.client.get("/cashflow/", {"category": "compra"})
+        self.assertContains(by_category, "Compra SD")
+        self.assertNotContains(by_category, "Sale")
+
+        by_currency = self.client.get("/cashflow/", {"currency": "USD"})
+        self.assertContains(by_currency, "Sale")
+        self.assertNotContains(by_currency, "Compra SD")
+
+        by_date = self.client.get("/cashflow/", {"transaction_date": "2026-10-07"})
+        self.assertContains(by_date, "Compra SD")
+        self.assertNotContains(by_date, "Sale")
+
+        partial = self.client.get("/cashflow/", HTTP_HX_REQUEST="true")
+        self.assertContains(partial, "Compra SD")
+        self.assertNotContains(partial, "<h1>")
+        self.assertNotContains(partial, "Log out")
+
+    def test_user_without_a_grant_does_not_see_amounts(self):
+        outsider = User.objects.create_user("bea", email="bea@example.com")
+        self.client.force_login(outsider)
+        response = self.client.get("/cashflow/")
+        self.assertContains(response, "Waiting for access", status_code=403)
+        self.assertNotContains(response, "-58000.50", status_code=403)
+
+    def test_superuser_can_open_cashflow_without_a_grant(self):
+        admin = User.objects.create_superuser("admin", "admin@example.com", "secret")
+        self.client.force_login(admin)
+        response = self.client.get("/cashflow/")
+        self.assertContains(response, "Compra SD")
 
 
 class HealthTests(SimpleTestCase):

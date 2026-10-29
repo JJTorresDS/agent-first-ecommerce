@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block title %}Cashflow{% endblock %}
+
+{% block content %}
+  <h1>Cashflow</h1>
+  <form
+    class="filters"
+    method="get"
+    action="{% url 'cashflow' %}"
+    hx-get="{% url 'cashflow' %}"
+    hx-target="#cashflow-table"
+    hx-swap="outerHTML"
+    hx-push-url="true"
+    hx-trigger="change, submit"
+  >
+    <div>
+      <label for="category">Category</label>
+      <select id="category" name="category">
+        <option value="">All</option>
+        {% for value in categories %}
+          <option value="{{ value }}" {% if value == category %}selected{% endif %}>{{ value }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="currency">Currency</label>
+      <select id="currency" name="currency">
+        <option value="">All</option>
+        {% for value in currencies %}
+          <option value="{{ value }}" {% if value == currency %}selected{% endif %}>{{ value }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="transaction_date">Date</label>
+      <input id="transaction_date" type="date" name="transaction_date" value="{{ transaction_date }}">
+    </div>
+  </form>
+  {% include "cashflow/_table.html" %}
+{% endblock %}

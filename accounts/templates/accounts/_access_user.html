@@ -1,0 +1,5 @@
+<tr id="access-user-{{ row.user.pk }}">
+  <td>{{ row.user.email|default:row.user.get_username }}</td>
+  <td>{% include "accounts/_access_check.html" with app="tasks" checked=row.tasks %}</td>
+  <td>{% include "accounts/_access_check.html" with app="cashflow" checked=row.cashflow %}</td>
+</tr>

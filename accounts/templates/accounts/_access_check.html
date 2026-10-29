@@ -1,0 +1,19 @@
+<form
+  method="post"
+  action="{% url 'set_app_access' row.user.pk %}"
+  hx-post="{% url 'set_app_access' row.user.pk %}"
+  hx-trigger="change"
+  hx-target="closest tr"
+  hx-swap="outerHTML"
+>
+  {% csrf_token %}
+  <input type="hidden" name="app" value="{{ app }}">
+  <input type="hidden" name="enabled" value="off">
+  <input
+    type="checkbox"
+    name="enabled"
+    value="on"
+    {% if checked %}checked{% endif %}
+    aria-label="{{ app }}"
+  >
+</form>
