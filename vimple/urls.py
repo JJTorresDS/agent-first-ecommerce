@@ -11,7 +11,7 @@ from accounts.views import (
     set_app_access,
 )
 from tasks.api import api
-from tasks.views import cashflow_list, health
+from tasks.views import cashflow_csv, cashflow_list, health
 
 admin.site.site_header = "Vimple"
 admin.site.site_title = "Vimple"
@@ -24,6 +24,7 @@ urlpatterns = [
     path("organization/", organization_settings, name="organization"),
     path("organization/delete/", organization_delete, name="organization_delete"),
     path("cashflow/", cashflow_list, name="cashflow"),
+    path("cashflow/export.csv", cashflow_csv, name="cashflow_csv"),
     path("access/", access, name="access"),
     path("access/<int:user_id>/", set_app_access, name="set_app_access"),
     path("accounts/", include("allauth.urls")),

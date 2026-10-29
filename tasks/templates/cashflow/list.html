@@ -9,7 +9,7 @@
     method="get"
     action="{% url 'cashflow' %}"
     hx-get="{% url 'cashflow' %}"
-    hx-target="#cashflow-table"
+    hx-target="#cashflow-results"
     hx-swap="outerHTML"
     hx-push-url="true"
     hx-trigger="change, submit"
@@ -37,5 +37,5 @@
       <input id="transaction_date" type="date" name="transaction_date" value="{{ transaction_date }}">
     </div>
   </form>
-  {% include "cashflow/_table.html" %}
+  {% include "cashflow/_results.html" %}
 {% endblock %}

@@ -390,8 +390,29 @@ class CashflowPageTests(TestCase):
 
         partial = self.client.get("/cashflow/", HTTP_HX_REQUEST="true")
         self.assertContains(partial, "Compra SD")
+        self.assertContains(partial, "Export CSV")
         self.assertNotContains(partial, "<h1>")
         self.assertNotContains(partial, "Log out")
+
+    def test_export_csv_matches_the_filtered_table(self):
+        exported = self.client.get("/cashflow/export.csv")
+        self.assertEqual(exported["Content-Type"], "text/csv")
+        self.assertIn("attachment", exported["Content-Disposition"])
+        body = exported.content.decode()
+        self.assertIn("Compra SD", body)
+        self.assertIn("Sale", body)
+        self.assertIn("Subcategory", body)
+
+        compra = self.client.get("/cashflow/export.csv", {"category": "compra"})
+        text = compra.content.decode()
+        self.assertIn("Compra SD", text)
+        self.assertNotIn("Sale", text)
+
+        other_user = User.objects.create_user("cara", email="cara@example.com")
+        other = assign_default_organization(other_user)
+        movement(organization=other, description="Hidden books", category="compra")
+        hidden = self.client.get("/cashflow/export.csv")
+        self.assertNotIn("Hidden books", hidden.content.decode())
 
     def test_user_without_a_grant_does_not_see_amounts(self):
         outsider = User.objects.create_user("bea", email="bea@example.com")

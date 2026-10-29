@@ -1,3 +1,4 @@
+import csv
 from datetime import date
 
 from django.http import HttpResponse
@@ -23,36 +24,75 @@ def _chosen_date(raw):
         return None
 
 
-@require_app(AppAccess.App.CASHFLOW)
-def cashflow_list(request):
+def _filtered_movements(request):
     category = request.GET.get("category") or ""
     currency = request.GET.get("currency") or ""
     raw_date = request.GET.get("transaction_date") or ""
     chosen = _chosen_date(raw_date)
-    membership = membership_for(request.user)
-    movements = CashflowMovement.objects.filter(organization=membership.organization)
+    organization = membership_for(request.user).organization
+    movements = CashflowMovement.objects.filter(organization=organization)
     if category:
         movements = movements.filter(category=category)
     if currency:
         movements = movements.filter(currency=currency)
     if chosen:
         movements = movements.filter(transaction_date=chosen)
-    scoped = CashflowMovement.objects.filter(organization=membership.organization)
-    context = {
-        "movements": movements,
-        "categories": scoped.order_by("category")
-        .values_list("category", flat=True)
-        .distinct(),
-        "currencies": scoped.order_by("currency")
-        .values_list("currency", flat=True)
-        .distinct(),
+    return movements, {
         "category": category,
         "currency": currency,
         "transaction_date": raw_date if chosen else "",
+        "categories": CashflowMovement.objects.filter(organization=organization)
+        .order_by("category")
+        .values_list("category", flat=True)
+        .distinct(),
+        "currencies": CashflowMovement.objects.filter(organization=organization)
+        .order_by("currency")
+        .values_list("currency", flat=True)
+        .distinct(),
     }
+
+
+@require_app(AppAccess.App.CASHFLOW)
+def cashflow_list(request):
+    movements, filters = _filtered_movements(request)
+    context = {"movements": movements, **filters}
     template = (
-        "cashflow/_table.html"
+        "cashflow/_results.html"
         if request.headers.get("HX-Request")
         else "cashflow/list.html"
     )
     return render(request, template, context)
+
+
+@require_app(AppAccess.App.CASHFLOW)
+def cashflow_csv(request):
+    movements, _filters = _filtered_movements(request)
+    response = HttpResponse(content_type="text/csv")
+    response["Content-Disposition"] = 'attachment; filename="cashflow.csv"'
+    writer = csv.writer(response)
+    writer.writerow(
+        [
+            "Date",
+            "Category",
+            "Subcategory",
+            "Amount",
+            "Currency",
+            "Counterparty",
+            "Description",
+            "White",
+        ]
+    )
+    for movement in movements:
+        writer.writerow(
+            [
+                movement.transaction_date.isoformat(),
+                movement.category,
+                movement.sub_category or "",
+                movement.amount,
+                movement.currency,
+                movement.counterparty_name,
+                movement.description,
+                "Yes" if movement.white else "No",
+            ]
+        )
+    return response

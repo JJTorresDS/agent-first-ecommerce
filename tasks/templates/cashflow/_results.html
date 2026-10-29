@@ -1,0 +1,6 @@
+<div id="cashflow-results">
+  <p>
+    <a href="{% url 'cashflow_csv' %}?category={{ category|urlencode }}&amp;currency={{ currency|urlencode }}&amp;transaction_date={{ transaction_date|urlencode }}">Export CSV</a>
+  </p>
+  {% include "cashflow/_table.html" %}
+</div>
