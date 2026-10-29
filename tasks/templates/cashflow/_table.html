@@ -3,6 +3,7 @@
     <tr>
       <th>Date</th>
       <th>Category</th>
+      <th>Subcategory</th>
       <th>Amount</th>
       <th>Currency</th>
       <th>Counterparty</th>
@@ -15,6 +16,7 @@
       <tr>
         <td>{{ movement.transaction_date|date:"Y-m-d" }}</td>
         <td>{{ movement.category }}</td>
+        <td>{{ movement.sub_category }}</td>
         <td>{{ movement.amount }}</td>
         <td>{{ movement.currency }}</td>
         <td>{{ movement.counterparty_name }}</td>
