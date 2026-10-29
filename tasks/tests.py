@@ -8,7 +8,7 @@ from ninja.testing import TestClient
 
 from accounts.models import AppAccess, Organization, assign_default_organization
 from tasks.api import api
-from tasks.models import CashflowMovement, Task
+from tasks.models import CashflowMovement, Task, drive_file_url
 
 User = get_user_model()
 
@@ -395,6 +395,13 @@ class CashflowPageTests(TestCase):
         self.assertNotContains(partial, "Log out")
 
     def test_export_csv_matches_the_filtered_table(self):
+        row = CashflowMovement.objects.get(description="Compra SD")
+        row.source_file_id = "abc_123"
+        row.save()
+        document = "https://drive.google.com/file/d/abc_123/view"
+        page = self.client.get("/cashflow/")
+        self.assertContains(page, document)
+
         exported = self.client.get("/cashflow/export.csv")
         self.assertEqual(exported["Content-Type"], "text/csv")
         self.assertIn("attachment", exported["Content-Disposition"])
@@ -402,6 +409,7 @@ class CashflowPageTests(TestCase):
         self.assertIn("Compra SD", body)
         self.assertIn("Sale", body)
         self.assertIn("Subcategory", body)
+        self.assertIn(document, body)
 
         compra = self.client.get("/cashflow/export.csv", {"category": "compra"})
         text = compra.content.decode()
@@ -452,6 +460,18 @@ class CashflowPageTests(TestCase):
         theirs = self.client.get("/cashflow/")
         self.assertContains(theirs, "Other books")
         self.assertNotContains(theirs, "Compra SD")
+
+
+class DriveFileUrlTests(SimpleTestCase):
+    def test_builds_a_view_link_for_a_file_id(self):
+        self.assertEqual(
+            drive_file_url("abc_123"),
+            "https://drive.google.com/file/d/abc_123/view",
+        )
+
+    def test_blank_or_unsafe_id_has_no_link(self):
+        self.assertEqual(drive_file_url(""), "")
+        self.assertEqual(drive_file_url("bad id"), "")
 
 
 class HealthTests(SimpleTestCase):

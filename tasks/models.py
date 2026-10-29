@@ -8,6 +8,7 @@ from django.utils import timezone
 from accounts.models import TenantModel
 
 _DRIVE_ID = re.compile(r"(?:/d/|/folders/|[?&]id=)([a-zA-Z0-9_-]+)")
+_FILE_ID = re.compile(r"^[a-zA-Z0-9_-]+$")
 _GOOGLE_HOSTS = {"docs.google.com", "drive.google.com"}
 
 
@@ -20,6 +21,13 @@ def drive_file_id(url):
         return ""
     match = _DRIVE_ID.search(url)
     return match.group(1) if match else ""
+
+
+def drive_file_url(file_id):
+    """Open link for a Drive file id. Empty when the id is missing or unsafe."""
+    if not file_id or not _FILE_ID.fullmatch(file_id):
+        return ""
+    return f"https://drive.google.com/file/d/{file_id}/view"
 
 
 class Task(TenantModel):
@@ -141,3 +149,6 @@ class CashflowMovement(TenantModel):
 
     def __str__(self):
         return f"{self.date} {self.amount} {self.currency}"
+
+    def source_file_url(self):
+        return drive_file_url(self.source_file_id)
