@@ -110,6 +110,7 @@ class CashflowMovement(models.Model):
     uploader_email = models.EmailField()
     transaction_date = models.DateField()
     category = models.CharField(max_length=100)
+    sub_category = models.CharField(max_length=100, null=True)
     amount = models.DecimalField(max_digits=14, decimal_places=2)
     currency = models.CharField(max_length=8)
     exchange_rate_at_purchase = models.DecimalField(
