@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block title %}Name your organization{% endblock %}
+
+{% block content %}
+  <section class="card">
+    <h1>Name your organization</h1>
+    <p class="muted">You can change this name later. The organization id will stay the same.</p>
+    {% if error %}
+      <p class="error">{{ error }}</p>
+    {% endif %}
+    <form method="post">
+      {% csrf_token %}
+      <label class="muted" for="name">Organization name</label>
+      <input id="name" type="text" name="name" maxlength="200" required>
+      <div class="actions">
+        <button class="primary" type="submit">Continue</button>
+      </div>
+    </form>
+  </section>
+{% endblock %}

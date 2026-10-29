@@ -6,7 +6,7 @@ from django.core.exceptions import ValidationError
 from django.test import SimpleTestCase, TestCase, override_settings
 from ninja.testing import TestClient
 
-from accounts.models import AppAccess
+from accounts.models import AppAccess, assign_default_organization
 from tasks.api import api
 from tasks.models import CashflowMovement, Task
 
@@ -282,6 +282,7 @@ def movement(**overrides):
 class CashflowPageTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user("ada", email="ada@example.com")
+        assign_default_organization(self.user)
         AppAccess.objects.create(user=self.user, app=AppAccess.App.CASHFLOW)
         movement()
         movement(
@@ -320,6 +321,7 @@ class CashflowPageTests(TestCase):
 
     def test_user_without_a_grant_does_not_see_amounts(self):
         outsider = User.objects.create_user("bea", email="bea@example.com")
+        assign_default_organization(outsider)
         self.client.force_login(outsider)
         response = self.client.get("/cashflow/")
         self.assertContains(response, "Waiting for access", status_code=403)
@@ -327,6 +329,7 @@ class CashflowPageTests(TestCase):
 
     def test_superuser_can_open_cashflow_without_a_grant(self):
         admin = User.objects.create_superuser("admin", "admin@example.com", "secret")
+        assign_default_organization(admin)
         self.client.force_login(admin)
         response = self.client.get("/cashflow/")
         self.assertContains(response, "Compra SD")

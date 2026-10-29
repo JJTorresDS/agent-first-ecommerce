@@ -4,7 +4,13 @@ from django.http import HttpResponseBadRequest, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
-from .models import AppAccess, Profile
+from .models import (
+    AppAccess,
+    Membership,
+    Profile,
+    create_owned_organization,
+    membership_for,
+)
 
 
 def home(request):
@@ -60,3 +66,75 @@ def set_app_access(request, user_id):
             {"row": _access_row(user)},
         )
     return redirect("access")
+
+
+def _organization_name(raw):
+    name = (raw or "").strip()
+    if not name or len(name) > 200:
+        return ""
+    return name
+
+
+@login_required
+def organization_setup(request):
+    if membership_for(request.user):
+        return redirect("organization")
+    error = ""
+    if request.method == "POST":
+        name = _organization_name(request.POST.get("name"))
+        if not name:
+            error = "Enter an organization name."
+        else:
+            create_owned_organization(request.user, name)
+            return redirect("organization")
+    return render(request, "accounts/organization_setup.html", {"error": error})
+
+
+@login_required
+def organization_settings(request):
+    membership = membership_for(request.user)
+    if membership is None:
+        return redirect("organization_setup")
+    if request.method == "POST" and membership.role != Membership.Role.OWNER:
+        return HttpResponseForbidden("Only the owner can rename the organization.")
+    error = ""
+    organization = membership.organization
+    if request.method == "POST":
+        name = _organization_name(request.POST.get("name"))
+        if not name:
+            error = "Enter an organization name."
+        else:
+            organization.name = name
+            organization.save(update_fields=["name", "updated_at"])
+            return redirect("organization")
+    return render(
+        request,
+        "accounts/organization.html",
+        {
+            "organization": organization,
+            "member_count": organization.memberships.count(),
+            "error": error,
+        },
+    )
+
+
+@login_required
+@require_POST
+def organization_delete(request):
+    membership = membership_for(request.user)
+    if membership is None:
+        return redirect("organization_setup")
+    if membership.role != Membership.Role.OWNER:
+        return HttpResponseForbidden("Only the owner can delete the organization.")
+    if request.POST.get("confirm") != "yes":
+        return render(
+            request,
+            "accounts/organization.html",
+            {
+                "organization": membership.organization,
+                "member_count": membership.organization.memberships.count(),
+                "error": "Confirm the deletion to remove the organization.",
+            },
+        )
+    membership.organization.delete()
+    return redirect("organization_setup")

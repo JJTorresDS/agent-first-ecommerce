@@ -18,11 +18,27 @@
     .filters label { display: block; font-size: 0.85rem; color: #555; margin-bottom: 0.25rem; }
     dt { color: #555; font-size: 0.85rem; margin-top: 1rem; }
     dd { margin: 0.25rem 0 0; }
+    .card { border: 1px solid #e6e6e6; border-radius: 12px; padding: 1.25rem 1.5rem; margin-bottom: 1rem; }
+    .card h1 { font-size: 1.25rem; margin: 0 0 1rem; }
+    .split { display: flex; gap: 1.5rem; flex-wrap: wrap; }
+    .split > div { flex: 1; min-width: 16rem; }
+    .muted { color: #555; font-size: 0.85rem; margin: 0 0 0.35rem; }
+    .actions { display: flex; justify-content: flex-end; margin-top: 1.25rem; }
+    input[type="text"] { width: 100%; box-sizing: border-box; padding: 0.45rem 0.6rem; }
+    input[readonly] { background: #f4f4f4; }
+    .id-row { display: flex; gap: 0.5rem; }
+    .id-row input { flex: 1; }
+    button.primary { background: #111; color: #fff; border: 0; border-radius: 6px; padding: 0.45rem 0.9rem; }
+    button.danger { background: #e23b2f; color: #fff; border: 0; border-radius: 6px; padding: 0.45rem 0.8rem; }
+    .error { color: #a32020; }
   </style>
 </head>
 <body>
   <nav>
     <a href="{% url 'profile' %}">Profile</a>
+    {% if organization %}
+      <a href="{% url 'organization' %}">Organization</a>
+    {% endif %}
     {% if can_open_cashflow %}
       <a href="{% url 'cashflow' %}">Cashflow</a>
     {% endif %}

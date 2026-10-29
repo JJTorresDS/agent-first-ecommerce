@@ -6,7 +6,13 @@ from allauth.account.signals import user_signed_up
 from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase
 
-from accounts.models import AppAccess, Profile
+from accounts.models import (
+    AppAccess,
+    Membership,
+    Organization,
+    Profile,
+    assign_default_organization,
+)
 from tasks.models import CashflowMovement, Task
 
 
@@ -66,6 +72,7 @@ class ProfileAccessTests(TestCase):
             display_name="Ada Lovelace",
             avatar_url="https://example.com/ada.jpg",
         )
+        assign_default_organization(user)
         self.client.force_login(user)
 
         home = self.client.get("/")
@@ -132,6 +139,7 @@ class SignupTaskTests(TestCase):
 class AccessPageTests(TestCase):
     def test_non_superuser_gets_403(self):
         user = User.objects.create_user("ada", email="ada@example.com")
+        assign_default_organization(user)
         self.client.force_login(user)
         response = self.client.get("/access/")
         self.assertEqual(response.status_code, 403)
@@ -139,6 +147,8 @@ class AccessPageTests(TestCase):
     def test_superuser_grant_lets_the_user_open_cashflow(self):
         admin = User.objects.create_superuser("admin", "admin@example.com", "secret")
         user = User.objects.create_user("ada", email="ada@example.com")
+        assign_default_organization(admin)
+        assign_default_organization(user)
         CashflowMovement.objects.create(
             uploader_email="ada@example.com",
             transaction_date=date(2026, 10, 7),
@@ -175,3 +185,70 @@ class AccessPageTests(TestCase):
         opened = self.client.get("/cashflow/")
         self.assertContains(opened, "Secret purchase")
         self.assertContains(opened, "-58000.50")
+
+
+class OrganizationTests(TestCase):
+    def test_setup_names_the_organization_and_makes_the_user_owner(self):
+        user = User.objects.create_user("ada", email="ada@example.com")
+        self.client.force_login(user)
+        response = self.client.post("/organization/setup/", {"name": "  Vimple  "})
+        self.assertRedirects(response, "/organization/")
+        membership = Membership.objects.get(user=user)
+        self.assertEqual(membership.organization.name, "Vimple")
+        self.assertEqual(membership.role, Membership.Role.OWNER)
+        self.assertIsNotNone(membership.organization.id)
+
+    def test_blank_name_is_rejected(self):
+        user = User.objects.create_user("ada", email="ada@example.com")
+        self.client.force_login(user)
+        response = self.client.post("/organization/setup/", {"name": "   "})
+        self.assertContains(response, "Enter an organization name.")
+        self.assertEqual(Organization.objects.count(), 0)
+
+    def test_backfill_names_a_missing_organization_default(self):
+        user = User.objects.create_user("ada", email="ada@example.com")
+        organization = assign_default_organization(user)
+        self.assertEqual(organization.name, "default")
+        self.assertEqual(assign_default_organization(user).id, organization.id)
+        self.assertEqual(
+            Membership.objects.get(user=user).role,
+            Membership.Role.OWNER,
+        )
+
+    def test_rename_keeps_the_same_id(self):
+        user = User.objects.create_user("ada", email="ada@example.com")
+        self.client.force_login(user)
+        self.client.post("/organization/setup/", {"name": "Vimple"})
+        organization_id = Membership.objects.get(user=user).organization_id
+        response = self.client.post("/organization/", {"name": "Scent"})
+        self.assertRedirects(response, "/organization/")
+        organization = Organization.objects.get(pk=organization_id)
+        self.assertEqual(organization.name, "Scent")
+        self.assertEqual(organization.id, organization_id)
+        page = self.client.get("/organization/")
+        self.assertContains(page, "Your organization")
+        self.assertContains(page, str(organization_id))
+        self.assertContains(page, "Active members")
+
+    def test_profile_without_an_organization_goes_to_setup(self):
+        user = User.objects.create_user("ada", email="ada@example.com")
+        self.client.force_login(user)
+        response = self.client.get("/profile/")
+        self.assertRedirects(response, "/organization/setup/")
+
+    def test_delete_removes_the_organization_and_the_next_id_is_new(self):
+        user = User.objects.create_user("ada", email="ada@example.com")
+        self.client.force_login(user)
+        self.client.post("/organization/setup/", {"name": "Vimple"})
+        organization_id = Membership.objects.get(user=user).organization_id
+        kept = self.client.post("/organization/delete/", {})
+        self.assertContains(kept, "Confirm the deletion")
+        self.assertTrue(Organization.objects.filter(pk=organization_id).exists())
+        deleted = self.client.post("/organization/delete/", {"confirm": "yes"})
+        self.assertRedirects(deleted, "/organization/setup/")
+        self.assertFalse(Organization.objects.filter(pk=organization_id).exists())
+        self.client.post("/organization/setup/", {"name": "Next"})
+        self.assertNotEqual(
+            Membership.objects.get(user=user).organization_id,
+            organization_id,
+        )

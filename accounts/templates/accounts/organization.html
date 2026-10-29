@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}Your organization{% endblock %}
+
+{% block content %}
+  <section class="card">
+    <h1>Your organization</h1>
+    <p class="muted">Active members</p>
+    <p>{{ member_count }}</p>
+    {% if error %}
+      <p class="error">{{ error }}</p>
+    {% endif %}
+    <form method="post" action="{% url 'organization' %}">
+      {% csrf_token %}
+      <div class="split">
+        <div>
+          <label class="muted" for="name">Organization name</label>
+          <input id="name" type="text" name="name" maxlength="200" value="{{ organization.name }}" required>
+        </div>
+        <div>
+          <label class="muted" for="organization-id">Organization ID</label>
+          <div class="id-row">
+            <input id="organization-id" type="text" value="{{ organization.id }}" readonly>
+            <button type="button" id="copy-organization-id">Copy</button>
+          </div>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="primary" type="submit">Save</button>
+      </div>
+    </form>
+  </section>
+  <section class="card">
+    <h1>Danger zone</h1>
+    <p class="muted">Delete organization</p>
+    <p>Deleting this organization removes it and its memberships. The next organization you create gets a new id.</p>
+    <form method="post" action="{% url 'organization_delete' %}">
+      {% csrf_token %}
+      <label>
+        <input type="checkbox" name="confirm" value="yes">
+        I want to permanently delete this organization
+      </label>
+      <div class="actions">
+        <button class="danger" type="submit">Delete organization</button>
+      </div>
+    </form>
+  </section>
+  <script>
+    document.getElementById("copy-organization-id").addEventListener("click", function () {
+      var field = document.getElementById("organization-id");
+      navigator.clipboard.writeText(field.value);
+    });
+  </script>
+{% endblock %}
