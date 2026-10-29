@@ -150,6 +150,7 @@ class CashflowMovementIn(Schema):
     uploader_email: str
     transaction_date: Date
     category: str
+    sub_category: str | None = None
     amount: Decimal
     currency: str
     exchange_rate_at_purchase: Decimal | None = None
@@ -164,6 +165,7 @@ class CashflowMovementPatch(Schema):
     uploader_email: str | None = None
     transaction_date: Date | None = None
     category: str | None = None
+    sub_category: str | None = None
     amount: Decimal | None = None
     currency: str | None = None
     exchange_rate_at_purchase: Decimal | None = None
@@ -179,6 +181,7 @@ class CashflowMovementOut(Schema):
     uploader_email: str
     transaction_date: Date
     category: str
+    sub_category: str | None
     amount: Decimal
     currency: str
     exchange_rate_at_purchase: Decimal | None
@@ -195,7 +198,10 @@ def _apply_movement(movement: CashflowMovement, data: dict) -> CashflowMovement:
     for key, value in data.items():
         if value is None and key in _MOVEMENT_TEXT:
             value = ""
-        if value is None and key != "exchange_rate_at_purchase":
+        if value is None and key not in {
+            "exchange_rate_at_purchase",
+            "sub_category",
+        }:
             continue
         setattr(movement, key, value)
     try:

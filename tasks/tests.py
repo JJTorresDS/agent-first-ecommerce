@@ -230,15 +230,17 @@ class CashflowApiTests(TestCase):
         self.assertTrue(body["id"])
         self.assertEqual(body["source_file_id"], SOURCE_FILE_ID)
         self.assertEqual(body["amount"], "-58000.00")
+        self.assertIsNone(body["sub_category"])
 
         updated = self.client.put(
             self.url,
-            json=cashflow_payload(amount="-100.00"),
+            json=cashflow_payload(amount="-100.00", sub_category="insumos"),
             headers=self.auth,
         )
         self.assertEqual(updated.status_code, 200)
         self.assertEqual(updated.json()["id"], body["id"])
         self.assertEqual(updated.json()["amount"], "-100.00")
+        self.assertEqual(updated.json()["sub_category"], "insumos")
         self.assertEqual(CashflowMovement.objects.count(), 1)
 
     def test_reparse_keeps_doc_moved_to_date_folder(self):
