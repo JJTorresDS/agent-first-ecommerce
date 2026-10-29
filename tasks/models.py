@@ -123,10 +123,6 @@ class CashflowMovement(models.Model):
     description = models.TextField(blank=True)
     source_file_id = models.CharField(max_length=128, blank=True)
     white = models.BooleanField(default=False)
-    doc_moved_to_date_folder = models.BooleanField(
-        default=False,
-        verbose_name="Moviste el doc a la carpeta con fecha?",
-    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

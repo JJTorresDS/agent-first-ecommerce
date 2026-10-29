@@ -33,7 +33,7 @@ class CashflowMovementAdmin(admin.ModelAdmin):
         "counterparty_name",
         "uploader_email",
         "white",
-        "doc_moved_to_date_folder",
+        "sub_category",
     )
     search_fields = (
         "uploader_email",

@@ -173,7 +173,6 @@ class CashflowMovementPatch(Schema):
     description: str | None = None
     source_file_id: str | None = None
     white: bool | None = None
-    doc_moved_to_date_folder: bool | None = None
 
 
 class CashflowMovementOut(Schema):
