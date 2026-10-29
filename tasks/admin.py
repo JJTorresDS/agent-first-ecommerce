@@ -26,7 +26,7 @@ class TaskAdmin(admin.ModelAdmin):
 @admin.register(CashflowMovement)
 class CashflowMovementAdmin(admin.ModelAdmin):
     list_display = (
-        "date",
+        "transaction_date",
         "amount",
         "currency",
         "category",
