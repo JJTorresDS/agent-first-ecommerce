@@ -15,7 +15,7 @@ from tasks.views import cashflow_csv, cashflow_list, health
 
 admin.site.site_header = "Vimple"
 admin.site.site_title = "Vimple"
-admin.site.index_title = "Tasks"
+admin.site.index_title = "Finances"
 
 urlpatterns = [
     path("", home, name="home"),

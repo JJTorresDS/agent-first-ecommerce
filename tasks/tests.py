@@ -375,6 +375,10 @@ class CashflowPageTests(TestCase):
         self.assertContains(page, "Sale")
         self.assertContains(page, "-58000.50")
         self.assertContains(page, "htmx.org")
+        self.assertContains(page, 'nav-label">Finances')
+        self.assertContains(page, 'nav-label">Administration')
+        self.assertContains(page, 'nav-label">Account')
+        self.assertContains(page, 'class="nav-link active" href="/cashflow/"')
 
         by_category = self.client.get("/cashflow/", {"category": "compra"})
         self.assertContains(by_category, "Compra SD")
@@ -393,6 +397,7 @@ class CashflowPageTests(TestCase):
         self.assertContains(partial, "Export CSV")
         self.assertNotContains(partial, "<h1>")
         self.assertNotContains(partial, "Log out")
+        self.assertNotContains(partial, "Finances")
 
     def test_export_csv_matches_the_filtered_table(self):
         row = CashflowMovement.objects.get(description="Compra SD")
@@ -472,6 +477,17 @@ class DriveFileUrlTests(SimpleTestCase):
     def test_blank_or_unsafe_id_has_no_link(self):
         self.assertEqual(drive_file_url(""), "")
         self.assertEqual(drive_file_url("bad id"), "")
+
+
+class AdminLabelTests(SimpleTestCase):
+    def test_admin_shows_finances_and_keeps_the_tasks_app(self):
+        from django.apps import apps
+        from django.contrib import admin
+
+        config = apps.get_app_config("tasks")
+        self.assertEqual(config.label, "tasks")
+        self.assertEqual(config.verbose_name, "Finances")
+        self.assertEqual(admin.site.index_title, "Finances")
 
 
 class HealthTests(SimpleTestCase):

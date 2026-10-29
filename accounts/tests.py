@@ -82,6 +82,9 @@ class ProfileAccessTests(TestCase):
         self.assertContains(response, "Ada Lovelace")
         self.assertContains(response, "https://example.com/ada.jpg")
         self.assertNotContains(response, 'name="display_name"')
+        self.assertContains(response, 'nav-label">Account')
+        self.assertContains(response, 'nav-label">Administration')
+        self.assertContains(response, 'class="nav-link active" href="/profile/"')
 
     def test_google_signup_copies_name_and_picture(self):
         user = User.objects.create_user("ada", email="ada@example.com")
@@ -223,6 +226,11 @@ class OrganizationTests(TestCase):
         self.assertContains(page, "Your organization")
         self.assertContains(page, str(organization_id))
         self.assertContains(page, "Active members")
+        self.assertContains(page, 'nav-label">Administration')
+        self.assertContains(page, 'nav-label">Account')
+        self.assertContains(page, 'class="nav-link active" href="/organization/"')
+        self.assertNotContains(page, 'class="nav-link active" href="/profile/"')
+        self.assertContains(page, ">AE<")
 
     def test_profile_without_an_organization_goes_to_setup(self):
         user = User.objects.create_user("ada", email="ada@example.com")
