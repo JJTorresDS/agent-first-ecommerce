@@ -107,7 +107,7 @@ class CashflowMovement(models.Model):
         default=new_cashflow_id,
         editable=False,
     )
-    email_address = models.EmailField()
+    uploader_email = models.EmailField()
     date = models.DateField()
     category = models.CharField(max_length=100)
     amount = models.DecimalField(max_digits=14, decimal_places=2)
@@ -132,6 +132,13 @@ class CashflowMovement(models.Model):
     class Meta:
         db_table = "cashflow_movement"
         ordering = ["-date", "-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["source_file_id"],
+                condition=~models.Q(source_file_id=""),
+                name="uniq_cashflow_source_file_id",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.date} {self.amount} {self.currency}"

@@ -31,12 +31,12 @@ class CashflowMovementAdmin(admin.ModelAdmin):
         "currency",
         "category",
         "counterparty_name",
-        "email_address",
+        "uploader_email",
         "white",
         "doc_moved_to_date_folder",
     )
     search_fields = (
-        "email_address",
+        "uploader_email",
         "category",
         "counterparty_name",
         "description",
@@ -48,10 +48,10 @@ class CashflowMovementAdmin(admin.ModelAdmin):
         initial = super().get_changeform_initial_data(request)
         email = email_from_account(request.user)
         if email:
-            initial["email_address"] = email
+            initial["uploader_email"] = email
         return initial
 
     def save_model(self, request, obj, form, change):
         if not obj.email_address:
-            obj.email_address = email_from_account(request.user)
+            obj.uploader_email = email_from_account(request.user)
         super().save_model(request, obj, form, change)
