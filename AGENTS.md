@@ -1,0 +1,12 @@
+# Agents
+
+Read this before changing models, queries, pages, or APIs.
+
+Organization is the tenant. Its UUID does not change. The name can.
+
+- App models other than Organization carry an organization foreign key, through TenantModel or an explicit field such as ItemQuestion.organization.
+- Pages take the organization from membership_for(request.user). A user with no membership goes to organization setup and sees no other organization's data.
+- API list, get, create, and update calls take the organization id and filter on it. A row in another organization is not returned and is not moved.
+- Counts, badges, exports, and webhook rows use that same organization. A query with no organization filter is wrong.
+- A new read or write includes a test where another organization's row stays invisible.
+- Leave the tasks app label, its database table, /api/tasks, and the AppAccess value tasks as they are.

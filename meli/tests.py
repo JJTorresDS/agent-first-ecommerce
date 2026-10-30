@@ -522,3 +522,142 @@ class ItemQuestionTests(TestCase):
         page = self.client.get("/meli/questions/")
         self.assertNotContains(page, "Tienen stock?")
         self.assertContains(page, "No questions yet.")
+
+    def test_open_question_shows_a_count(self):
+        ItemQuestion.objects.create(
+            organization=self.organization,
+            question_id="13683341904",
+            item_title="Perfume",
+            text="Tienen stock?",
+            status="UNANSWERED",
+        )
+        page = self.client.get("/meli/questions/")
+        self.assertContains(page, 'class="badge">1<')
+        self.assertContains(page, 'class="open-dot"')
+        organization = self.client.get("/organization/")
+        self.assertContains(organization, 'class="alerts"')
+        self.assertContains(organization, 'class="badge">1<')
+        self.assertContains(organization, 'aria-label="Open questions, 1"')
+
+    def test_answered_question_has_no_count(self):
+        ItemQuestion.objects.create(
+            organization=self.organization,
+            question_id="13683341904",
+            text="Tienen stock?",
+            status="ANSWERED",
+            answer_text="Si hay",
+        )
+        page = self.client.get("/meli/questions/")
+        self.assertNotContains(page, 'class="badge"')
+        self.assertNotContains(page, 'class="open-dot"')
+        organization = self.client.get("/organization/")
+        self.assertContains(organization, 'class="alerts"')
+        self.assertNotContains(organization, 'class="badge"')
+
+    def test_another_organization_does_not_change_the_count(self):
+        other = Organization.objects.create(name="Other")
+        ItemQuestion.objects.create(
+            organization=other,
+            question_id="999",
+            text="Only other",
+            status="UNANSWERED",
+        )
+        page = self.client.get("/meli/questions/")
+        self.assertNotContains(page, "Only other")
+        self.assertNotContains(page, 'class="badge"')
+        organization = self.client.get("/organization/")
+        self.assertNotContains(organization, 'class="badge"')
+        other_user = User.objects.create_user("bea", email="bea@example.com")
+        Membership.objects.create(
+            user=other_user,
+            organization=other,
+            role=Membership.Role.OWNER,
+        )
+        self.client.force_login(other_user)
+        theirs = self.client.get("/organization/")
+        self.assertEqual(theirs.context["open_question_count"], 1)
+        self.assertContains(theirs, 'class="badge">1<')
+
+    def test_user_without_an_organization_has_no_bell(self):
+        ItemQuestion.objects.create(
+            organization=self.organization,
+            question_id="13683341904",
+            text="Tienen stock?",
+            status="UNANSWERED",
+        )
+        outsider = User.objects.create_user("cleo", email="cleo@example.com")
+        self.client.force_login(outsider)
+        page = self.client.get("/organization/setup/")
+        self.assertEqual(page.context["open_question_count"], 0)
+        self.assertNotContains(page, 'class="alerts"')
+        self.assertNotContains(page, 'class="badge"')
+
+    def test_get_open_questions_loads_unanswered_from_mercadolibre(self):
+        calls = []
+
+        def open_response(request, timeout=15):
+            calls.append(request.full_url)
+            if "/questions/search" in request.full_url:
+                self.assertIn("status=UNANSWERED", request.full_url)
+                self.assertIn("seller_id=468424240", request.full_url)
+                self.assertIn("limit=50", request.full_url)
+                return TokenResponse({"questions": [QUESTION], "total": 1})
+            return question_api(request, timeout)
+
+        page = self.client.get("/meli/questions/")
+        self.assertContains(page, "Get open questions")
+        with patch("meli.client.urlopen", side_effect=open_response):
+            response = self.client.post("/meli/questions/sync/")
+        self.assertRedirects(response, "/meli/questions/?sync=ok")
+        self.assertEqual(sum("/questions/search" in url for url in calls), 1)
+        question = ItemQuestion.objects.get()
+        self.assertEqual(question.organization, self.organization)
+        self.assertEqual(question.text, "Tienen stock?")
+        self.assertEqual(question.item_title, "Perfume")
+        calls.clear()
+        with patch("meli.client.urlopen", side_effect=open_response):
+            shown = self.client.get("/meli/questions/?sync=ok")
+        self.assertEqual(calls, [])
+        self.assertContains(shown, "Tienen stock?")
+        self.assertContains(shown, "Open questions loaded.")
+        other_user = User.objects.create_user("bea", email="bea@example.com")
+        other = Organization.objects.create(name="Other")
+        Membership.objects.create(
+            user=other_user,
+            organization=other,
+            role=Membership.Role.OWNER,
+        )
+        self.client.force_login(other_user)
+        hidden = self.client.get("/meli/questions/")
+        self.assertNotContains(hidden, "Tienen stock?")
+
+    def test_sync_leaves_another_organizations_question_in_place(self):
+        other = Organization.objects.create(name="Other")
+        ItemQuestion.objects.create(
+            organization=other,
+            question_id="13683341904",
+            text="Theirs",
+            status="UNANSWERED",
+        )
+
+        def open_response(request, timeout=15):
+            if "/questions/search" in request.full_url:
+                return TokenResponse({"questions": [QUESTION]})
+            return question_api(request, timeout)
+
+        with patch("meli.client.urlopen", side_effect=open_response):
+            self.client.post("/meli/questions/sync/")
+        row = ItemQuestion.objects.get(question_id="13683341904")
+        self.assertEqual(row.organization, other)
+        self.assertEqual(row.text, "Theirs")
+        page = self.client.get("/meli/questions/")
+        self.assertNotContains(page, "Theirs")
+        self.assertNotContains(page, "Tienen stock?")
+
+    def test_sync_failure_stores_nothing(self):
+        with patch("meli.client.urlopen", side_effect=URLError("down")):
+            response = self.client.post("/meli/questions/sync/")
+        self.assertRedirects(response, "/meli/questions/?sync=failed")
+        self.assertEqual(ItemQuestion.objects.count(), 0)
+        page = self.client.get("/meli/questions/?sync=failed")
+        self.assertContains(page, "Open questions could not be loaded.")

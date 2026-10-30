@@ -62,6 +62,20 @@ def fetch_user_profile(access_token):
     return _api_request(access_token, "https://api.mercadolibre.com/users/me")
 
 
+def fetch_unanswered_questions(access_token, seller_id):
+    query = urlencode(
+        {
+            "seller_id": seller_id,
+            "status": "UNANSWERED",
+            "limit": 50,
+        }
+    )
+    return _api_request(
+        access_token,
+        f"https://api.mercadolibre.com/questions/search?{query}",
+    )
+
+
 def fetch_question(access_token, question_id):
     question = quote(str(question_id), safe="")
     return _api_request(

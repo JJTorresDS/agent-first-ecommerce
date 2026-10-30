@@ -17,6 +17,7 @@ from meli.views import (
     mercadolibre_disconnect,
     mercadolibre_question_reply,
     mercadolibre_questions,
+    mercadolibre_questions_sync,
     mercadolibre_settings,
     mercadolibre_token,
     mercadolibre_webhook,
@@ -43,6 +44,11 @@ urlpatterns = [
     path("health/", health, name="health"),
     path("meli/", mercadolibre_settings, name="mercadolibre_settings"),
     path("meli/questions/", mercadolibre_questions, name="mercadolibre_questions"),
+    path(
+        "meli/questions/sync/",
+        mercadolibre_questions_sync,
+        name="mercadolibre_questions_sync",
+    ),
     path(
         "meli/questions/<str:question_id>/reply/",
         mercadolibre_question_reply,

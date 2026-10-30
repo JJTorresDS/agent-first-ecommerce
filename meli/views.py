@@ -23,6 +23,7 @@ from .client import (
     exchange_code,
     fetch_item,
     fetch_question,
+    fetch_unanswered_questions,
     fetch_user_profile,
     post_answer,
 )
@@ -420,6 +421,47 @@ def mercadolibre_token(request):
     )
 
 
+def _item_for_sync(token, item_id, existing, cache):
+    if existing is not None and existing.item_id == item_id and existing.item_title:
+        return {"title": existing.item_title, "permalink": existing.item_permalink}
+    if item_id in cache:
+        return cache[item_id]
+    try:
+        item = fetch_item(token, item_id)
+    except (OSError, ValueError):
+        item = {}
+    cache[item_id] = item
+    return item
+
+
+def _sync_open_questions(organization):
+    account = _account_for(organization)
+    if account is None:
+        raise ValueError("Mercado Libre is not connected.")
+    token = account.fresh_access_token()
+    payload = fetch_unanswered_questions(token, account.meli_user_id)
+    questions = payload.get("questions")
+    if not isinstance(questions, list):
+        raise ValueError("Mercado Libre response had no questions.")
+    seller_id = str(account.meli_user_id)
+    items = {}
+    for raw in questions:
+        if not isinstance(raw, dict):
+            continue
+        question_id = str(raw.get("id") or "")
+        if not question_id:
+            continue
+        seller = str(raw.get("seller_id") or "")
+        if seller and seller != seller_id:
+            continue
+        existing = ItemQuestion.objects.filter(question_id=question_id).first()
+        if existing is not None and existing.organization_id != organization.id:
+            continue
+        item_id = str(raw.get("item_id") or "")
+        item = _item_for_sync(token, item_id, existing, items) if item_id else {}
+        _upsert_question(organization, raw, item)
+
+
 def _questions_redirect(question_id, failed=False):
     url = f"{reverse('mercadolibre_questions')}?question={question_id}"
     if failed:
@@ -449,8 +491,25 @@ def mercadolibre_questions(request):
             "questions": questions,
             "selected": selected,
             "reply_error": request.GET.get("reply") == "failed",
+            "can_sync": _account_for(organization) is not None,
+            "sync_error": request.GET.get("sync") == "failed",
+            "sync_ok": request.GET.get("sync") == "ok",
         },
     )
+
+
+@login_required
+@require_POST
+def mercadolibre_questions_sync(request):
+    membership = membership_for(request.user)
+    if membership is None:
+        return redirect("organization_setup")
+    url = reverse("mercadolibre_questions")
+    try:
+        _sync_open_questions(membership.organization)
+    except (OSError, ValueError, InvalidToken):
+        return redirect(f"{url}?sync=failed")
+    return redirect(f"{url}?sync=ok")
 
 
 @login_required

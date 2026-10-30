@@ -1,4 +1,4 @@
 <nav class="tabs" aria-label="Mercado Libre">
   <a class="tab{% if active_tab == 'settings' %} active{% endif %}" href="{% url 'mercadolibre_settings' %}">Settings</a>
-  <a class="tab{% if active_tab == 'questions' %} active{% endif %}" href="{% url 'mercadolibre_questions' %}">Questions</a>
+  <a class="tab{% if active_tab == 'questions' %} active{% endif %}" href="{% url 'mercadolibre_questions' %}">Questions{% if open_question_count %}<span class="badge">{{ open_question_count }}</span>{% endif %}</a>
 </nav>
