@@ -110,6 +110,11 @@ def email_from_account(user):
     return user.email or ""
 
 
+class DocumentType(models.TextChoices):
+    RECEIPT = "receipt", "Receipt"
+    INVOICE = "invoice", "Invoice"
+
+
 class CashflowMovement(TenantModel):
     id = models.CharField(
         primary_key=True,
@@ -136,6 +141,11 @@ class CashflowMovement(TenantModel):
         max_length=128,
         blank=True,
         help_text="Invoice or ticket id from the document, when one is present.",
+    )
+    document_type = models.CharField(
+        max_length=16,
+        choices=DocumentType.choices,
+        blank=True,
     )
     white = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)

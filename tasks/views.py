@@ -90,6 +90,7 @@ def cashflow_csv(request):
             "Description",
             "White",
             "Receipt",
+            "Document type",
             "Document",
         ]
     )
@@ -105,6 +106,7 @@ def cashflow_csv(request):
                 movement.description,
                 "Yes" if movement.white else "No",
                 movement.receipt_id,
+                movement.document_type,
                 movement.source_file_url(),
             ]
         )

@@ -34,7 +34,9 @@ class CashflowMovementAdmin(admin.ModelAdmin):
         "uploader_email",
         "white",
         "sub_category",
+        "document_type",
     )
+    list_filter = ("document_type",)
     search_fields = (
         "uploader_email",
         "category",

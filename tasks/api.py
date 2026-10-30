@@ -174,6 +174,7 @@ _MOVEMENT_TEXT = (
     "description",
     "source_file_id",
     "receipt_id",
+    "document_type",
 )
 
 
@@ -190,6 +191,7 @@ class CashflowMovementIn(Schema):
     description: str = ""
     source_file_id: str = ""
     receipt_id: Optional[str] = None
+    document_type: str = ""
     white: bool = False
 
 
@@ -206,6 +208,7 @@ class CashflowMovementPatch(Schema):
     description: str | None = None
     source_file_id: str | None = None
     receipt_id: str | None = None
+    document_type: str | None = None
     white: bool | None = None
 
 
@@ -227,6 +230,7 @@ class CashflowMovementOut(Schema):
     description: str
     source_file_id: str
     receipt_id: str
+    document_type: str
     white: bool
     created_at: datetime
     updated_at: datetime

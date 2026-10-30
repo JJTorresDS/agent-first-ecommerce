@@ -229,6 +229,7 @@ class CashflowMovementTests(TestCase):
         )
         movement.clean_fields()
         self.assertEqual(movement.receipt_id, "")
+        self.assertEqual(movement.document_type, "")
         self.assertEqual(movement.transaction_date, date(2026, 10, 7))
         self.assertEqual(movement.amount, Decimal("-58000.00"))
         self.assertEqual(movement.exchange_rate_at_purchase, Decimal("1560.9700"))
@@ -307,6 +308,7 @@ class CashflowApiTests(TestCase):
         self.assertTrue(body["id"])
         self.assertEqual(body["source_file_id"], SOURCE_FILE_ID)
         self.assertEqual(body["receipt_id"], "")
+        self.assertEqual(body["document_type"], "")
         self.assertEqual(body["amount"], "-58000.00")
         self.assertIsNone(body["sub_category"])
         self.assertEqual(body["organization"], self.org_id)
@@ -318,6 +320,7 @@ class CashflowApiTests(TestCase):
                 amount="-100.00",
                 sub_category="insumos",
                 receipt_id="FAC-1042",
+                document_type="invoice",
             ),
             headers=self.auth,
         )
@@ -326,7 +329,17 @@ class CashflowApiTests(TestCase):
         self.assertEqual(updated.json()["amount"], "-100.00")
         self.assertEqual(updated.json()["sub_category"], "insumos")
         self.assertEqual(updated.json()["receipt_id"], "FAC-1042")
+        self.assertEqual(updated.json()["document_type"], "invoice")
         self.assertEqual(CashflowMovement.objects.count(), 1)
+
+    def test_document_type_must_be_receipt_or_invoice(self):
+        response = self.client.put(
+            self.url,
+            json=cashflow_payload(organization=self.org_id, document_type="other"),
+            headers=self.auth,
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(CashflowMovement.objects.count(), 0)
 
     def test_create_without_an_organization_is_rejected(self):
         response = self.client.post(
@@ -475,11 +488,13 @@ class CashflowPageTests(TestCase):
         row = CashflowMovement.objects.get(description="Compra SD")
         row.source_file_id = "abc_123"
         row.receipt_id = "FAC-1042"
+        row.document_type = "invoice"
         row.save()
         document = "https://drive.google.com/file/d/abc_123/view"
         page = self.client.get("/cashflow/")
         self.assertContains(page, document)
         self.assertContains(page, "FAC-1042")
+        self.assertContains(page, "Invoice")
 
         exported = self.client.get("/cashflow/export.csv")
         self.assertEqual(exported["Content-Type"], "text/csv")
@@ -489,7 +504,9 @@ class CashflowPageTests(TestCase):
         self.assertIn("Sale", body)
         self.assertIn("Subcategory", body)
         self.assertIn("Receipt", body)
+        self.assertIn("Document type", body)
         self.assertIn("FAC-1042", body)
+        self.assertIn("invoice", body)
         self.assertIn(document, body)
 
         compra = self.client.get("/cashflow/export.csv", {"category": "compra"})
