@@ -10,7 +10,12 @@ from django.test import Client, TestCase, override_settings
 from django.utils import timezone
 
 from accounts.models import Membership, Organization
-from meli.models import MercadoLibreAccount, MercadoLibreNotification, SellerProfile
+from meli.models import (
+    ItemQuestion,
+    MercadoLibreAccount,
+    MercadoLibreNotification,
+    SellerProfile,
+)
 from meli.tokens import encrypt_secret
 
 User = get_user_model()
@@ -85,6 +90,7 @@ class MercadoLibreWebhookTests(TestCase):
         self.assertEqual(row.resource, "/orders/2195160686")
         self.assertEqual(row.user_id, "468424240")
         self.assertEqual(row.organization, organization)
+        self.assertEqual(ItemQuestion.objects.count(), 0)
         self.assertEqual(row.payload["topic"], "orders_v2")
         self.assertIsNotNone(row.sent_at)
         self.assertIsNotNone(row.received_at)
@@ -386,3 +392,133 @@ def mercadolibre_responses(profile):
         return TokenResponse(TOKEN)
 
     return open_response
+
+
+QUESTION = {
+    "id": 13683341904,
+    "text": "Tienen stock?",
+    "status": "UNANSWERED",
+    "item_id": "MLA1",
+    "date_created": "2026-10-30T13:00:00.000-03:00",
+    "from": {"id": 99},
+    "answer": None,
+}
+ITEM = {
+    "id": "MLA1",
+    "title": "Perfume",
+    "permalink": "https://articulo.mercadolibre.com.ar/MLA1",
+}
+ANSWERED = {
+    **QUESTION,
+    "status": "ANSWERED",
+    "answer": {
+        "text": "Si hay",
+        "date_created": "2026-10-30T14:00:00.000-03:00",
+    },
+}
+
+
+def question_api(request, timeout=15):
+    url = request.full_url
+    if url.endswith("/answers"):
+        return TokenResponse({"text": "Si hay"})
+    if "/items/" in url:
+        return TokenResponse(ITEM)
+    if "/questions/" in url:
+        return TokenResponse(QUESTION)
+    raise AssertionError(url)
+
+
+@override_settings(
+    MELI_WEBHOOK_SECRET=WEBHOOK_SECRET,
+    MELI_CLIENT_ID=str(SAMPLE["application_id"]),
+)
+class ItemQuestionTests(TestCase):
+    def setUp(self):
+        self.organization = connect_seller()
+        self.user = User.objects.create_user("ada", email="ada@example.com")
+        Membership.objects.create(
+            user=self.user,
+            organization=self.organization,
+            role=Membership.Role.OWNER,
+        )
+        self.client.force_login(self.user)
+        account = MercadoLibreAccount.objects.get(organization=self.organization)
+        account.access_token = encrypt_secret("access-1")
+        account.refresh_token = encrypt_secret("refresh-1")
+        account.save(update_fields=["access_token", "refresh_token", "updated_at"])
+
+    def test_questions_notification_is_shown_in_the_chat(self):
+        body = json.dumps(
+            {
+                **SAMPLE,
+                "_id": "question-note",
+                "topic": "questions",
+                "resource": "/questions/13683341904",
+            }
+        )
+        with patch("meli.client.urlopen", side_effect=question_api):
+            response = self.client.post(
+                WEBHOOK_URL,
+                data=body,
+                content_type="application/json",
+            )
+        self.assertEqual(response.status_code, 200)
+        question = ItemQuestion.objects.get()
+        self.assertEqual(question.organization, self.organization)
+        self.assertEqual(question.text, "Tienen stock?")
+        self.assertEqual(question.item_title, "Perfume")
+        page = self.client.get("/meli/questions/")
+        self.assertContains(page, "Tienen stock?")
+        self.assertContains(page, "Perfume")
+
+    def test_reply_is_posted_to_mercadolibre(self):
+        ItemQuestion.objects.create(
+            organization=self.organization,
+            question_id="13683341904",
+            item_id="MLA1",
+            item_title="Perfume",
+            text="Tienen stock?",
+            status="UNANSWERED",
+        )
+        calls = []
+
+        def open_response(request, timeout=15):
+            calls.append(request.full_url)
+            if "/questions/" in request.full_url:
+                return TokenResponse(ANSWERED)
+            return question_api(request, timeout)
+
+        with patch("meli.client.urlopen", side_effect=open_response):
+            response = self.client.post(
+                "/meli/questions/13683341904/reply/",
+                {"text": "Si hay"},
+            )
+        self.assertTrue(any(url.endswith("/answers") for url in calls))
+        self.assertRedirects(
+            response,
+            "/meli/questions/?question=13683341904",
+        )
+        self.assertEqual(ItemQuestion.objects.get().answer_text, "Si hay")
+        page = self.client.get("/meli/questions/?question=13683341904")
+        self.assertContains(page, "Si hay")
+        self.assertNotContains(page, "Write a reply")
+
+    def test_another_organization_does_not_see_the_question(self):
+        ItemQuestion.objects.create(
+            organization=self.organization,
+            question_id="13683341904",
+            text="Tienen stock?",
+            status="UNANSWERED",
+        )
+        other_user = User.objects.create_user("bea", email="bea@example.com")
+        other = Organization.objects.create(name="Other")
+        Membership.objects.create(
+            user=other_user,
+            organization=other,
+            role=Membership.Role.OWNER,
+        )
+        self.client.force_login(other_user)
+        page = self.client.get("/meli/questions/")
+        self.assertNotContains(page, "Tienen stock?")
+        self.assertContains(page, "No questions yet.")

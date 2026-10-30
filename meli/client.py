@@ -1,6 +1,6 @@
 import json
 from datetime import timedelta
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 from django.conf import settings
@@ -41,19 +41,46 @@ def exchange_code(code, redirect_uri):
     )
 
 
-def fetch_user_profile(access_token):
-    request = Request(
-        "https://api.mercadolibre.com/users/me",
-        headers={
-            "Accept": "application/json",
-            "Authorization": f"Bearer {access_token}",
-        },
-    )
+def _api_request(access_token, url, payload=None):
+    headers = {
+        "Accept": "application/json",
+        "Authorization": f"Bearer {access_token}",
+    }
+    body = None
+    if payload is not None:
+        body = json.dumps(payload).encode()
+        headers["Content-Type"] = "application/json"
+    request = Request(url, data=body, headers=headers)
     with urlopen(request, timeout=15) as response:
-        payload = json.loads(response.read().decode())
-    if not isinstance(payload, dict):
-        raise ValueError("Mercado Libre profile was not an object.")
-    return payload
+        parsed = json.loads(response.read().decode() or "null")
+    if not isinstance(parsed, dict):
+        raise ValueError("Mercado Libre response was not an object.")
+    return parsed
+
+
+def fetch_user_profile(access_token):
+    return _api_request(access_token, "https://api.mercadolibre.com/users/me")
+
+
+def fetch_question(access_token, question_id):
+    question = quote(str(question_id), safe="")
+    return _api_request(
+        access_token,
+        f"https://api.mercadolibre.com/questions/{question}",
+    )
+
+
+def fetch_item(access_token, item_id):
+    item = quote(str(item_id), safe="")
+    return _api_request(access_token, f"https://api.mercadolibre.com/items/{item}")
+
+
+def post_answer(access_token, question_id, text):
+    return _api_request(
+        access_token,
+        "https://api.mercadolibre.com/answers",
+        {"question_id": int(question_id), "text": text},
+    )
 
 
 def refresh_access_token(refresh_token):

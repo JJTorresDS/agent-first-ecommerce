@@ -156,6 +156,55 @@ class SellerProfile(models.Model):
         self.deleted_at = None
 
 
+class ItemQuestion(models.Model):
+    """A presales question asked on one of the organization's items."""
+
+    organization = models.ForeignKey(
+        "accounts.Organization",
+        on_delete=models.CASCADE,
+        related_name="item_questions",
+    )
+    question_id = models.CharField(max_length=32, unique=True)
+    item_id = models.CharField(max_length=32, blank=True)
+    item_title = models.CharField(max_length=200, blank=True)
+    item_permalink = models.CharField(max_length=512, blank=True)
+    text = models.TextField(blank=True)
+    status = models.CharField(max_length=32, blank=True)
+    from_user_id = models.CharField(max_length=64, blank=True)
+    answer_text = models.TextField(blank=True)
+    asked_at = models.DateTimeField(null=True, blank=True)
+    answered_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "item_question"
+        ordering = ["-asked_at", "-created_at"]
+
+    def __str__(self):
+        return self.question_id
+
+    def can_reply(self):
+        return self.status.upper() == "UNANSWERED" and not self.answer_text
+
+    def item_url(self):
+        if self.item_permalink.startswith(("http://", "https://")):
+            return self.item_permalink
+        return ""
+
+    def asked_label(self):
+        return _buenos_aires_label(self.asked_at)
+
+    def answered_label(self):
+        return _buenos_aires_label(self.answered_at)
+
+
+def _buenos_aires_label(value):
+    if value is None:
+        return ""
+    return value.astimezone(BUENOS_AIRES).strftime("%Y-%m-%d %H:%M")
+
+
 def _text(value, limit):
     if value is None:
         return ""

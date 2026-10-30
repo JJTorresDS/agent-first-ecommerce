@@ -56,6 +56,20 @@
     button.primary, a.primary { background: #111; color: #fff; border: 0; border-radius: 6px; padding: 0.45rem 0.9rem; text-decoration: none; }
     button.danger { background: #e23b2f; color: #fff; border: 0; border-radius: 6px; padding: 0.45rem 0.8rem; }
     .error { color: #a32020; }
+    .chat { display: flex; gap: 1rem; align-items: stretch; min-height: 28rem; }
+    .chat-list, .chat-thread { border: 1px solid #e6e6e6; border-radius: 12px; background: #fff; }
+    .chat-list { width: 18rem; flex: none; overflow: auto; }
+    .chat-list a { display: block; padding: 0.75rem 0.9rem; border-bottom: 1px solid #eee; text-decoration: none; }
+    .chat-list a.active, .chat-list a:hover { background: #f6f5f2; }
+    .chat-list strong, .chat-list span { display: block; }
+    .chat-list span { color: #555; font-size: 0.85rem; margin-top: 0.2rem; }
+    .chat-thread { flex: 1; min-width: 0; padding: 1.25rem; display: flex; flex-direction: column; gap: 0.75rem; }
+    .chat-thread h1 { font-size: 1.15rem; margin: 0; }
+    .bubble { max-width: 36rem; padding: 0.7rem 0.85rem; border-radius: 12px; }
+    .bubble.buyer { align-self: flex-start; background: #f4f4f4; }
+    .bubble.seller { align-self: flex-end; background: #111; color: #fff; }
+    .bubble time { display: block; margin-top: 0.35rem; font-size: 0.75rem; opacity: 0.7; }
+    .composer textarea { width: 100%; min-height: 5rem; font: inherit; padding: 0.6rem; }
     .tabs { display: flex; gap: 0.35rem; margin-bottom: 1rem; }
     .tab { padding: 0.35rem 0.75rem; border-radius: 8px; text-decoration: none; color: #555; }
     .tab.active { background: #111; color: #fff; }
@@ -235,7 +249,7 @@
       {% if organization %}
         <div class="nav-section">
           <p class="nav-label">Integrations</p>
-          <a class="nav-link{% if url_name == 'mercadolibre_settings' or url_name == 'mercadolibre_token' %} active{% endif %}" title="Mercado Libre" href="{% url 'mercadolibre_settings' %}">
+          <a class="nav-link{% if url_name == 'mercadolibre_settings' or url_name == 'mercadolibre_token' or url_name == 'mercadolibre_questions' or url_name == 'mercadolibre_question_reply' %} active{% endif %}" title="Mercado Libre" href="{% url 'mercadolibre_settings' %}">
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 2.5v3M10 2.5v3M4.5 5.5h7v3.2a3.5 3.5 0 0 1-7 0zM8 11.7V14"/></svg>
             <span class="nav-text">Mercado Libre</span>
           </a>

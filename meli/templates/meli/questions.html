@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}Questions{% endblock %}
+
+{% block content %}
+  {% include "meli/_tabs.html" %}
+  <div class="chat">
+    <aside class="chat-list">
+      {% for question in questions %}
+        <a class="{% if selected.question_id == question.question_id %}active{% endif %}" href="{% url 'mercadolibre_questions' %}?question={{ question.question_id }}">
+          <strong>{{ question.item_title|default:question.item_id }}</strong>
+          <span>{{ question.text|truncatechars:80 }}</span>
+        </a>
+      {% empty %}
+        <p class="muted" style="padding: 0.9rem;">No questions yet.</p>
+      {% endfor %}
+    </aside>
+    <section class="chat-thread">
+      {% if selected %}
+        <h1>
+          {% if selected.item_url %}
+            <a href="{{ selected.item_url }}" target="_blank" rel="noopener">{{ selected.item_title|default:selected.item_id }}</a>
+          {% else %}
+            {{ selected.item_title|default:selected.item_id }}
+          {% endif %}
+        </h1>
+        <div class="bubble buyer">
+          {{ selected.text }}
+          {% if selected.asked_label %}<time>{{ selected.asked_label }}</time>{% endif %}
+        </div>
+        {% if selected.answer_text %}
+          <div class="bubble seller">
+            {{ selected.answer_text }}
+            {% if selected.answered_label %}<time>{{ selected.answered_label }}</time>{% endif %}
+          </div>
+        {% endif %}
+        {% if reply_error %}
+          <p class="error">The answer could not be posted.</p>
+        {% endif %}
+        {% if selected.can_reply %}
+          <form class="composer" method="post" action="{% url 'mercadolibre_question_reply' selected.question_id %}">
+            {% csrf_token %}
+            <textarea name="text" maxlength="2000" required placeholder="Write a reply"></textarea>
+            <div class="actions">
+              <button class="primary" type="submit">Send</button>
+            </div>
+          </form>
+        {% endif %}
+      {% else %}
+        <p class="muted">No questions yet.</p>
+      {% endif %}
+    </section>
+  </div>
+{% endblock %}

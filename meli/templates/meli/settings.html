@@ -3,9 +3,7 @@
 {% block title %}Mercado Libre{% endblock %}
 
 {% block content %}
-  <nav class="tabs" aria-label="Mercado Libre">
-    <a class="tab active" href="{% url 'mercadolibre_settings' %}">Settings</a>
-  </nav>
+  {% include "meli/_tabs.html" %}
   <section class="card">
     <h1>Mercado Libre</h1>
     {% if meli_error %}

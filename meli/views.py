@@ -1,5 +1,6 @@
 import hmac
 import json
+import re
 from datetime import datetime, timezone as dt_timezone
 from urllib.parse import urlencode
 
@@ -8,7 +9,7 @@ from django.contrib.auth.decorators import login_required
 from django.core import signing
 from django.db import IntegrityError, transaction
 from django.http import HttpResponse, HttpResponseForbidden, HttpResponseNotFound
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
@@ -18,8 +19,19 @@ from accounts.models import Membership, membership_for
 
 from cryptography.fernet import InvalidToken
 
-from .client import exchange_code, fetch_user_profile
-from .models import MercadoLibreAccount, MercadoLibreNotification, SellerProfile
+from .client import (
+    exchange_code,
+    fetch_item,
+    fetch_question,
+    fetch_user_profile,
+    post_answer,
+)
+from .models import (
+    ItemQuestion,
+    MercadoLibreAccount,
+    MercadoLibreNotification,
+    SellerProfile,
+)
 
 
 def _clip(value, limit):
@@ -113,6 +125,10 @@ def mercadolibre_webhook(request, secret):
         parsed = None
     if isinstance(parsed, dict):
         _store_object(parsed)
+        try:
+            _load_question_from_notification(parsed)
+        except (OSError, ValueError, InvalidToken):
+            pass
     return HttpResponse("ok")
 
 
@@ -151,6 +167,91 @@ _MELI_ERRORS = {
     "failed": "Mercado Libre could not be connected.",
     "profile": "The seller profile could not be loaded.",
 }
+
+
+def _question_id(resource):
+    match = re.fullmatch(r"/questions/(\d+)", str(resource or ""))
+    return match.group(1) if match else ""
+
+
+def _upsert_question(organization, payload, item):
+    question_id = str(payload.get("id") or "")
+    if not question_id:
+        return None
+    answer = payload.get("answer") if isinstance(payload.get("answer"), dict) else {}
+    buyer = payload.get("from") if isinstance(payload.get("from"), dict) else {}
+    permalink = str(item.get("permalink") or "")
+    if not permalink.startswith(("http://", "https://")):
+        permalink = ""
+    defaults = {
+        "organization": organization,
+        "item_id": _clip(payload.get("item_id"), 32),
+        "item_title": _clip(item.get("title"), 200),
+        "item_permalink": _clip(permalink, 512),
+        "text": str(payload.get("text") or ""),
+        "status": _clip(payload.get("status"), 32),
+        "from_user_id": _clip(buyer.get("id"), 64),
+        "answer_text": str(answer.get("text") or ""),
+        "asked_at": _when(payload.get("date_created")),
+        "answered_at": _when(answer.get("date_created")) if answer else None,
+    }
+    question, _created = ItemQuestion.objects.update_or_create(
+        question_id=question_id,
+        defaults=defaults,
+    )
+    return question
+
+
+def _load_question(organization, question_id):
+    account = _account_for(organization)
+    if account is None:
+        return None
+    token = account.fresh_access_token()
+    payload = fetch_question(token, question_id)
+    item = {}
+    item_id = str(payload.get("item_id") or "")
+    if item_id:
+        try:
+            item = fetch_item(token, item_id)
+        except (OSError, ValueError):
+            item = {}
+    return _upsert_question(organization, payload, item)
+
+
+def _load_question_from_notification(parsed):
+    if _clip(parsed.get("topic"), 64) != "questions":
+        return
+    question_id = _question_id(parsed.get("resource"))
+    if not question_id:
+        return
+    organization = _organization_for(_clip(parsed.get("user_id"), 64))
+    if organization is None:
+        return
+    _load_question(organization, question_id)
+
+
+def _backfill_questions(organization):
+    if _account_for(organization) is None:
+        return
+    known = set(
+        ItemQuestion.objects.filter(organization=organization).values_list(
+            "question_id",
+            flat=True,
+        )
+    )
+    notifications = MercadoLibreNotification.objects.filter(
+        organization=organization,
+        topic="questions",
+    )
+    for notification in notifications:
+        question_id = _question_id(notification.resource)
+        if not question_id or question_id in known:
+            continue
+        try:
+            _load_question(organization, question_id)
+        except (OSError, ValueError, InvalidToken):
+            continue
+        known.add(question_id)
 
 
 def _seller_snippet(access_token):
@@ -194,6 +295,7 @@ def _settings_context(membership, meli_error="", access_token=""):
         "meli_error": meli_error,
         "access_token": access_token,
         "snippet": _seller_snippet(access_token) if access_token else "",
+        "active_tab": "settings",
     }
 
 
@@ -316,3 +418,70 @@ def mercadolibre_token(request):
         "meli/settings.html",
         _settings_context(membership, access_token=token),
     )
+
+
+def _questions_redirect(question_id, failed=False):
+    url = f"{reverse('mercadolibre_questions')}?question={question_id}"
+    if failed:
+        return redirect(f"{url}&reply=failed")
+    return redirect(url)
+
+
+@login_required
+def mercadolibre_questions(request):
+    membership = membership_for(request.user)
+    if membership is None:
+        return redirect("organization_setup")
+    organization = membership.organization
+    _backfill_questions(organization)
+    questions = ItemQuestion.objects.filter(organization=organization)
+    selected_id = request.GET.get("question")
+    selected = None
+    if selected_id:
+        selected = questions.filter(question_id=selected_id).first()
+    if selected is None:
+        selected = questions.first()
+    return render(
+        request,
+        "meli/questions.html",
+        {
+            "active_tab": "questions",
+            "questions": questions,
+            "selected": selected,
+            "reply_error": request.GET.get("reply") == "failed",
+        },
+    )
+
+
+@login_required
+@require_POST
+def mercadolibre_question_reply(request, question_id):
+    membership = membership_for(request.user)
+    if membership is None:
+        return redirect("organization_setup")
+    question = get_object_or_404(
+        ItemQuestion,
+        organization=membership.organization,
+        question_id=question_id,
+    )
+    text = (request.POST.get("text") or "").strip()
+    if not question.can_reply():
+        return _questions_redirect(question.question_id)
+    if not text or len(text) > 2000:
+        return _questions_redirect(question.question_id, failed=True)
+    account = _account_for(membership.organization)
+    if account is None:
+        return _questions_redirect(question.question_id, failed=True)
+    try:
+        post_answer(account.fresh_access_token(), question.question_id, text)
+    except (OSError, ValueError, InvalidToken):
+        return _questions_redirect(question.question_id, failed=True)
+    question.answer_text = text
+    question.status = "ANSWERED"
+    question.answered_at = timezone.now()
+    question.save(update_fields=["answer_text", "status", "answered_at", "updated_at"])
+    try:
+        _load_question(membership.organization, question.question_id)
+    except (OSError, ValueError, InvalidToken):
+        pass
+    return _questions_redirect(question.question_id)
