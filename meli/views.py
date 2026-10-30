@@ -19,6 +19,7 @@ from accounts.models import Membership, membership_for
 
 from cryptography.fernet import InvalidToken
 
+from .alerts import unanswered_count
 from .client import (
     exchange_code,
     fetch_item,
@@ -297,6 +298,7 @@ def _settings_context(membership, meli_error="", access_token=""):
         "access_token": access_token,
         "snippet": _seller_snippet(access_token) if access_token else "",
         "active_tab": "settings",
+        "open_question_count": unanswered_count(membership.organization),
     }
 
 
@@ -494,6 +496,7 @@ def mercadolibre_questions(request):
             "can_sync": _account_for(organization) is not None,
             "sync_error": request.GET.get("sync") == "failed",
             "sync_ok": request.GET.get("sync") == "ok",
+            "open_question_count": unanswered_count(organization),
         },
     )
 

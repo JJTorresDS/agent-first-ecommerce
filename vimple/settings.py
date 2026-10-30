@@ -93,6 +93,7 @@ INSTALLED_APPS = [
     "allauth.socialaccount.providers.google",
     "accounts",
     "tasks",
+    "notifications",
     "meli",
 ]
 

@@ -537,7 +537,9 @@ class ItemQuestionTests(TestCase):
         organization = self.client.get("/organization/")
         self.assertContains(organization, 'class="alerts"')
         self.assertContains(organization, 'class="badge">1<')
-        self.assertContains(organization, 'aria-label="Open questions, 1"')
+        self.assertContains(organization, 'aria-label="Alerts, 1"')
+        self.assertContains(organization, "You have 1 unanswered presales question")
+        self.assertContains(organization, 'href="/meli/questions/"')
 
     def test_answered_question_has_no_count(self):
         ItemQuestion.objects.create(
@@ -575,7 +577,8 @@ class ItemQuestionTests(TestCase):
         )
         self.client.force_login(other_user)
         theirs = self.client.get("/organization/")
-        self.assertEqual(theirs.context["open_question_count"], 1)
+        self.assertEqual(theirs.context["alert_count"], 1)
+        self.assertContains(theirs, "You have 1 unanswered presales question")
         self.assertContains(theirs, 'class="badge">1<')
 
     def test_user_without_an_organization_has_no_bell(self):
@@ -588,7 +591,7 @@ class ItemQuestionTests(TestCase):
         outsider = User.objects.create_user("cleo", email="cleo@example.com")
         self.client.force_login(outsider)
         page = self.client.get("/organization/setup/")
-        self.assertEqual(page.context["open_question_count"], 0)
+        self.assertEqual(page.context["alert_count"], 0)
         self.assertNotContains(page, 'class="alerts"')
         self.assertNotContains(page, 'class="badge"')
 
