@@ -15,6 +15,8 @@ from meli.views import (
     mercadolibre_callback,
     mercadolibre_connect,
     mercadolibre_disconnect,
+    mercadolibre_settings,
+    mercadolibre_token,
     mercadolibre_webhook,
 )
 from tasks.api import api
@@ -37,6 +39,8 @@ urlpatterns = [
     path("access/<int:user_id>/", set_app_access, name="set_app_access"),
     path("accounts/", include("allauth.urls")),
     path("health/", health, name="health"),
+    path("meli/", mercadolibre_settings, name="mercadolibre_settings"),
+    path("meli/token/", mercadolibre_token, name="mercadolibre_token"),
     path("meli/connect/", mercadolibre_connect, name="mercadolibre_connect"),
     path("meli/callback/", mercadolibre_callback, name="mercadolibre_callback"),
     path("meli/disconnect/", mercadolibre_disconnect, name="mercadolibre_disconnect"),

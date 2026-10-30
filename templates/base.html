@@ -56,6 +56,10 @@
     button.primary, a.primary { background: #111; color: #fff; border: 0; border-radius: 6px; padding: 0.45rem 0.9rem; text-decoration: none; }
     button.danger { background: #e23b2f; color: #fff; border: 0; border-radius: 6px; padding: 0.45rem 0.8rem; }
     .error { color: #a32020; }
+    .tabs { display: flex; gap: 0.35rem; margin-bottom: 1rem; }
+    .tab { padding: 0.35rem 0.75rem; border-radius: 8px; text-decoration: none; color: #555; }
+    .tab.active { background: #111; color: #fff; }
+    pre.snippet { white-space: pre; overflow-x: auto; background: #f4f4f4; padding: 0.75rem; border-radius: 8px; margin: 0.5rem 0 0; }
     .pager { display: flex; gap: 1rem; align-items: center; margin-top: 1rem; }
 
     .shell { display: flex; height: 100vh; overflow: hidden; }
@@ -225,6 +229,15 @@
           <a class="nav-link{% if url_name == 'cashflow' %} active{% endif %}" title="Cashflow" href="{% url 'cashflow' %}">
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2 12.5h12M4 10V7M8 10V4M12 10V5.5"/></svg>
             <span class="nav-text">Cashflow</span>
+          </a>
+        </div>
+      {% endif %}
+      {% if organization %}
+        <div class="nav-section">
+          <p class="nav-label">Integrations</p>
+          <a class="nav-link{% if url_name == 'mercadolibre_settings' or url_name == 'mercadolibre_token' %} active{% endif %}" title="Mercado Libre" href="{% url 'mercadolibre_settings' %}">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 2.5v3M10 2.5v3M4.5 5.5h7v3.2a3.5 3.5 0 0 1-7 0zM8 11.7V14"/></svg>
+            <span class="nav-text">Mercado Libre</span>
           </a>
         </div>
       {% endif %}

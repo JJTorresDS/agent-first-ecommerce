@@ -4,8 +4,6 @@ from django.http import HttpResponseBadRequest, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
-from meli.models import MercadoLibreAccount
-
 from .models import (
     AppAccess,
     Membership,
@@ -124,25 +122,12 @@ def organization_setup(request):
 
 def _organization_context(membership, error=""):
     organization = membership.organization
-    try:
-        meli_account = organization.mercadolibre_account
-    except MercadoLibreAccount.DoesNotExist:
-        meli_account = None
     return {
         "organization": organization,
         "member_count": organization.memberships.count(),
         "error": error,
         "is_owner": membership.role == Membership.Role.OWNER,
-        "meli_account": meli_account,
-        "meli_error": "",
     }
-
-
-_MELI_ERRORS = {
-    "denied": "Mercado Libre did not authorize the connection.",
-    "taken": "That Mercado Libre account is already connected to another organization.",
-    "failed": "Mercado Libre could not be connected.",
-}
 
 
 @login_required
@@ -162,9 +147,11 @@ def organization_settings(request):
             organization.name = name
             organization.save(update_fields=["name", "updated_at"])
             return redirect("organization")
-    context = _organization_context(membership, error)
-    context["meli_error"] = _MELI_ERRORS.get(request.GET.get("meli"), "")
-    return render(request, "accounts/organization.html", context)
+    return render(
+        request,
+        "accounts/organization.html",
+        _organization_context(membership, error),
+    )
 
 
 @login_required

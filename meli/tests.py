@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from accounts.models import Membership, Organization
 from meli.models import MercadoLibreAccount, MercadoLibreNotification
+from meli.tokens import encrypt_secret
 
 User = get_user_model()
 
@@ -141,9 +142,10 @@ class MercadoLibreConnectTests(TestCase):
         self.client.force_login(operator)
         response = self.client.get("/meli/connect/")
         self.assertEqual(response.status_code, 403)
-        page = self.client.get("/organization/")
+        page = self.client.get("/meli/")
         self.assertContains(page, "Not connected")
         self.assertNotContains(page, 'href="/meli/connect/"')
+        self.assertNotContains(page, "Create access token")
 
     def test_owner_is_sent_to_mercadolibre(self):
         response = self.client.get("/meli/connect/")
@@ -154,8 +156,14 @@ class MercadoLibreConnectTests(TestCase):
         )
         self.assertIn("client_id=app-id", location)
         self.assertIn("state=", location)
-        page = self.client.get("/organization/")
+        page = self.client.get("/meli/")
         self.assertContains(page, "Connect")
+        self.assertContains(page, 'nav-label">Integrations')
+        self.assertContains(page, "Mercado Libre")
+        self.assertContains(page, "Settings")
+        organization = self.client.get("/organization/")
+        self.assertNotContains(organization, "Not connected")
+        self.assertNotContains(organization, "Create access token")
 
     def _state(self):
         response = self.client.get("/meli/connect/")
@@ -168,7 +176,7 @@ class MercadoLibreConnectTests(TestCase):
                 "/meli/callback/",
                 {"code": "auth-code", "state": state},
             )
-        self.assertRedirects(response, "/organization/")
+        self.assertRedirects(response, "/meli/")
         account = MercadoLibreAccount.objects.get()
         self.assertEqual(account.organization, self.organization)
         self.assertEqual(account.meli_user_id, "468424240")
@@ -190,9 +198,67 @@ class MercadoLibreConnectTests(TestCase):
                 "/meli/callback/",
                 {"code": "auth-code", "state": other_state},
             )
-        self.assertRedirects(taken, "/organization/?meli=taken")
+        self.assertRedirects(taken, "/meli/?meli=taken")
         self.assertEqual(MercadoLibreAccount.objects.count(), 1)
         self.assertEqual(
             MercadoLibreAccount.objects.get().organization,
             self.organization,
         )
+
+    def test_valid_token_is_shown_without_calling_mercadolibre(self):
+        MercadoLibreAccount.objects.create(
+            organization=self.organization,
+            meli_user_id="468424240",
+            access_token=encrypt_secret("current-access"),
+            refresh_token=encrypt_secret("refresh-1"),
+            expires_at=timezone.now() + timedelta(hours=1),
+        )
+        with patch("meli.client.urlopen") as urlopen:
+            response = self.client.post("/meli/token/")
+        urlopen.assert_not_called()
+        self.assertContains(response, "current-access")
+        self.assertContains(response, "https://api.mercadolibre.com/users/me")
+        self.assertContains(response, "Authorization: Bearer")
+
+    def test_expired_token_is_refreshed(self):
+        MercadoLibreAccount.objects.create(
+            organization=self.organization,
+            meli_user_id="468424240",
+            access_token=encrypt_secret("old-access"),
+            refresh_token=encrypt_secret("refresh-1"),
+            expires_at=timezone.now() - timedelta(minutes=1),
+        )
+        refreshed = {
+            "access_token": "new-access",
+            "refresh_token": "new-refresh",
+            "expires_in": 21600,
+            "user_id": 468424240,
+        }
+        with patch("meli.client.urlopen", return_value=TokenResponse(refreshed)):
+            response = self.client.post("/meli/token/")
+        self.assertContains(response, "new-access")
+        self.assertContains(response, "https://api.mercadolibre.com/users/me")
+        self.assertNotContains(response, "old-access")
+        self.assertEqual(
+            MercadoLibreAccount.objects.get().fresh_access_token(),
+            "new-access",
+        )
+
+    def test_non_owner_cannot_reveal_a_token(self):
+        MercadoLibreAccount.objects.create(
+            organization=self.organization,
+            meli_user_id="468424240",
+            access_token=encrypt_secret("current-access"),
+            refresh_token=encrypt_secret("refresh-1"),
+            expires_at=timezone.now() + timedelta(hours=1),
+        )
+        operator = User.objects.create_user("bea", email="bea@example.com")
+        Membership.objects.create(
+            user=operator,
+            organization=self.organization,
+            role=Membership.Role.OPERATOR,
+        )
+        self.client.force_login(operator)
+        response = self.client.post("/meli/token/")
+        self.assertEqual(response.status_code, 403)
+        self.assertNotContains(response, "current-access", status_code=403)

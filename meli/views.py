@@ -7,13 +7,15 @@ from django.contrib.auth.decorators import login_required
 from django.core import signing
 from django.db import IntegrityError, transaction
 from django.http import HttpResponse, HttpResponseForbidden
-from django.shortcuts import redirect
+from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from accounts.models import Membership, membership_for
+
+from cryptography.fernet import InvalidToken
 
 from .client import exchange_code
 from .models import MercadoLibreAccount, MercadoLibreNotification
@@ -115,13 +117,60 @@ def _callback_uri(request):
     return request.build_absolute_uri(reverse("mercadolibre_callback"))
 
 
+def _settings_redirect(code=""):
+    url = reverse("mercadolibre_settings")
+    if code:
+        return redirect(f"{url}?meli={code}")
+    return redirect(url)
+
+
+def _account_for(organization):
+    try:
+        return organization.mercadolibre_account
+    except MercadoLibreAccount.DoesNotExist:
+        return None
+
+
+_MELI_ERRORS = {
+    "denied": "Mercado Libre did not authorize the connection.",
+    "taken": "That Mercado Libre account is already connected to another organization.",
+    "failed": "Mercado Libre could not be connected.",
+}
+
+
+def _seller_snippet(access_token):
+    return (
+        "curl https://api.mercadolibre.com/users/me \\\n"
+        f'  -H "Authorization: Bearer {access_token}"'
+    )
+
+
+def _settings_context(membership, meli_error="", access_token=""):
+    return {
+        "is_owner": membership.role == Membership.Role.OWNER,
+        "meli_account": _account_for(membership.organization),
+        "meli_error": meli_error,
+        "access_token": access_token,
+        "snippet": _seller_snippet(access_token) if access_token else "",
+    }
+
+
+@login_required
+def mercadolibre_settings(request):
+    membership = membership_for(request.user)
+    if membership is None:
+        return redirect("organization_setup")
+    error = _MELI_ERRORS.get(request.GET.get("meli"), "")
+    return render(request, "meli/settings.html", _settings_context(membership, error))
+
+
 @login_required
 def mercadolibre_connect(request):
     organization, denied = _owner_organization(request)
     if denied:
         return denied
     if not settings.MELI_CLIENT_ID:
-        return redirect(f"{reverse('organization')}?meli=failed")
+        return _settings_redirect("failed")
     state = signing.dumps({"organization": str(organization.id)})
     query = urlencode(
         {
@@ -140,7 +189,7 @@ def mercadolibre_callback(request):
     if denied:
         return denied
     if request.GET.get("error") or not request.GET.get("code"):
-        return redirect(f"{reverse('organization')}?meli=denied")
+        return _settings_redirect("denied")
     try:
         payload = signing.loads(request.GET.get("state", ""), max_age=600)
     except signing.BadSignature:
@@ -150,15 +199,15 @@ def mercadolibre_callback(request):
     try:
         token = exchange_code(request.GET["code"], _callback_uri(request))
     except (OSError, ValueError):
-        return redirect(f"{reverse('organization')}?meli=failed")
+        return _settings_redirect("failed")
     user_id = str(token.get("user_id") or "")
     if not user_id:
-        return redirect(f"{reverse('organization')}?meli=failed")
+        return _settings_redirect("failed")
     taken = MercadoLibreAccount.objects.filter(meli_user_id=user_id).exclude(
         organization=organization
     )
     if taken.exists():
-        return redirect(f"{reverse('organization')}?meli=taken")
+        return _settings_redirect("taken")
     account = MercadoLibreAccount.objects.filter(organization=organization).first()
     if account is None:
         account = MercadoLibreAccount(organization=organization, meli_user_id=user_id)
@@ -167,12 +216,12 @@ def mercadolibre_callback(request):
     try:
         account.save()
     except IntegrityError:
-        return redirect(f"{reverse('organization')}?meli=taken")
+        return _settings_redirect("taken")
     MercadoLibreNotification.objects.filter(
         user_id=user_id,
         organization__isnull=True,
     ).update(organization=organization)
-    return redirect("organization")
+    return _settings_redirect()
 
 
 @login_required
@@ -182,4 +231,32 @@ def mercadolibre_disconnect(request):
     if denied:
         return denied
     MercadoLibreAccount.objects.filter(organization=organization).delete()
-    return redirect("organization")
+    return _settings_redirect()
+
+
+@login_required
+@require_POST
+def mercadolibre_token(request):
+    organization, denied = _owner_organization(request)
+    if denied:
+        return denied
+    membership = membership_for(request.user)
+    account = _account_for(organization)
+    if account is None:
+        return _settings_redirect()
+    try:
+        token = account.fresh_access_token()
+    except (OSError, ValueError, InvalidToken):
+        return render(
+            request,
+            "meli/settings.html",
+            _settings_context(
+                membership,
+                "The access token could not be refreshed.",
+            ),
+        )
+    return render(
+        request,
+        "meli/settings.html",
+        _settings_context(membership, access_token=token),
+    )

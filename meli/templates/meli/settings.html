@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block title %}Mercado Libre{% endblock %}
+
+{% block content %}
+  <nav class="tabs" aria-label="Mercado Libre">
+    <a class="tab active" href="{% url 'mercadolibre_settings' %}">Settings</a>
+  </nav>
+  <section class="card">
+    <h1>Mercado Libre</h1>
+    {% if meli_error %}
+      <p class="error">{{ meli_error }}</p>
+    {% endif %}
+    {% if meli_account %}
+      <p>Connected as {{ meli_account.meli_user_id }}</p>
+      {% if is_owner %}
+        <form method="post" action="{% url 'mercadolibre_token' %}">
+          {% csrf_token %}
+          <div class="actions">
+            <button class="primary" type="submit">Create access token</button>
+          </div>
+        </form>
+        <form method="post" action="{% url 'mercadolibre_disconnect' %}">
+          {% csrf_token %}
+          <div class="actions">
+            <button class="danger" type="submit">Disconnect</button>
+          </div>
+        </form>
+      {% endif %}
+    {% else %}
+      <p>Not connected</p>
+      {% if is_owner %}
+        <div class="actions">
+          <a class="primary" href="{% url 'mercadolibre_connect' %}">Connect</a>
+        </div>
+      {% endif %}
+    {% endif %}
+  </section>
+  {% if access_token %}
+    <section class="card">
+      <h1>Access token</h1>
+      <pre class="snippet">{{ access_token }}</pre>
+      <p class="muted">GET https://api.mercadolibre.com/users/me</p>
+      <pre class="snippet" id="meli-snippet">{{ snippet }}</pre>
+      <div class="actions">
+        <button type="button" id="copy-meli-snippet">Copy</button>
+      </div>
+    </section>
+    <script>
+      document.getElementById("copy-meli-snippet").addEventListener("click", function () {
+        navigator.clipboard.writeText(document.getElementById("meli-snippet").textContent);
+      });
+    </script>
+  {% endif %}
+{% endblock %}
