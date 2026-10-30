@@ -1,5 +1,6 @@
 import json
 from datetime import timedelta
+from zoneinfo import ZoneInfo
 from unittest.mock import patch
 from urllib.error import URLError
 from urllib.parse import parse_qs, urlparse
@@ -87,6 +88,10 @@ class MercadoLibreWebhookTests(TestCase):
         self.assertEqual(row.payload["topic"], "orders_v2")
         self.assertIsNotNone(row.sent_at)
         self.assertIsNotNone(row.received_at)
+        self.assertEqual(
+            row.buenos_aires_at.astimezone(ZoneInfo("America/Argentina/Buenos_Aires")).utcoffset(),
+            timedelta(hours=-3),
+        )
 
     def test_repeated_id_is_stored_once(self):
         connect_seller()

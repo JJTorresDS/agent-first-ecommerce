@@ -1,7 +1,10 @@
 from datetime import timedelta
+from zoneinfo import ZoneInfo
 
 from django.db import models
 from django.utils import timezone
+
+BUENOS_AIRES = ZoneInfo("America/Argentina/Buenos_Aires")
 
 from .tokens import decrypt_secret, encrypt_secret
 
@@ -70,6 +73,7 @@ class MercadoLibreNotification(models.Model):
     attempts = models.PositiveIntegerField(null=True, blank=True)
     sent_at = models.DateTimeField(null=True, blank=True)
     received_at = models.DateTimeField(null=True, blank=True)
+    buenos_aires_at = models.DateTimeField(null=True, blank=True)
     payload = models.JSONField()
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -86,6 +90,14 @@ class MercadoLibreNotification(models.Model):
 
     def __str__(self):
         return f"{self.topic} {self.resource}".strip()
+
+    def save(self, *args, **kwargs):
+        update_fields = kwargs.get("update_fields")
+        if self.buenos_aires_at is None:
+            self.buenos_aires_at = timezone.now().astimezone(BUENOS_AIRES)
+            if update_fields is not None:
+                kwargs["update_fields"] = {"buenos_aires_at", *update_fields}
+        super().save(*args, **kwargs)
 
 
 class SellerProfile(models.Model):
