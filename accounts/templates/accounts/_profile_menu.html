@@ -14,6 +14,18 @@
         <span class="muted">{{ organization.name }}</span>
       </a>
     {% endif %}
+    {% if user_memberships %}
+      {% for item in user_memberships %}
+        <form method="post" action="{% url 'organization_switch' %}">
+          {% csrf_token %}
+          <input type="hidden" name="organization" value="{{ item.organization_id }}">
+          <button class="profile-menu-link" type="submit">
+            <span>{{ item.organization.name }}</span>
+            {% if organization and item.organization_id == organization.id %}<span class="muted">Active</span>{% endif %}
+          </button>
+        </form>
+      {% endfor %}
+    {% endif %}
     <a class="profile-menu-link" href="{% url 'profile' %}">Profile</a>
     <form method="post" action="{% url 'account_logout' %}">
       {% csrf_token %}

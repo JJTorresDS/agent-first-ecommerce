@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block title %}Members{% endblock %}
+
+{% block content %}
+  <section class="card">
+    <h1>Members</h1>
+    <p>A person can sign in only with a Gmail account. Vimple does not check the address or send an invitation. Tell them to sign up.</p>
+    {% if error %}
+      <p class="error">{{ error }}</p>
+    {% endif %}
+    <form method="post" action="{% url 'members' %}">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="add">
+      <label class="muted" for="emails">Email</label>
+      <textarea id="emails" name="emails" rows="3" placeholder="ada@gmail.com, bea@gmail.com"></textarea>
+      <label class="muted" for="role">Role</label>
+      <select id="role" name="role">
+        <option value="contributor">Contributor</option>
+        <option value="admin">Admin</option>
+      </select>
+      <div class="actions">
+        <button class="primary" type="submit">Add members</button>
+      </div>
+    </form>
+  </section>
+  <section class="card">
+    <table class="members">
+      <thead>
+        <tr>
+          <th>Person</th>
+          <th>Role</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for member in members %}
+          <tr>
+            <td>{{ member.user.email }}</td>
+            <td>
+              {% if member.role == owner_role %}
+                Owner
+              {% else %}
+                <form method="post" action="{% url 'members' %}">
+                  {% csrf_token %}
+                  <input type="hidden" name="action" value="role">
+                  <input type="hidden" name="membership" value="{{ member.pk }}">
+                  <select name="role">
+                    <option value="admin"{% if member.role == "admin" %} selected{% endif %}>Admin</option>
+                    <option value="contributor"{% if member.role == "contributor" %} selected{% endif %}>Contributor</option>
+                  </select>
+                  <button type="submit">Save</button>
+                </form>
+              {% endif %}
+            </td>
+            <td>
+              {% if member.role != owner_role %}
+                <form method="post" action="{% url 'members' %}">
+                  {% csrf_token %}
+                  <input type="hidden" name="action" value="remove">
+                  <input type="hidden" name="membership" value="{{ member.pk }}">
+                  <button type="submit">Remove</button>
+                </form>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        {% for invitation in invitations %}
+          <tr>
+            <td>{{ invitation.email }}</td>
+            <td>{{ invitation.get_role_display }}</td>
+            <td>Waiting for signup</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+{% endblock %}

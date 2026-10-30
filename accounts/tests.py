@@ -4,14 +4,17 @@ from types import SimpleNamespace
 
 from allauth.account.signals import user_signed_up
 from django.contrib.auth import get_user_model
+from django.core import mail
 from django.test import SimpleTestCase, TestCase
 
 from accounts.models import (
     AppAccess,
+    Invitation,
     Membership,
     Organization,
     Profile,
     assign_default_organization,
+    create_owned_organization,
 )
 from tasks.models import CashflowMovement, Task
 
@@ -261,4 +264,167 @@ class OrganizationTests(TestCase):
         self.assertNotEqual(
             Membership.objects.get(user=user).organization_id,
             organization_id,
+        )
+
+
+def _google_signup(user):
+    sociallogin = SimpleNamespace(
+        account=SimpleNamespace(provider="google", extra_data={})
+    )
+    user_signed_up.send(
+        sender=user.__class__,
+        request=None,
+        user=user,
+        sociallogin=sociallogin,
+    )
+
+
+class MemberTests(TestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user("ada", email="ada@example.com")
+        self.organization = create_owned_organization(self.owner, "SCENT")
+        self.client.force_login(self.owner)
+
+    def test_owner_adds_a_waiting_contributor(self):
+        response = self.client.post(
+            "/organization/members/",
+            {"action": "add", "emails": "ada@gmail.com", "role": "contributor"},
+        )
+        self.assertRedirects(response, "/organization/members/")
+        invitation = Invitation.objects.get()
+        self.assertEqual(invitation.organization, self.organization)
+        self.assertEqual(invitation.email, "ada@gmail.com")
+        self.assertEqual(invitation.role, Membership.Role.CONTRIBUTOR)
+        self.assertEqual(mail.outbox, [])
+        page = self.client.get("/organization/members/")
+        self.assertContains(page, "Gmail account")
+        self.assertContains(page, "does not check the address")
+        self.assertContains(page, "ada@gmail.com")
+        self.assertContains(page, "Waiting for signup")
+        self.assertContains(page, "Members")
+
+    def test_an_address_that_is_not_gmail_is_stored(self):
+        self.client.post(
+            "/organization/members/",
+            {"action": "add", "emails": "Ada@Company.com", "role": "admin"},
+        )
+        invitation = Invitation.objects.get()
+        self.assertEqual(invitation.email, "Ada@Company.com")
+        self.assertEqual(invitation.role, Membership.Role.ADMIN)
+
+    def test_an_existing_user_joins_this_organization_only(self):
+        bea = User.objects.create_user("bea", email="bea@example.com")
+        home = assign_default_organization(bea)
+        self.client.post(
+            "/organization/members/",
+            {"action": "add", "emails": "bea@example.com", "role": "contributor"},
+        )
+        self.assertEqual(Invitation.objects.count(), 0)
+        membership = Membership.objects.get(user=bea, organization=self.organization)
+        self.assertEqual(membership.role, Membership.Role.CONTRIBUTOR)
+        self.assertTrue(Membership.objects.filter(user=bea, organization=home).exists())
+        self.assertEqual(mail.outbox, [])
+
+    def test_signup_with_an_invitation_joins_that_organization(self):
+        Invitation.objects.create(
+            organization=self.organization,
+            email="bea@gmail.com",
+            role=Membership.Role.CONTRIBUTOR,
+        )
+        bea = User.objects.create_user("bea", email="bea@gmail.com")
+        _google_signup(bea)
+        membership = Membership.objects.get(user=bea)
+        self.assertEqual(membership.organization, self.organization)
+        self.assertEqual(membership.role, Membership.Role.CONTRIBUTOR)
+        self.assertEqual(Invitation.objects.count(), 0)
+        self.client.force_login(bea)
+        setup = self.client.get("/organization/setup/")
+        self.assertRedirects(setup, "/organization/")
+
+    def test_signup_without_an_invitation_still_creates_an_organization(self):
+        bea = User.objects.create_user("bea", email="bea@gmail.com")
+        _google_signup(bea)
+        self.assertFalse(Membership.objects.filter(user=bea).exists())
+        self.client.force_login(bea)
+        response = self.client.post("/organization/setup/", {"name": "Bea Co"})
+        self.assertRedirects(response, "/organization/")
+        membership = Membership.objects.get(user=bea)
+        self.assertEqual(membership.organization.name, "Bea Co")
+        self.assertEqual(membership.role, Membership.Role.OWNER)
+
+    def test_a_contributor_cannot_add_a_member(self):
+        bea = User.objects.create_user("bea", email="bea@example.com")
+        Membership.objects.create(
+            user=bea,
+            organization=self.organization,
+            role=Membership.Role.CONTRIBUTOR,
+        )
+        self.client.force_login(bea)
+        response = self.client.post(
+            "/organization/members/",
+            {"action": "add", "emails": "cara@gmail.com", "role": "contributor"},
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(Invitation.objects.count(), 0)
+        self.assertNotContains(
+            self.client.get("/organization/"),
+            'title="Members"',
+            status_code=200,
+        )
+
+    def test_switching_organization_hides_the_other_members(self):
+        Invitation.objects.create(
+            organization=self.organization,
+            email="secret@gmail.com",
+            role=Membership.Role.CONTRIBUTOR,
+        )
+        other = Organization.objects.create(name="Other")
+        Membership.objects.create(
+            user=self.owner,
+            organization=other,
+            role=Membership.Role.OWNER,
+        )
+        switched = self.client.post(
+            "/organization/switch/",
+            {"organization": str(other.id)},
+        )
+        self.assertRedirects(switched, "/organization/")
+        page = self.client.get("/organization/members/")
+        self.assertContains(page, "Other")
+        self.assertNotContains(page, "secret@gmail.com")
+        self.client.post("/organization/switch/", {"organization": str(self.organization.id)})
+        home = self.client.get("/organization/members/")
+        self.assertContains(home, "secret@gmail.com")
+        self.assertContains(home, "SCENT")
+
+    def test_django_admin_adds_a_member_the_same_way(self):
+        admin = User.objects.create_superuser("admin", "admin@example.com", "secret")
+        self.client.force_login(admin)
+        waiting = self.client.post(
+            "/admin/accounts/invitation/add/",
+            {
+                "organization": str(self.organization.id),
+                "email": "cara@gmail.com",
+                "role": "contributor",
+            },
+        )
+        self.assertEqual(waiting.status_code, 302)
+        self.assertEqual(
+            Invitation.objects.get().email,
+            "cara@gmail.com",
+        )
+        person = User.objects.create_user("bea", email="bea@gmail.com")
+        linked = self.client.post(
+            "/admin/accounts/invitation/add/",
+            {
+                "organization": str(self.organization.id),
+                "email": "bea@gmail.com",
+                "role": "admin",
+            },
+        )
+        self.assertRedirects(linked, "/admin/accounts/membership/")
+        membership = Membership.objects.get(user=person, organization=self.organization)
+        self.assertEqual(membership.role, Membership.Role.ADMIN)
+        self.assertFalse(
+            Invitation.objects.filter(email__iexact="bea@gmail.com").exists()
         )

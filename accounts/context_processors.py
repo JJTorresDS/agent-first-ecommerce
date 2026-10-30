@@ -1,6 +1,13 @@
 from notifications.registry import groups_for
 
-from .models import AppAccess, Profile, membership_for, user_can_open
+from .models import (
+    AppAccess,
+    Membership,
+    Profile,
+    can_manage_members,
+    membership_for,
+    user_can_open,
+)
 
 
 def nav(request):
@@ -9,9 +16,18 @@ def nav(request):
     name, initials, avatar = _identity(user)
     organization = membership.organization if membership else None
     groups = groups_for(organization)
+    user_memberships = []
+    if getattr(user, "is_authenticated", False):
+        user_memberships = list(
+            Membership.objects.filter(user=user)
+            .select_related("organization")
+            .order_by("organization__name", "pk")
+        )
     return {
         "can_open_cashflow": user_can_open(user, AppAccess.App.CASHFLOW),
         "can_grant_access": bool(getattr(user, "is_superuser", False)),
+        "can_manage_members": can_manage_members(membership),
+        "user_memberships": user_memberships,
         "organization": organization,
         "alert_groups": groups,
         "alert_count": sum(group["count"] for group in groups),

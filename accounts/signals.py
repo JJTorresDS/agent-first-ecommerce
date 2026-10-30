@@ -1,7 +1,7 @@
 from allauth.account.signals import user_signed_up
 from django.dispatch import receiver
 
-from .models import Membership, Profile
+from .models import Profile, claim_invitations, membership_for
 
 
 def _is_google_signup(sociallogin):
@@ -12,9 +12,8 @@ def _is_google_signup(sociallogin):
 def copy_google_profile(request, user, sociallogin=None, **kwargs):
     if not _is_google_signup(sociallogin):
         return
-    membership = (
-        Membership.objects.filter(user=user).select_related("organization").first()
-    )
+    claim_invitations(user)
+    membership = membership_for(user)
     if membership is None:
         return
     extra = sociallogin.account.extra_data or {}

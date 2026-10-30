@@ -1,7 +1,9 @@
 import uuid
 
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.db import models
+from django.db.models.functions import Lower
 
 
 class Organization(models.Model):
@@ -28,6 +30,8 @@ class TenantModel(models.Model):
 class Membership(models.Model):
     class Role(models.TextChoices):
         OWNER = "owner", "Owner"
+        ADMIN = "admin", "Admin"
+        CONTRIBUTOR = "contributor", "Contributor"
         OPERATOR = "operator", "Operator"
         VIEWER = "viewer", "Viewer"
 
@@ -53,6 +57,125 @@ class Membership(models.Model):
 
     def __str__(self):
         return f"{self.user} {self.organization}"
+
+
+class Invitation(models.Model):
+    """An email invited to an organization before that person has signed up."""
+
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="invitations",
+    )
+    email = models.CharField(max_length=254)
+    role = models.CharField(
+        max_length=32,
+        choices=[
+            (Membership.Role.ADMIN, Membership.Role.ADMIN.label),
+            (Membership.Role.CONTRIBUTOR, Membership.Role.CONTRIBUTOR.label),
+        ],
+        default=Membership.Role.CONTRIBUTOR,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "invitation"
+        constraints = [
+            models.UniqueConstraint(
+                Lower("email"),
+                "organization",
+                name="uniq_invitation_org_email",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.email} {self.organization}"
+
+
+_MEMBER_ROLES = {Membership.Role.ADMIN, Membership.Role.CONTRIBUTOR}
+
+
+def can_manage_members(membership):
+    return membership is not None and membership.role in {
+        Membership.Role.OWNER,
+        Membership.Role.ADMIN,
+    }
+
+
+def add_organization_member(organization, email, role):
+    """Attach an existing user, or store an invitation for a later signup."""
+    email = (email or "").strip()
+    if not email:
+        raise ValueError("Enter an email address.")
+    if role not in _MEMBER_ROLES:
+        raise ValueError("Choose admin or contributor.")
+    user = get_user_model().objects.filter(email__iexact=email).order_by("pk").first()
+    if user is not None:
+        membership = Membership.objects.filter(
+            user=user,
+            organization=organization,
+        ).first()
+        if membership is None:
+            membership = Membership.objects.create(
+                user=user,
+                organization=organization,
+                role=role,
+            )
+        elif membership.role != Membership.Role.OWNER:
+            membership.role = role
+            membership.save(update_fields=["role"])
+        Invitation.objects.filter(
+            organization=organization,
+            email__iexact=email,
+        ).delete()
+        return membership
+    invitation = Invitation.objects.filter(
+        organization=organization,
+        email__iexact=email,
+    ).first()
+    if invitation is None:
+        invitation = Invitation.objects.create(
+            organization=organization,
+            email=email,
+            role=role,
+        )
+    else:
+        invitation.role = role
+        invitation.save(update_fields=["role"])
+    return invitation
+
+
+def claim_invitations(user):
+    """Join every organization that invited this email and activate the first."""
+    email = (getattr(user, "email", "") or "").strip()
+    if not email:
+        return []
+    invitations = list(
+        Invitation.objects.filter(email__iexact=email)
+        .select_related("organization")
+        .order_by("pk")
+    )
+    if not invitations:
+        return []
+    memberships = []
+    for invitation in invitations:
+        membership = Membership.objects.filter(
+            user=user,
+            organization=invitation.organization,
+        ).first()
+        if membership is None:
+            membership = Membership.objects.create(
+                user=user,
+                organization=invitation.organization,
+                role=invitation.role,
+            )
+        elif membership.role != Membership.Role.OWNER:
+            membership.role = invitation.role
+            membership.save(update_fields=["role"])
+        memberships.append(membership)
+    Invitation.objects.filter(pk__in=[item.pk for item in invitations]).delete()
+    ensure_profile(user, memberships[0].organization)
+    return memberships
 
 
 class AppAccess(TenantModel):
@@ -97,12 +220,20 @@ class Profile(TenantModel):
 def membership_for(user):
     if not getattr(user, "is_authenticated", False):
         return None
-    return (
-        Membership.objects.select_related("organization")
-        .filter(user=user)
-        .order_by("pk")
-        .first()
-    )
+    memberships = Membership.objects.select_related("organization").filter(user=user)
+    profile = _profile_for(user)
+    if profile is not None and profile.organization_id:
+        chosen = memberships.filter(organization_id=profile.organization_id).first()
+        if chosen is not None:
+            return chosen
+    return memberships.order_by("pk").first()
+
+
+def _profile_for(user):
+    try:
+        return user.profile
+    except Profile.DoesNotExist:
+        return None
 
 
 def user_can_open(user, app):
