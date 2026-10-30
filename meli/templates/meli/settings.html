@@ -35,7 +35,7 @@
           {% endif %}
         </dl>
       {% endif %}
-      {% if is_owner %}
+      {% if can_connect %}
         <form method="post" action="{% url 'mercadolibre_token' %}">
           {% csrf_token %}
           <div class="actions">
@@ -51,7 +51,7 @@
       {% endif %}
     {% else %}
       <p>Not connected</p>
-      {% if is_owner %}
+      {% if can_connect %}
         <div class="actions">
           <a class="primary" href="{% url 'mercadolibre_connect' %}">Connect</a>
         </div>

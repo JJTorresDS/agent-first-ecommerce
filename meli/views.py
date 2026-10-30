@@ -15,7 +15,7 @@ from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
-from accounts.models import Membership, membership_for
+from accounts.models import can_connect_mercadolibre, membership_for
 
 from cryptography.fernet import InvalidToken
 
@@ -138,9 +138,9 @@ def _owner_organization(request):
     membership = membership_for(request.user)
     if membership is None:
         return None, redirect("organization_setup")
-    if membership.role != Membership.Role.OWNER:
+    if not can_connect_mercadolibre(membership):
         return None, HttpResponseForbidden(
-            "Only the owner can connect Mercado Libre."
+            "Only an owner or admin can connect Mercado Libre."
         )
     return membership.organization, None
 
@@ -291,7 +291,7 @@ def _load_seller_profile(account):
 
 def _settings_context(membership, meli_error="", access_token=""):
     return {
-        "is_owner": membership.role == Membership.Role.OWNER,
+        "can_connect": can_connect_mercadolibre(membership),
         "meli_account": _account_for(membership.organization),
         "seller_profile": _active_profile(membership.organization),
         "meli_error": meli_error,

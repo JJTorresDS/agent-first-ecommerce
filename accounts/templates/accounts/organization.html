@@ -30,6 +30,7 @@
       </div>
     </form>
   </section>
+  {% if is_owner %}
   <section class="card">
     <h1>Danger zone</h1>
     <p class="muted">Delete organization</p>
@@ -45,6 +46,7 @@
       </div>
     </form>
   </section>
+  {% endif %}
   <script>
     document.getElementById("copy-organization-id").addEventListener("click", function () {
       var field = document.getElementById("organization-id");

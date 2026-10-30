@@ -170,6 +170,39 @@ class MercadoLibreConnectTests(TestCase):
         )
         self.client.force_login(self.owner)
 
+    def test_admin_can_start_the_connection(self):
+        admin = User.objects.create_user("bea", email="bea@example.com")
+        Membership.objects.create(
+            user=admin,
+            organization=self.organization,
+            role=Membership.Role.ADMIN,
+        )
+        self.client.force_login(admin)
+        page = self.client.get("/meli/")
+        self.assertContains(page, 'href="/meli/connect/"')
+        response = self.client.get("/meli/connect/")
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(
+            response["Location"].startswith(
+                "https://auth.mercadolibre.com.ar/authorization?"
+            )
+        )
+
+    def test_contributor_cannot_start_the_connection(self):
+        contributor = User.objects.create_user("bea", email="bea@example.com")
+        Membership.objects.create(
+            user=contributor,
+            organization=self.organization,
+            role=Membership.Role.CONTRIBUTOR,
+        )
+        self.client.force_login(contributor)
+        response = self.client.get("/meli/connect/")
+        self.assertEqual(response.status_code, 403)
+        page = self.client.get("/meli/")
+        self.assertContains(page, "Not connected")
+        self.assertNotContains(page, 'href="/meli/connect/"')
+        self.assertNotContains(page, "Create access token")
+
     def test_non_owner_cannot_start_the_connection(self):
         operator = User.objects.create_user("bea", email="bea@example.com")
         Membership.objects.create(

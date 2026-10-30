@@ -102,6 +102,10 @@ def can_manage_members(membership):
     }
 
 
+def can_connect_mercadolibre(membership):
+    return can_manage_members(membership)
+
+
 def add_organization_member(organization, email, role):
     """Attach an existing user, or store an invitation for a later signup."""
     email = (email or "").strip()

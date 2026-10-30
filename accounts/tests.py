@@ -352,6 +352,30 @@ class MemberTests(TestCase):
         self.assertEqual(membership.organization.name, "Bea Co")
         self.assertEqual(membership.role, Membership.Role.OWNER)
 
+    def test_only_the_owner_can_delete_the_organization(self):
+        self.assertContains(self.client.get("/organization/"), "Delete organization")
+        admin = User.objects.create_user("bea", email="bea@example.com")
+        Membership.objects.create(
+            user=admin,
+            organization=self.organization,
+            role=Membership.Role.ADMIN,
+        )
+        contributor = User.objects.create_user("cara", email="cara@example.com")
+        Membership.objects.create(
+            user=contributor,
+            organization=self.organization,
+            role=Membership.Role.CONTRIBUTOR,
+        )
+        for person in (admin, contributor):
+            self.client.force_login(person)
+            page = self.client.get("/organization/")
+            self.assertNotContains(page, "Delete organization")
+            denied = self.client.post("/organization/delete/", {"confirm": "yes"})
+            self.assertEqual(denied.status_code, 403)
+            self.assertTrue(
+                Organization.objects.filter(pk=self.organization.id).exists()
+            )
+
     def test_a_contributor_cannot_add_a_member(self):
         bea = User.objects.create_user("bea", email="bea@example.com")
         Membership.objects.create(
