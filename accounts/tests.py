@@ -23,6 +23,19 @@ from tasks.models import CashflowMovement, Task
 User = get_user_model()
 
 
+class AdminLabelTests(SimpleTestCase):
+    def test_vimple_accounts_is_separate_from_allauth(self):
+        from django.apps import apps
+
+        config = apps.get_app_config("accounts")
+        self.assertEqual(config.label, "accounts")
+        self.assertEqual(config.verbose_name, "Vimple accounts")
+        self.assertNotEqual(
+            config.verbose_name,
+            apps.get_app_config("account").verbose_name,
+        )
+
+
 class AnonymousAccessTests(SimpleTestCase):
     def test_home_sends_visitors_to_google(self):
         response = self.client.get("/")
