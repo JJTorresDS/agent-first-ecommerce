@@ -672,6 +672,7 @@ name = "vimple"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "cryptography" },
     { name = "django" },
     { name = "django-allauth", extra = ["socialaccount"] },
     { name = "django-ninja" },
@@ -683,6 +684,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cryptography", specifier = "==50.0.2" },
     { name = "django", specifier = "==5.2.18" },
     { name = "django-allauth", extras = ["socialaccount"], specifier = "==65.21.0" },
     { name = "django-ninja", specifier = "==1.7.1" },

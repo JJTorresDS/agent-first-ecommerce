@@ -38,6 +38,13 @@ TASKS_API_TOKEN = os.environ.get("TASKS_API_TOKEN", "")
 
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+MELI_CLIENT_ID = os.environ.get("MELI_CLIENT_ID", "")
+MELI_CLIENT_SECRET = os.environ.get("MELI_CLIENT_SECRET", "")
+MELI_AUTH_URL = os.environ.get(
+    "MELI_AUTH_URL",
+    "https://auth.mercadolibre.com.ar/authorization",
+)
+MELI_TOKEN_URL = "https://api.mercadolibre.com/oauth/token"
 
 SITE_ID = 1
 

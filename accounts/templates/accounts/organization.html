@@ -31,6 +31,30 @@
     </form>
   </section>
   <section class="card">
+    <h1>Mercado Libre</h1>
+    {% if meli_error %}
+      <p class="error">{{ meli_error }}</p>
+    {% endif %}
+    {% if meli_account %}
+      <p>Connected as {{ meli_account.meli_user_id }}</p>
+      {% if is_owner %}
+        <form method="post" action="{% url 'mercadolibre_disconnect' %}">
+          {% csrf_token %}
+          <div class="actions">
+            <button class="danger" type="submit">Disconnect</button>
+          </div>
+        </form>
+      {% endif %}
+    {% else %}
+      <p>Not connected</p>
+      {% if is_owner %}
+        <div class="actions">
+          <a class="primary" href="{% url 'mercadolibre_connect' %}">Connect</a>
+        </div>
+      {% endif %}
+    {% endif %}
+  </section>
+  <section class="card">
     <h1>Danger zone</h1>
     <p class="muted">Delete organization</p>
     <p>Deleting this organization removes it and its memberships. The next organization you create gets a new id.</p>

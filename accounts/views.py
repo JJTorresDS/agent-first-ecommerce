@@ -4,6 +4,8 @@ from django.http import HttpResponseBadRequest, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
+from meli.models import MercadoLibreAccount
+
 from .models import (
     AppAccess,
     Membership,
@@ -120,6 +122,29 @@ def organization_setup(request):
     return render(request, "accounts/organization_setup.html", {"error": error})
 
 
+def _organization_context(membership, error=""):
+    organization = membership.organization
+    try:
+        meli_account = organization.mercadolibre_account
+    except MercadoLibreAccount.DoesNotExist:
+        meli_account = None
+    return {
+        "organization": organization,
+        "member_count": organization.memberships.count(),
+        "error": error,
+        "is_owner": membership.role == Membership.Role.OWNER,
+        "meli_account": meli_account,
+        "meli_error": "",
+    }
+
+
+_MELI_ERRORS = {
+    "denied": "Mercado Libre did not authorize the connection.",
+    "taken": "That Mercado Libre account is already connected to another organization.",
+    "failed": "Mercado Libre could not be connected.",
+}
+
+
 @login_required
 def organization_settings(request):
     membership = membership_for(request.user)
@@ -137,15 +162,9 @@ def organization_settings(request):
             organization.name = name
             organization.save(update_fields=["name", "updated_at"])
             return redirect("organization")
-    return render(
-        request,
-        "accounts/organization.html",
-        {
-            "organization": organization,
-            "member_count": organization.memberships.count(),
-            "error": error,
-        },
-    )
+    context = _organization_context(membership, error)
+    context["meli_error"] = _MELI_ERRORS.get(request.GET.get("meli"), "")
+    return render(request, "accounts/organization.html", context)
 
 
 @login_required
@@ -160,11 +179,10 @@ def organization_delete(request):
         return render(
             request,
             "accounts/organization.html",
-            {
-                "organization": membership.organization,
-                "member_count": membership.organization.memberships.count(),
-                "error": "Confirm the deletion to remove the organization.",
-            },
+            _organization_context(
+                membership,
+                "Confirm the deletion to remove the organization.",
+            ),
         )
     membership.organization.delete()
     return redirect("organization_setup")

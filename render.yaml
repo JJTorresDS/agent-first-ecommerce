@@ -27,3 +27,7 @@ services:
         sync: false
       - key: GOOGLE_CLIENT_SECRET
         sync: false
+      - key: MELI_CLIENT_ID
+        sync: false
+      - key: MELI_CLIENT_SECRET
+        sync: false
