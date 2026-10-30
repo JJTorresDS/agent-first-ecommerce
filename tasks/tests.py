@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
@@ -377,8 +377,15 @@ class CashflowPageTests(TestCase):
         self.assertContains(page, "htmx.org")
         self.assertContains(page, 'nav-label">Finances')
         self.assertContains(page, 'nav-label">Administration')
-        self.assertContains(page, 'nav-label">Account')
-        self.assertContains(page, 'class="nav-link active" href="/cashflow/"')
+        self.assertNotContains(page, 'nav-label">Account')
+        body = page.content.decode()
+        self.assertLess(body.index('nav-label">Administration'), body.index('nav-label">Finances'))
+        self.assertContains(page, 'class="nav-link active" title="Cashflow" href="/cashflow/"')
+        self.assertContains(page, 'aria-label="Collapse menu"')
+        self.assertContains(page, "vimple-sidebar")
+        self.assertContains(page, 'hx-get="/profile/menu/"')
+        self.assertContains(page, "Page 1 of 1")
+        self.assertNotContains(page, 'name="page"')
 
         by_category = self.client.get("/cashflow/", {"category": "compra"})
         self.assertContains(by_category, "Compra SD")
@@ -395,9 +402,39 @@ class CashflowPageTests(TestCase):
         partial = self.client.get("/cashflow/", HTTP_HX_REQUEST="true")
         self.assertContains(partial, "Compra SD")
         self.assertContains(partial, "Export CSV")
+        self.assertContains(partial, 'class="pager"')
         self.assertNotContains(partial, "<h1>")
         self.assertNotContains(partial, "Log out")
         self.assertNotContains(partial, "Finances")
+
+    def test_pages_keep_filters_and_csv_exports_every_row(self):
+        CashflowMovement.objects.filter(organization=self.organization).delete()
+        for index in range(26):
+            movement(
+                organization=self.organization,
+                transaction_date=date(2026, 1, 1) + timedelta(days=index),
+                category="venta" if index == 0 else "compra",
+                description=f"Movement {index:02d}",
+            )
+
+        first = self.client.get("/cashflow/")
+        self.assertContains(first, "Movement 25")
+        self.assertContains(first, "Page 1 of 2")
+        self.assertNotContains(first, "Movement 00")
+
+        second = self.client.get("/cashflow/", {"page": "2"})
+        self.assertContains(second, "Movement 00")
+        self.assertContains(second, "Previous")
+        self.assertNotContains(second, "Movement 25")
+
+        filtered = self.client.get("/cashflow/", {"page": "2", "category": "compra"})
+        self.assertContains(filtered, "Movement 25")
+        self.assertNotContains(filtered, "Movement 00")
+
+        exported = self.client.get("/cashflow/export.csv")
+        text = exported.content.decode()
+        self.assertIn("Movement 00", text)
+        self.assertIn("Movement 25", text)
 
     def test_export_csv_matches_the_filtered_table(self):
         row = CashflowMovement.objects.get(description="Compra SD")

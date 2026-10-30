@@ -1,0 +1,23 @@
+<div class="profile-menu" role="dialog" aria-label="Account">
+  <button
+    class="profile-backdrop"
+    type="button"
+    aria-label="Close"
+    hx-on:click="document.getElementById('profile-menu').replaceChildren()"
+  ></button>
+  <div class="profile-panel">
+    <p class="profile-menu-name">{{ nav_name }}</p>
+    <p class="profile-menu-email">{{ user.email }}</p>
+    {% if organization %}
+      <a class="profile-menu-link" href="{% url 'organization' %}">
+        <span>Organization</span>
+        <span class="muted">{{ organization.name }}</span>
+      </a>
+    {% endif %}
+    <a class="profile-menu-link" href="{% url 'profile' %}">Profile</a>
+    <form method="post" action="{% url 'account_logout' %}">
+      {% csrf_token %}
+      <button class="profile-menu-link" type="submit">Log out</button>
+    </form>
+  </div>
+</div>

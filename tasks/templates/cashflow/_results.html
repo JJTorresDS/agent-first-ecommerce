@@ -3,4 +3,25 @@
     <a href="{% url 'cashflow_csv' %}?category={{ category|urlencode }}&amp;currency={{ currency|urlencode }}&amp;transaction_date={{ transaction_date|urlencode }}">Export CSV</a>
   </p>
   {% include "cashflow/_table.html" %}
+  <nav class="pager" aria-label="Pages">
+    {% if page_obj.has_previous %}
+      <a
+        href="{% url 'cashflow' %}?page={{ page_obj.previous_page_number }}&amp;category={{ category|urlencode }}&amp;currency={{ currency|urlencode }}&amp;transaction_date={{ transaction_date|urlencode }}"
+        hx-get="{% url 'cashflow' %}?page={{ page_obj.previous_page_number }}&amp;category={{ category|urlencode }}&amp;currency={{ currency|urlencode }}&amp;transaction_date={{ transaction_date|urlencode }}"
+        hx-target="#cashflow-results"
+        hx-swap="outerHTML"
+        hx-push-url="true"
+      >Previous</a>
+    {% endif %}
+    <span>Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+    {% if page_obj.has_next %}
+      <a
+        href="{% url 'cashflow' %}?page={{ page_obj.next_page_number }}&amp;category={{ category|urlencode }}&amp;currency={{ currency|urlencode }}&amp;transaction_date={{ transaction_date|urlencode }}"
+        hx-get="{% url 'cashflow' %}?page={{ page_obj.next_page_number }}&amp;category={{ category|urlencode }}&amp;currency={{ currency|urlencode }}&amp;transaction_date={{ transaction_date|urlencode }}"
+        hx-target="#cashflow-results"
+        hx-swap="outerHTML"
+        hx-push-url="true"
+      >Next</a>
+    {% endif %}
+  </nav>
 </div>

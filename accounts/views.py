@@ -31,6 +31,11 @@ def profile(request):
     return render(request, "accounts/profile.html", {"profile": profile_row})
 
 
+@login_required
+def profile_menu(request):
+    return render(request, "accounts/_profile_menu.html")
+
+
 def _access_row(user):
     membership = membership_for(user)
     if membership is None:

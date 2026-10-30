@@ -8,6 +8,7 @@ from accounts.views import (
     organization_settings,
     organization_setup,
     profile,
+    profile_menu,
     set_app_access,
 )
 from tasks.api import api
@@ -20,6 +21,7 @@ admin.site.index_title = "Finances"
 urlpatterns = [
     path("", home, name="home"),
     path("profile/", profile, name="profile"),
+    path("profile/menu/", profile_menu, name="profile_menu"),
     path("organization/setup/", organization_setup, name="organization_setup"),
     path("organization/", organization_settings, name="organization"),
     path("organization/delete/", organization_delete, name="organization_delete"),

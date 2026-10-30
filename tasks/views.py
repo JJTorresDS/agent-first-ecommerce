@@ -1,6 +1,7 @@
 import csv
 from datetime import date
 
+from django.core.paginator import Paginator
 from django.http import HttpResponse
 from django.shortcuts import render
 
@@ -8,6 +9,8 @@ from accounts.access import require_app
 from accounts.models import AppAccess, membership_for
 
 from .models import CashflowMovement
+
+PAGE_SIZE = 25
 
 
 def health(request):
@@ -55,7 +58,8 @@ def _filtered_movements(request):
 @require_app(AppAccess.App.CASHFLOW)
 def cashflow_list(request):
     movements, filters = _filtered_movements(request)
-    context = {"movements": movements, **filters}
+    page = Paginator(movements, PAGE_SIZE).get_page(request.GET.get("page") or 1)
+    context = {"movements": page.object_list, "page_obj": page, **filters}
     template = (
         "cashflow/_results.html"
         if request.headers.get("HX-Request")

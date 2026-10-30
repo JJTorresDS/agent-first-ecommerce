@@ -82,9 +82,17 @@ class ProfileAccessTests(TestCase):
         self.assertContains(response, "Ada Lovelace")
         self.assertContains(response, "https://example.com/ada.jpg")
         self.assertNotContains(response, 'name="display_name"')
-        self.assertContains(response, 'nav-label">Account')
         self.assertContains(response, 'nav-label">Administration')
-        self.assertContains(response, 'class="nav-link active" href="/profile/"')
+        self.assertNotContains(response, 'nav-label">Account')
+        self.assertContains(response, 'hx-get="/profile/menu/"')
+        menu = self.client.get("/profile/menu/")
+        self.assertContains(menu, "Ada Lovelace")
+        self.assertContains(menu, "ada@example.com")
+        self.assertContains(menu, "Organization")
+        self.assertContains(menu, "Profile")
+        self.assertContains(menu, "default")
+        self.assertContains(menu, 'href="/profile/"')
+        self.assertContains(menu, "Log out")
 
     def test_google_signup_copies_name_and_picture(self):
         user = User.objects.create_user("ada", email="ada@example.com")
@@ -227,9 +235,9 @@ class OrganizationTests(TestCase):
         self.assertContains(page, str(organization_id))
         self.assertContains(page, "Active members")
         self.assertContains(page, 'nav-label">Administration')
-        self.assertContains(page, 'nav-label">Account')
-        self.assertContains(page, 'class="nav-link active" href="/organization/"')
-        self.assertNotContains(page, 'class="nav-link active" href="/profile/"')
+        self.assertNotContains(page, 'nav-label">Account')
+        self.assertContains(page, 'class="nav-link active" title="Organization" href="/organization/"')
+        self.assertNotContains(page, 'title="Profile"')
         self.assertContains(page, ">AE<")
 
     def test_profile_without_an_organization_goes_to_setup(self):

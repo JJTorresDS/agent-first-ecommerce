@@ -5,8 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Vimple{% endblock %}</title>
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  <script>
+    try {
+      if (localStorage.getItem("vimple-sidebar") === "collapsed") {
+        document.documentElement.classList.add("sidebar-collapsed");
+      }
+    } catch (error) {}
+  </script>
   <style>
-    body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 0; background: #fff; color: #1a1a1a; }
+    html, body { height: 100%; }
+    body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 0; background: #fff; color: #1a1a1a; overflow: hidden; }
     a { color: inherit; }
     table { border-collapse: collapse; width: 100%; }
     th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid #ddd; vertical-align: top; }
@@ -29,18 +37,35 @@
     button.primary { background: #111; color: #fff; border: 0; border-radius: 6px; padding: 0.45rem 0.9rem; }
     button.danger { background: #e23b2f; color: #fff; border: 0; border-radius: 6px; padding: 0.45rem 0.8rem; }
     .error { color: #a32020; }
+    .pager { display: flex; gap: 1rem; align-items: center; margin-top: 1rem; }
 
-    .shell { display: flex; min-height: 100vh; }
+    .shell { display: flex; height: 100vh; overflow: hidden; }
     .sidebar {
       width: 15.5rem;
       flex: none;
+      height: 100%;
       background: #f6f5f2;
       border-right: 1px solid #eceae4;
       display: flex;
       flex-direction: column;
       padding: 0.85rem 0.7rem 0.7rem;
+      overflow: visible;
     }
-    .sidebar-brand { font-weight: 650; padding: 0.35rem 0.65rem 1.1rem; }
+    .sidebar-brand { display: flex; align-items: center; justify-content: space-between; font-weight: 650; padding: 0.15rem 0.35rem 1rem; }
+    button.collapse-nav {
+      display: grid;
+      place-items: center;
+      width: 1.75rem;
+      height: 1.75rem;
+      padding: 0;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: inherit;
+      cursor: pointer;
+    }
+    button.collapse-nav:hover, button.who:hover { background: #eceae4; }
+    button.collapse-nav svg { width: 1rem; height: 1rem; }
     .nav-section { margin-bottom: 1rem; }
     .nav-label { margin: 0 0.65rem 0.3rem; color: #8a877f; font-size: 0.75rem; }
     .nav-link {
@@ -55,25 +80,26 @@
     .nav-link svg { width: 1rem; height: 1rem; flex: none; }
     .nav-link.active, .nav-link:hover { background: #eceae4; }
     .sidebar-footer {
+      position: relative;
       margin-top: auto;
-      display: flex;
-      align-items: center;
-      gap: 0.45rem;
       padding-top: 0.75rem;
       border-top: 1px solid #eceae4;
     }
-    .sidebar-footer form { margin: 0; }
-    .who {
+    button.who {
       display: flex;
       align-items: center;
       gap: 0.55rem;
+      width: 100%;
       min-width: 0;
-      flex: 1;
+      text-align: left;
       text-decoration: none;
       padding: 0.25rem;
+      border: 0;
       border-radius: 8px;
+      background: transparent;
+      color: inherit;
+      cursor: pointer;
     }
-    .who:hover { background: #eceae4; }
     .who img, .initials {
       width: 2rem;
       height: 2rem;
@@ -92,56 +118,103 @@
     .who-name, .org { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .who-name { font-weight: 600; font-size: 0.9rem; }
     .org { color: #6f6c66; font-size: 0.75rem; }
-    button.logout {
-      background: transparent;
+    .profile-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 20;
       border: 0;
-      color: #6f6c66;
-      cursor: pointer;
-      padding: 0.35rem 0.4rem;
+      padding: 0;
+      background: transparent;
+      cursor: default;
     }
-    main { flex: 1; min-width: 0; padding: 2rem; background: #fafafa; }
+    .profile-panel {
+      position: absolute;
+      z-index: 21;
+      left: 0;
+      bottom: calc(100% + 0.45rem);
+      width: 16rem;
+      background: #fff;
+      border: 1px solid #e6e6e6;
+      border-radius: 12px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+      padding: 0.35rem;
+    }
+    .profile-menu-name, .profile-menu-email { margin: 0; padding: 0.35rem 0.6rem; }
+    .profile-menu-name { font-weight: 650; }
+    .profile-menu-email { color: #6f6c66; font-size: 0.85rem; margin-bottom: 0.35rem; }
+    .profile-menu form { margin: 0; }
+    a.profile-menu-link, button.profile-menu-link {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      width: 100%;
+      box-sizing: border-box;
+      padding: 0.45rem 0.6rem;
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
+      color: inherit;
+      text-align: left;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    a.profile-menu-link:hover, button.profile-menu-link:hover { background: #f6f5f2; }
+    html.sidebar-collapsed .sidebar { width: 4.25rem; padding-left: 0.45rem; padding-right: 0.45rem; }
+    html.sidebar-collapsed .sidebar-brand { justify-content: center; }
+    html.sidebar-collapsed .brand-name,
+    html.sidebar-collapsed .nav-label,
+    html.sidebar-collapsed .nav-text,
+    html.sidebar-collapsed .who-text { display: none; }
+    html.sidebar-collapsed .nav-link, html.sidebar-collapsed button.who { justify-content: center; }
+    main { flex: 1; min-width: 0; height: 100%; overflow: auto; padding: 2rem; background: #fafafa; }
   </style>
 </head>
 <body>
   {% with url_name=request.resolver_match.url_name %}
   <div class="shell">
     <nav class="sidebar" aria-label="Menu">
-      <div class="sidebar-brand">Vimple</div>
-      {% if can_open_cashflow %}
-        <div class="nav-section">
-          <p class="nav-label">Finances</p>
-          <a class="nav-link{% if url_name == 'cashflow' %} active{% endif %}" href="{% url 'cashflow' %}">
-            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2 12.5h12M4 10V7M8 10V4M12 10V5.5"/></svg>
-            Cashflow
-          </a>
-        </div>
-      {% endif %}
+      <div class="sidebar-brand">
+        <span class="brand-name">Vimple</span>
+        <button type="button" class="collapse-nav" aria-label="Collapse menu">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="1.75" y="2.25" width="12.5" height="11.5" rx="1.5"/><path d="M6 2.25v11.5"/></svg>
+        </button>
+      </div>
       {% if organization or can_grant_access %}
         <div class="nav-section">
           <p class="nav-label">Administration</p>
           {% if organization %}
-            <a class="nav-link{% if url_name == 'organization' or url_name == 'organization_setup' %} active{% endif %}" href="{% url 'organization' %}">
+            <a class="nav-link{% if url_name == 'organization' or url_name == 'organization_setup' %} active{% endif %}" title="Organization" href="{% url 'organization' %}">
               <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 13.5V3.5h6.5v10M9.5 6.5H13v7M5.2 6h2M5.2 8.5h2M5.2 11h2"/></svg>
-              Organization
+              <span class="nav-text">Organization</span>
             </a>
           {% endif %}
           {% if can_grant_access %}
-            <a class="nav-link{% if url_name == 'access' %} active{% endif %}" href="{% url 'access' %}">
+            <a class="nav-link{% if url_name == 'access' %} active{% endif %}" title="Access" href="{% url 'access' %}">
               <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6.5 7.5V5.2a2.2 2.2 0 0 1 4.4 0v2.3M4.5 7.5h7v5h-7z"/></svg>
-              Access
+              <span class="nav-text">Access</span>
             </a>
           {% endif %}
         </div>
       {% endif %}
-      <div class="nav-section">
-        <p class="nav-label">Account</p>
-        <a class="nav-link{% if url_name == 'profile' %} active{% endif %}" href="{% url 'profile' %}">
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="5.5" r="2.2"/><path d="M3.5 13.2c.6-2.2 2.3-3.2 4.5-3.2s3.9 1 4.5 3.2"/></svg>
-          Profile
-        </a>
-      </div>
+      {% if can_open_cashflow %}
+        <div class="nav-section">
+          <p class="nav-label">Finances</p>
+          <a class="nav-link{% if url_name == 'cashflow' %} active{% endif %}" title="Cashflow" href="{% url 'cashflow' %}">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2 12.5h12M4 10V7M8 10V4M12 10V5.5"/></svg>
+            <span class="nav-text">Cashflow</span>
+          </a>
+        </div>
+      {% endif %}
       <div class="sidebar-footer">
-        <a class="who" href="{% url 'profile' %}">
+        <div id="profile-menu"></div>
+        <button
+          type="button"
+          class="who"
+          hx-get="{% url 'profile_menu' %}"
+          hx-target="#profile-menu"
+          hx-swap="innerHTML"
+        >
           {% if nav_avatar %}
             <img src="{{ nav_avatar }}" alt="">
           {% else %}
@@ -151,11 +224,7 @@
             <span class="who-name">{{ nav_name }}</span>
             {% if organization %}<span class="org">{{ organization.name }}</span>{% endif %}
           </span>
-        </a>
-        <form method="post" action="{% url 'account_logout' %}">
-          {% csrf_token %}
-          <button class="logout" type="submit">Log out</button>
-        </form>
+        </button>
       </div>
     </nav>
     <main>
@@ -163,5 +232,23 @@
     </main>
   </div>
   {% endwith %}
+  <script>
+    (function () {
+      var button = document.querySelector(".collapse-nav");
+      if (!button) return;
+      function apply(collapsed) {
+        document.documentElement.classList.toggle("sidebar-collapsed", collapsed);
+        button.setAttribute("aria-label", collapsed ? "Expand menu" : "Collapse menu");
+      }
+      button.addEventListener("click", function () {
+        var collapsed = !document.documentElement.classList.contains("sidebar-collapsed");
+        try {
+          localStorage.setItem("vimple-sidebar", collapsed ? "collapsed" : "open");
+        } catch (error) {}
+        apply(collapsed);
+      });
+      if (document.documentElement.classList.contains("sidebar-collapsed")) apply(true);
+    })();
+  </script>
 </body>
 </html>
