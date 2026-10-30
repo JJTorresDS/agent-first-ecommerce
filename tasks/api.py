@@ -3,7 +3,7 @@ import uuid
 from datetime import date as Date
 from datetime import datetime
 from decimal import Decimal
-from typing import Literal
+from typing import Literal, Optional
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -189,7 +189,7 @@ class CashflowMovementIn(Schema):
     counterparty_name: str = ""
     description: str = ""
     source_file_id: str = ""
-    receipt_id: str = ""
+    receipt_id: Optional[str] = None
     white: bool = False
 
 
