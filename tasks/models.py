@@ -132,6 +132,11 @@ class CashflowMovement(TenantModel):
     counterparty_name = models.CharField(max_length=200, blank=True)
     description = models.TextField(blank=True)
     source_file_id = models.CharField(max_length=128, blank=True)
+    receipt_id = models.CharField(
+        max_length=128,
+        blank=True,
+        help_text="Invoice or ticket id from the document, when one is present.",
+    )
     white = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

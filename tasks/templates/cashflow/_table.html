@@ -9,6 +9,7 @@
       <th>Counterparty</th>
       <th>Description</th>
       <th>White</th>
+      <th>Receipt</th>
       <th>Document</th>
     </tr>
   </thead>
@@ -28,6 +29,7 @@
           {% endif %}
         </td>
         <td>{% if movement.white %}Yes{% else %}No{% endif %}</td>
+        <td>{{ movement.receipt_id }}</td>
         <td>
           {% if movement.source_file_url %}
             <a href="{{ movement.source_file_url }}" target="_blank" rel="noopener">Open</a>
@@ -36,7 +38,7 @@
       </tr>
     {% empty %}
       <tr>
-        <td colspan="9">No movements.</td>
+        <td colspan="10">No movements.</td>
       </tr>
     {% endfor %}
   </tbody>

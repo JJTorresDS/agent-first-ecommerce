@@ -41,6 +41,7 @@ class CashflowMovementAdmin(admin.ModelAdmin):
         "counterparty_name",
         "description",
         "source_file_id",
+        "receipt_id",
     )
     readonly_fields = ("id", "created_at", "updated_at")
 

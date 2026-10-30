@@ -173,6 +173,7 @@ _MOVEMENT_TEXT = (
     "counterparty_name",
     "description",
     "source_file_id",
+    "receipt_id",
 )
 
 
@@ -188,6 +189,7 @@ class CashflowMovementIn(Schema):
     counterparty_name: str = ""
     description: str = ""
     source_file_id: str = ""
+    receipt_id: str = ""
     white: bool = False
 
 
@@ -203,6 +205,7 @@ class CashflowMovementPatch(Schema):
     counterparty_name: str | None = None
     description: str | None = None
     source_file_id: str | None = None
+    receipt_id: str | None = None
     white: bool | None = None
 
 
@@ -223,6 +226,7 @@ class CashflowMovementOut(Schema):
     counterparty_name: str
     description: str
     source_file_id: str
+    receipt_id: str
     white: bool
     created_at: datetime
     updated_at: datetime

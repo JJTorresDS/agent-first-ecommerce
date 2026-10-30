@@ -89,6 +89,7 @@ def cashflow_csv(request):
             "Counterparty",
             "Description",
             "White",
+            "Receipt",
             "Document",
         ]
     )
@@ -103,6 +104,7 @@ def cashflow_csv(request):
                 movement.counterparty_name,
                 movement.description,
                 "Yes" if movement.white else "No",
+                movement.receipt_id,
                 movement.source_file_url(),
             ]
         )
