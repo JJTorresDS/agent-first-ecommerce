@@ -11,6 +11,7 @@ from accounts.views import (
     profile_menu,
     set_app_access,
 )
+from meli.views import mercadolibre_webhook
 from tasks.api import api
 from tasks.views import cashflow_csv, cashflow_list, health
 
@@ -31,6 +32,7 @@ urlpatterns = [
     path("access/<int:user_id>/", set_app_access, name="set_app_access"),
     path("accounts/", include("allauth.urls")),
     path("health/", health, name="health"),
+    path("meli/webhooks/", mercadolibre_webhook, name="mercadolibre_webhook"),
     path("admin/", admin.site.urls),
     path("api/", api.urls),
 ]
