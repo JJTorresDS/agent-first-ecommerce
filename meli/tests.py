@@ -27,16 +27,55 @@ SAMPLE = {
 }
 
 
+WEBHOOK_SECRET = "hook-secret"
+WEBHOOK_URL = f"/meli/webhooks/{WEBHOOK_SECRET}/"
+
+
+def connect_seller(user_id="468424240"):
+    organization = Organization.objects.create(name="Vimple")
+    MercadoLibreAccount.objects.create(
+        organization=organization,
+        meli_user_id=user_id,
+        access_token="cipher",
+        expires_at=timezone.now() + timedelta(hours=1),
+    )
+    return organization
+
+
+@override_settings(
+    MELI_WEBHOOK_SECRET=WEBHOOK_SECRET,
+    MELI_CLIENT_ID=str(SAMPLE["application_id"]),
+)
 class MercadoLibreWebhookTests(TestCase):
     def setUp(self):
         self.client = Client(enforce_csrf_checks=True)
 
-    def test_stores_an_orders_notification(self):
-        response = self.client.post(
+    def post_notification(self, body=None, url=WEBHOOK_URL):
+        if body is None:
+            body = json.dumps(SAMPLE)
+        return self.client.post(url, data=body, content_type="application/json")
+
+    @override_settings(MELI_WEBHOOK_SECRET="")
+    def test_missing_secret_setting_is_not_found(self):
+        response = self.post_notification()
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(MercadoLibreNotification.objects.count(), 0)
+
+    def test_wrong_secret_is_not_found(self):
+        response = self.post_notification(url="/meli/webhooks/wrong/")
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(MercadoLibreNotification.objects.count(), 0)
+        missing = self.client.post(
             "/meli/webhooks/",
             data=json.dumps(SAMPLE),
             content_type="application/json",
         )
+        self.assertEqual(missing.status_code, 404)
+        self.assertEqual(MercadoLibreNotification.objects.count(), 0)
+
+    def test_known_seller_is_stored_on_their_organization(self):
+        organization = connect_seller()
+        response = self.post_notification()
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.content, b"ok")
         row = MercadoLibreNotification.objects.get()
@@ -44,55 +83,42 @@ class MercadoLibreWebhookTests(TestCase):
         self.assertEqual(row.topic, "orders_v2")
         self.assertEqual(row.resource, "/orders/2195160686")
         self.assertEqual(row.user_id, "468424240")
-        self.assertIsNone(row.organization)
+        self.assertEqual(row.organization, organization)
         self.assertEqual(row.payload["topic"], "orders_v2")
         self.assertIsNotNone(row.sent_at)
         self.assertIsNotNone(row.received_at)
 
     def test_repeated_id_is_stored_once(self):
+        connect_seller()
         body = json.dumps(SAMPLE)
-        self.client.post(
-            "/meli/webhooks/",
-            data=body,
-            content_type="application/json",
-        )
-        second = self.client.post(
-            "/meli/webhooks/",
-            data=body,
-            content_type="application/json",
-        )
+        self.post_notification(body)
+        second = self.post_notification(body)
         self.assertEqual(second.status_code, 200)
         self.assertEqual(MercadoLibreNotification.objects.count(), 1)
 
-    def test_non_json_is_still_accepted(self):
+    def test_unknown_seller_is_not_stored(self):
+        response = self.post_notification()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b"ok")
+        self.assertEqual(MercadoLibreNotification.objects.count(), 0)
+
+    def test_foreign_application_is_not_stored(self):
+        connect_seller()
+        body = json.dumps({**SAMPLE, "application_id": 1})
+        response = self.post_notification(body)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(MercadoLibreNotification.objects.count(), 0)
+
+    def test_non_json_is_not_stored(self):
+        connect_seller()
         response = self.client.post(
-            "/meli/webhooks/",
+            WEBHOOK_URL,
             data="not-json",
             content_type="text/plain",
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.content, b"ok")
-        row = MercadoLibreNotification.objects.get()
-        self.assertEqual(row.payload, "not-json")
-        self.assertEqual(row.topic, "")
-        self.assertEqual(row.notification_id, "")
-
-    def test_known_seller_is_stored_on_their_organization(self):
-        organization = Organization.objects.create(name="Vimple")
-        MercadoLibreAccount.objects.create(
-            organization=organization,
-            meli_user_id="468424240",
-            access_token="cipher",
-            expires_at=timezone.now() + timedelta(hours=1),
-        )
-        response = self.client.post(
-            "/meli/webhooks/",
-            data=json.dumps(SAMPLE),
-            content_type="application/json",
-        )
-        self.assertEqual(response.status_code, 200)
-        row = MercadoLibreNotification.objects.get()
-        self.assertEqual(row.organization, organization)
+        self.assertEqual(MercadoLibreNotification.objects.count(), 0)
 
 
 class TokenResponse:

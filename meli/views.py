@@ -1,3 +1,4 @@
+import hmac
 import json
 from datetime import datetime, timezone as dt_timezone
 from urllib.parse import urlencode
@@ -6,7 +7,7 @@ from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.core import signing
 from django.db import IntegrityError, transaction
-from django.http import HttpResponse, HttpResponseForbidden
+from django.http import HttpResponse, HttpResponseForbidden, HttpResponseNotFound
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -60,19 +61,32 @@ def _organization_for(user_id):
     return account.organization if account else None
 
 
+def _webhook_secret_matches(secret):
+    expected = settings.MELI_WEBHOOK_SECRET
+    if not expected or not secret:
+        return False
+    return hmac.compare_digest(secret, expected)
+
+
 def _store_object(parsed):
+    application_id = str(parsed.get("application_id") or "")
+    if not settings.MELI_CLIENT_ID or application_id != settings.MELI_CLIENT_ID:
+        return
     notification_id = _clip(parsed.get("_id"), 128)
     user_id = _clip(parsed.get("user_id"), 64)
+    organization = _organization_for(user_id)
+    if organization is None:
+        return
     fields = {
         "topic": _clip(parsed.get("topic"), 64),
         "resource": _clip(parsed.get("resource"), 512),
         "user_id": user_id,
-        "application_id": _clip(parsed.get("application_id"), 64),
+        "application_id": _clip(application_id, 64),
         "attempts": _attempts(parsed.get("attempts")),
         "sent_at": _when(parsed.get("sent")),
         "received_at": _when(parsed.get("received")),
         "payload": parsed,
-        "organization": _organization_for(user_id),
+        "organization": organization,
     }
     if not notification_id:
         MercadoLibreNotification.objects.create(notification_id="", **fields)
@@ -89,7 +103,9 @@ def _store_object(parsed):
 
 @csrf_exempt
 @require_POST
-def mercadolibre_webhook(request):
+def mercadolibre_webhook(request, secret):
+    if not _webhook_secret_matches(secret):
+        return HttpResponseNotFound()
     raw = request.body.decode("utf-8", errors="replace")
     try:
         parsed = json.loads(raw) if raw else None
@@ -97,8 +113,6 @@ def mercadolibre_webhook(request):
         parsed = None
     if isinstance(parsed, dict):
         _store_object(parsed)
-    else:
-        MercadoLibreNotification.objects.create(payload=raw)
     return HttpResponse("ok")
 
 

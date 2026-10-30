@@ -44,7 +44,7 @@ urlpatterns = [
     path("meli/connect/", mercadolibre_connect, name="mercadolibre_connect"),
     path("meli/callback/", mercadolibre_callback, name="mercadolibre_callback"),
     path("meli/disconnect/", mercadolibre_disconnect, name="mercadolibre_disconnect"),
-    path("meli/webhooks/", mercadolibre_webhook, name="mercadolibre_webhook"),
+    path("meli/webhooks/<str:secret>/", mercadolibre_webhook, name="mercadolibre_webhook"),
     path("admin/", admin.site.urls),
     path("api/", api.urls),
 ]

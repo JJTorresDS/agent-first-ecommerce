@@ -45,6 +45,7 @@ MELI_AUTH_URL = os.environ.get(
     "https://auth.mercadolibre.com.ar/authorization",
 )
 MELI_TOKEN_URL = "https://api.mercadolibre.com/oauth/token"
+MELI_WEBHOOK_SECRET = os.environ.get("MELI_WEBHOOK_SECRET", "")
 
 SITE_ID = 1
 
