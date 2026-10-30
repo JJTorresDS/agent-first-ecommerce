@@ -21,7 +21,12 @@
         <td>{{ movement.amount }}</td>
         <td>{{ movement.currency }}</td>
         <td>{{ movement.counterparty_name }}</td>
-        <td>{{ movement.description }}</td>
+        <td class="description">
+          <span class="description-text{% if movement.description|length > 90 %} clamped{% endif %}">{{ movement.description }}</span>
+          {% if movement.description|length > 90 %}
+            <button type="button" class="more" aria-expanded="false">…more</button>
+          {% endif %}
+        </td>
         <td>{% if movement.white %}Yes{% else %}No{% endif %}</td>
         <td>
           {% if movement.source_file_url %}

@@ -38,4 +38,25 @@
     </div>
   </form>
   {% include "cashflow/_results.html" %}
+  <script>
+    function fitDescriptions() {
+      document.querySelectorAll("#cashflow-table .description-text.clamped").forEach(function (text) {
+        var more = text.parentElement.querySelector(".more");
+        if (!more || more.getAttribute("aria-expanded") === "true") return;
+        more.hidden = text.scrollHeight <= text.clientHeight + 1;
+      });
+    }
+    document.addEventListener("click", function (event) {
+      var more = event.target.closest("button.more");
+      if (!more) return;
+      var text = more.parentElement.querySelector(".description-text");
+      var open = more.getAttribute("aria-expanded") === "true";
+      text.classList.toggle("clamped", open);
+      more.hidden = false;
+      more.setAttribute("aria-expanded", open ? "false" : "true");
+      more.textContent = open ? "…more" : "less";
+    });
+    document.addEventListener("DOMContentLoaded", fitDescriptions);
+    document.body.addEventListener("htmx:afterSwap", fitDescriptions);
+  </script>
 {% endblock %}
