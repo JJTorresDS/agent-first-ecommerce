@@ -33,8 +33,12 @@
       </select>
     </div>
     <div>
-      <label for="transaction_date">Date</label>
-      <input id="transaction_date" type="date" name="transaction_date" value="{{ transaction_date }}">
+      <label for="date_from">From</label>
+      <input id="date_from" type="date" name="date_from" value="{{ date_from }}">
+    </div>
+    <div>
+      <label for="date_to">To</label>
+      <input id="date_to" type="date" name="date_to" value="{{ date_to }}">
     </div>
   </form>
   {% include "cashflow/_results.html" %}

@@ -30,20 +30,25 @@ def _chosen_date(raw):
 def _filtered_movements(request):
     category = request.GET.get("category") or ""
     currency = request.GET.get("currency") or ""
-    raw_date = request.GET.get("transaction_date") or ""
-    chosen = _chosen_date(raw_date)
+    date_from = _chosen_date(request.GET.get("date_from") or "")
+    date_to = _chosen_date(request.GET.get("date_to") or "")
+    if date_from and date_to and date_from > date_to:
+        date_from, date_to = date_to, date_from
     organization = membership_for(request.user).organization
     movements = CashflowMovement.objects.filter(organization=organization)
     if category:
         movements = movements.filter(category=category)
     if currency:
         movements = movements.filter(currency=currency)
-    if chosen:
-        movements = movements.filter(transaction_date=chosen)
+    if date_from:
+        movements = movements.filter(transaction_date__gte=date_from)
+    if date_to:
+        movements = movements.filter(transaction_date__lte=date_to)
     return movements, {
         "category": category,
         "currency": currency,
-        "transaction_date": raw_date if chosen else "",
+        "date_from": date_from.isoformat() if date_from else "",
+        "date_to": date_to.isoformat() if date_to else "",
         "categories": CashflowMovement.objects.filter(organization=organization)
         .order_by("category")
         .values_list("category", flat=True)

@@ -395,9 +395,30 @@ class CashflowPageTests(TestCase):
         self.assertContains(by_currency, "Sale")
         self.assertNotContains(by_currency, "Compra SD")
 
-        by_date = self.client.get("/cashflow/", {"transaction_date": "2026-10-07"})
-        self.assertContains(by_date, "Compra SD")
-        self.assertNotContains(by_date, "Sale")
+        one_day = self.client.get(
+            "/cashflow/",
+            {"date_from": "2026-10-07", "date_to": "2026-10-07"},
+        )
+        self.assertContains(one_day, "Compra SD")
+        self.assertNotContains(one_day, "Sale")
+
+        both_days = self.client.get(
+            "/cashflow/",
+            {"date_from": "2026-10-08", "date_to": "2026-10-07"},
+        )
+        self.assertContains(both_days, "Compra SD")
+        self.assertContains(both_days, "Sale")
+        self.assertContains(both_days, 'id="date_from"')
+        self.assertContains(both_days, 'value="2026-10-07"')
+        self.assertContains(both_days, 'value="2026-10-08"')
+
+        exported = self.client.get(
+            "/cashflow/export.csv",
+            {"date_from": "2026-10-08"},
+        )
+        text = exported.content.decode()
+        self.assertIn("Sale", text)
+        self.assertNotIn("Compra SD", text)
 
         partial = self.client.get("/cashflow/", HTTP_HX_REQUEST="true")
         self.assertContains(partial, "Compra SD")
