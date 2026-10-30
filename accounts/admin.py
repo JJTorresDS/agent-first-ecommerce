@@ -1,7 +1,30 @@
 from django.contrib import admin, messages
+from django.contrib.auth import get_user_model
+from django.contrib.auth.admin import UserAdmin
 from django.shortcuts import redirect
+from django.urls import reverse
+from django.utils.html import format_html
 
 from .models import Invitation, Membership, Organization, add_organization_member
+
+User = get_user_model()
+
+
+admin.site.unregister(User)
+
+
+@admin.register(User)
+class VimpleUserAdmin(UserAdmin):
+    def get_list_display(self, request):
+        display = super().get_list_display(request)
+        if request.user.is_superuser:
+            return (*display, "open_as_user")
+        return display
+
+    @admin.display(description="Open")
+    def open_as_user(self, obj):
+        url = reverse("impersonate", args=[obj.pk])
+        return format_html('<a href="{}">Open as this user</a>', url)
 
 
 @admin.register(Organization)

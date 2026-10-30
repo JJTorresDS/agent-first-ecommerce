@@ -1,12 +1,13 @@
 import re
 
-from django.contrib.auth import get_user_model
+from django.contrib.auth import get_user_model, login
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponseBadRequest, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_GET, require_POST
 
 from .models import (
+    IMPERSONATOR_SESSION_KEY,
     AppAccess,
     Invitation,
     Membership,
@@ -17,6 +18,8 @@ from .models import (
     ensure_profile,
     membership_for,
 )
+
+_AUTH_BACKEND = "django.contrib.auth.backends.ModelBackend"
 
 
 def home(request):
@@ -259,6 +262,36 @@ def members(request):
         "accounts/members.html",
         _members_context(membership, error),
     )
+
+
+@login_required
+@require_GET
+def impersonate(request, user_id):
+    if request.session.get(IMPERSONATOR_SESSION_KEY):
+        return HttpResponseForbidden("An impersonation is already active.")
+    if not request.user.is_superuser:
+        return HttpResponseForbidden(
+            "Only a superuser can open Vimple as another user."
+        )
+    target = get_object_or_404(get_user_model(), pk=user_id)
+    superuser_id = request.user.pk
+    login(request, target, backend=_AUTH_BACKEND)
+    request.session[IMPERSONATOR_SESSION_KEY] = superuser_id
+    return redirect("profile")
+
+
+@login_required
+@require_POST
+def impersonate_exit(request):
+    superuser = get_user_model().objects.filter(
+        pk=request.session.get(IMPERSONATOR_SESSION_KEY),
+        is_superuser=True,
+    ).first()
+    if superuser is None:
+        return HttpResponseForbidden("No impersonation is active.")
+    login(request, superuser, backend=_AUTH_BACKEND)
+    request.session.pop(IMPERSONATOR_SESSION_KEY, None)
+    return redirect("admin:index")
 
 
 @login_required

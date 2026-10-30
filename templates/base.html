@@ -15,7 +15,13 @@
   <style>
     *, *::before, *::after { box-sizing: border-box; }
     html, body { height: 100%; }
-    body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 0; background: #fff; color: #1a1a1a; overflow: hidden; }
+    body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 0; background: #fff; color: #1a1a1a; overflow: hidden; display: flex; flex-direction: column; }
+    .impersonation { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.55rem 1rem; background: #111; color: #fff; flex: none; }
+    .impersonation p { margin: 0; }
+    .impersonation form { margin: 0; }
+    .impersonation button { background: #fff; color: #111; }
+    .impersonation button:hover { background: #f6f5f2; }
+    .impersonation button:active { background: #eceae4; transform: scale(0.97); }
     a { color: inherit; }
     table { border-collapse: collapse; width: 100%; }
     th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid #ddd; vertical-align: top; }
@@ -118,7 +124,7 @@
     pre.snippet { white-space: pre; overflow-x: auto; background: #f4f4f4; padding: 0.75rem; border-radius: 8px; margin: 0.5rem 0 0; }
     .pager { display: flex; gap: 1rem; align-items: center; margin-top: 1rem; }
 
-    .shell { display: flex; height: 100vh; overflow: hidden; }
+    .shell { display: flex; flex: 1; min-height: 0; overflow: hidden; }
     .sidebar {
       width: 15.5rem;
       flex: none;
@@ -258,6 +264,15 @@
   </style>
 </head>
 <body>
+  {% if impersonating %}
+    <div class="impersonation">
+      <p>Viewing {{ impersonated_label }}</p>
+      <form method="post" action="{% url 'impersonate_exit' %}">
+        {% csrf_token %}
+        <button type="submit">Exit</button>
+      </form>
+    </div>
+  {% endif %}
   {% with url_name=request.resolver_match.url_name %}
   <div class="shell">
     <nav class="sidebar" aria-label="Menu">

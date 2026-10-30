@@ -5,6 +5,8 @@ from django.contrib.auth import get_user_model
 from django.db import models
 from django.db.models.functions import Lower
 
+IMPERSONATOR_SESSION_KEY = "impersonator_id"
+
 
 class Organization(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

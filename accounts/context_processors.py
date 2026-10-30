@@ -1,6 +1,7 @@
 from notifications.registry import groups_for
 
 from .models import (
+    IMPERSONATOR_SESSION_KEY,
     AppAccess,
     Membership,
     Profile,
@@ -17,16 +18,23 @@ def nav(request):
     organization = membership.organization if membership else None
     groups = groups_for(organization)
     user_memberships = []
+    impersonating = False
+    impersonated_label = ""
     if getattr(user, "is_authenticated", False):
         user_memberships = list(
             Membership.objects.filter(user=user)
             .select_related("organization")
             .order_by("organization__name", "pk")
         )
+        if request.session.get(IMPERSONATOR_SESSION_KEY):
+            impersonating = True
+            impersonated_label = user.email or user.get_username()
     return {
         "can_open_cashflow": user_can_open(user, AppAccess.App.CASHFLOW),
         "can_grant_access": bool(getattr(user, "is_superuser", False)),
         "can_manage_members": can_manage_members(membership),
+        "impersonating": impersonating,
+        "impersonated_label": impersonated_label,
         "user_memberships": user_memberships,
         "organization": organization,
         "alert_groups": groups,

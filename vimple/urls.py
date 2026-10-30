@@ -4,6 +4,8 @@ from django.urls import include, path
 from accounts.views import (
     access,
     home,
+    impersonate,
+    impersonate_exit,
     members,
     organization_delete,
     organization_settings,
@@ -63,6 +65,8 @@ urlpatterns = [
     path("meli/callback/", mercadolibre_callback, name="mercadolibre_callback"),
     path("meli/disconnect/", mercadolibre_disconnect, name="mercadolibre_disconnect"),
     path("meli/webhooks/<str:secret>/", mercadolibre_webhook, name="mercadolibre_webhook"),
+    path("admin/impersonate/exit/", impersonate_exit, name="impersonate_exit"),
+    path("admin/impersonate/<int:user_id>/", impersonate, name="impersonate"),
     path("admin/", admin.site.urls),
     path("api/", api.urls),
 ]

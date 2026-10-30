@@ -15,6 +15,7 @@ from accounts.models import (
     Profile,
     assign_default_organization,
     create_owned_organization,
+    ensure_profile,
 )
 from tasks.models import CashflowMovement, Task
 
@@ -452,3 +453,76 @@ class MemberTests(TestCase):
         self.assertFalse(
             Invitation.objects.filter(email__iexact="bea@gmail.com").exists()
         )
+
+
+class ImpersonationTests(TestCase):
+    def setUp(self):
+        self.superuser = User.objects.create_superuser(
+            "admin",
+            "admin@example.com",
+            "secret",
+        )
+        self.owner = User.objects.create_user("ada", email="ada@example.com")
+        self.scent = create_owned_organization(self.owner, "SCENT")
+        self.contributor = User.objects.create_user("cara", email="cara@example.com")
+        create_owned_organization(self.contributor, "Cara Home")
+        Membership.objects.create(
+            user=self.contributor,
+            organization=self.scent,
+            role=Membership.Role.CONTRIBUTOR,
+        )
+        ensure_profile(self.contributor, self.scent)
+
+    def test_a_superuser_sees_the_contributors_organization(self):
+        self.client.force_login(self.superuser)
+        row = self.client.get("/admin/auth/user/")
+        self.assertContains(row, "Open as this user")
+        self.assertContains(
+            row,
+            f'href="/admin/impersonate/{self.contributor.pk}/"',
+        )
+        started = self.client.get(f"/admin/impersonate/{self.contributor.pk}/")
+        self.assertRedirects(started, "/profile/")
+        page = self.client.get("/profile/")
+        self.assertContains(page, "Viewing cara@example.com")
+        self.assertContains(page, "Exit")
+        self.assertContains(page, "SCENT")
+        self.assertNotContains(page, 'title="Members"')
+        self.assertNotContains(page, "Cara Home")
+        self.assertNotContains(page, 'title="Cashflow"')
+        self.assertEqual(self.client.get("/cashflow/").status_code, 403)
+        self.contributor.profile.refresh_from_db()
+        self.assertEqual(self.contributor.profile.organization_id, self.scent.id)
+        denied = self.client.get(f"/admin/impersonate/{self.owner.pk}/")
+        self.assertContains(
+            denied,
+            "An impersonation is already active.",
+            status_code=403,
+        )
+        still = self.client.get("/organization/")
+        self.assertContains(still, "SCENT")
+        self.assertNotContains(still, 'title="Members"')
+
+    def test_exit_returns_the_superuser_to_django_admin(self):
+        self.client.force_login(self.superuser)
+        self.client.get(f"/admin/impersonate/{self.contributor.pk}/")
+        exited = self.client.post("/admin/impersonate/exit/")
+        self.assertRedirects(exited, "/admin/")
+        self.assertContains(self.client.get("/admin/"), "Vimple")
+        setup = self.client.get("/profile/")
+        self.assertRedirects(setup, "/organization/setup/")
+        page = self.client.get("/organization/setup/")
+        self.assertNotContains(page, "Viewing")
+        again = self.client.get(f"/admin/impersonate/{self.contributor.pk}/")
+        self.assertRedirects(again, "/profile/")
+
+    def test_a_user_who_is_not_a_superuser_cannot_impersonate(self):
+        self.client.force_login(self.owner)
+        denied = self.client.get(f"/admin/impersonate/{self.contributor.pk}/")
+        self.assertContains(
+            denied,
+            "Only a superuser can open Vimple as another user.",
+            status_code=403,
+        )
+        self.contributor.profile.refresh_from_db()
+        self.assertEqual(self.contributor.profile.organization_id, self.scent.id)
