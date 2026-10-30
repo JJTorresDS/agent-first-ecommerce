@@ -41,6 +41,21 @@ def exchange_code(code, redirect_uri):
     )
 
 
+def fetch_user_profile(access_token):
+    request = Request(
+        "https://api.mercadolibre.com/users/me",
+        headers={
+            "Accept": "application/json",
+            "Authorization": f"Bearer {access_token}",
+        },
+    )
+    with urlopen(request, timeout=15) as response:
+        payload = json.loads(response.read().decode())
+    if not isinstance(payload, dict):
+        raise ValueError("Mercado Libre profile was not an object.")
+    return payload
+
+
 def refresh_access_token(refresh_token):
     return _token_request(
         {

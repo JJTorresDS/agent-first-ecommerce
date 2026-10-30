@@ -13,6 +13,30 @@
     {% endif %}
     {% if meli_account %}
       <p>Connected as {{ meli_account.meli_user_id }}</p>
+      {% if seller_profile %}
+        <dl>
+          {% if seller_profile.nickname %}
+            <dt>Nickname</dt>
+            <dd>{{ seller_profile.nickname }}</dd>
+          {% endif %}
+          {% if seller_profile.display_name %}
+            <dt>Name</dt>
+            <dd>{{ seller_profile.display_name }}</dd>
+          {% endif %}
+          {% if seller_profile.email %}
+            <dt>Email</dt>
+            <dd>{{ seller_profile.email }}</dd>
+          {% endif %}
+          {% if seller_profile.site_id %}
+            <dt>Site</dt>
+            <dd>{{ seller_profile.site_id }}</dd>
+          {% endif %}
+          {% if seller_profile.profile_url %}
+            <dt>Permalink</dt>
+            <dd><a href="{{ seller_profile.profile_url }}" target="_blank" rel="noopener">{{ seller_profile.profile_url }}</a></dd>
+          {% endif %}
+        </dl>
+      {% endif %}
       {% if is_owner %}
         <form method="post" action="{% url 'mercadolibre_token' %}">
           {% csrf_token %}

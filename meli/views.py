@@ -17,8 +17,8 @@ from accounts.models import Membership, membership_for
 
 from cryptography.fernet import InvalidToken
 
-from .client import exchange_code
-from .models import MercadoLibreAccount, MercadoLibreNotification
+from .client import exchange_code, fetch_user_profile
+from .models import MercadoLibreAccount, MercadoLibreNotification, SellerProfile
 
 
 def _clip(value, limit):
@@ -135,6 +135,7 @@ _MELI_ERRORS = {
     "denied": "Mercado Libre did not authorize the connection.",
     "taken": "That Mercado Libre account is already connected to another organization.",
     "failed": "Mercado Libre could not be connected.",
+    "profile": "The seller profile could not be loaded.",
 }
 
 
@@ -145,10 +146,37 @@ def _seller_snippet(access_token):
     )
 
 
+def _active_profile(organization):
+    try:
+        profile = organization.seller_profile
+    except SellerProfile.DoesNotExist:
+        return None
+    if profile.deleted_at:
+        return None
+    return profile
+
+
+def _save_seller_profile(organization, payload):
+    profile = SellerProfile.objects.filter(organization=organization).first()
+    if profile is None:
+        profile = SellerProfile(organization=organization)
+    profile.store_user_profile(payload)
+    profile.save()
+    return profile
+
+
+def _load_seller_profile(account):
+    _save_seller_profile(
+        account.organization,
+        fetch_user_profile(account.fresh_access_token()),
+    )
+
+
 def _settings_context(membership, meli_error="", access_token=""):
     return {
         "is_owner": membership.role == Membership.Role.OWNER,
         "meli_account": _account_for(membership.organization),
+        "seller_profile": _active_profile(membership.organization),
         "meli_error": meli_error,
         "access_token": access_token,
         "snippet": _seller_snippet(access_token) if access_token else "",
@@ -161,6 +189,12 @@ def mercadolibre_settings(request):
     if membership is None:
         return redirect("organization_setup")
     error = _MELI_ERRORS.get(request.GET.get("meli"), "")
+    account = _account_for(membership.organization)
+    if account is not None and _active_profile(membership.organization) is None:
+        try:
+            _load_seller_profile(account)
+        except (OSError, ValueError, InvalidToken):
+            error = error or _MELI_ERRORS["profile"]
     return render(request, "meli/settings.html", _settings_context(membership, error))
 
 
@@ -221,6 +255,10 @@ def mercadolibre_callback(request):
         user_id=user_id,
         organization__isnull=True,
     ).update(organization=organization)
+    try:
+        _load_seller_profile(account)
+    except (OSError, ValueError, InvalidToken):
+        return _settings_redirect("profile")
     return _settings_redirect()
 
 
@@ -230,6 +268,10 @@ def mercadolibre_disconnect(request):
     organization, denied = _owner_organization(request)
     if denied:
         return denied
+    SellerProfile.objects.filter(
+        organization=organization,
+        deleted_at__isnull=True,
+    ).update(deleted_at=timezone.now())
     MercadoLibreAccount.objects.filter(organization=organization).delete()
     return _settings_redirect()
 

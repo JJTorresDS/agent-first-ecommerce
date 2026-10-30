@@ -1,6 +1,7 @@
 import json
 from datetime import timedelta
 from unittest.mock import patch
+from urllib.error import URLError
 from urllib.parse import parse_qs, urlparse
 
 from django.contrib.auth import get_user_model
@@ -8,7 +9,7 @@ from django.test import Client, TestCase, override_settings
 from django.utils import timezone
 
 from accounts.models import Membership, Organization
-from meli.models import MercadoLibreAccount, MercadoLibreNotification
+from meli.models import MercadoLibreAccount, MercadoLibreNotification, SellerProfile
 from meli.tokens import encrypt_secret
 
 User = get_user_model()
@@ -262,3 +263,95 @@ class MercadoLibreConnectTests(TestCase):
         response = self.client.post("/meli/token/")
         self.assertEqual(response.status_code, 403)
         self.assertNotContains(response, "current-access", status_code=403)
+
+    def test_callback_stores_the_seller_profile(self):
+        state = self._state()
+        with patch("meli.client.urlopen", side_effect=mercadolibre_responses(PROFILE)):
+            response = self.client.get(
+                "/meli/callback/",
+                {"code": "auth-code", "state": state},
+            )
+            self.assertRedirects(response, "/meli/")
+        profile = SellerProfile.objects.get()
+        self.assertEqual(profile.organization, self.organization)
+        self.assertIsNone(profile.deleted_at)
+        self.assertEqual(profile.nickname, "SELLER")
+        page = self.client.get("/meli/")
+        self.assertContains(page, "SELLER")
+        self.assertContains(page, "Ada Lovelace")
+        self.assertContains(page, "ada@seller.test")
+        self.assertContains(page, "MLA")
+
+    def test_disconnect_hides_the_profile_until_reconnect(self):
+        state = self._state()
+        profiles = {"current": PROFILE}
+        with patch(
+            "meli.client.urlopen",
+            side_effect=lambda request, timeout=15: mercadolibre_responses(
+                profiles["current"]
+            )(request, timeout),
+        ):
+            self.client.get("/meli/callback/", {"code": "auth-code", "state": state})
+            self.client.post("/meli/disconnect/")
+        profile = SellerProfile.objects.get()
+        self.assertIsNotNone(profile.deleted_at)
+        self.assertEqual(MercadoLibreAccount.objects.count(), 0)
+        hidden = self.client.get("/meli/")
+        self.assertNotContains(hidden, "SELLER")
+        self.assertContains(hidden, "Not connected")
+
+        profiles["current"] = {**PROFILE, "nickname": "NEWSELLER"}
+        state = self._state()
+        with patch(
+            "meli.client.urlopen",
+            side_effect=lambda request, timeout=15: mercadolibre_responses(
+                profiles["current"]
+            )(request, timeout),
+        ):
+            self.client.get("/meli/callback/", {"code": "auth-code", "state": state})
+        profile.refresh_from_db()
+        self.assertIsNone(profile.deleted_at)
+        self.assertEqual(profile.nickname, "NEWSELLER")
+        self.assertEqual(SellerProfile.objects.count(), 1)
+        page = self.client.get("/meli/")
+        self.assertContains(page, "NEWSELLER")
+        self.assertNotContains(page, ">SELLER<")
+
+    def test_failed_profile_call_keeps_the_account(self):
+        state = self._state()
+        with patch(
+            "meli.client.urlopen",
+            side_effect=mercadolibre_responses(URLError("down")),
+        ):
+            response = self.client.get(
+                "/meli/callback/",
+                {"code": "auth-code", "state": state},
+                follow=True,
+            )
+        self.assertEqual(response.redirect_chain, [("/meli/?meli=profile", 302)])
+        self.assertContains(response, "The seller profile could not be loaded.")
+        self.assertEqual(MercadoLibreAccount.objects.count(), 1)
+        self.assertEqual(SellerProfile.objects.count(), 0)
+
+
+PROFILE = {
+    "id": 468424240,
+    "nickname": "SELLER",
+    "first_name": "Ada",
+    "last_name": "Lovelace",
+    "email": "ada@seller.test",
+    "site_id": "MLA",
+    "country_id": "AR",
+    "permalink": "https://perfil.mercadolibre.com.ar/SELLER",
+}
+
+
+def mercadolibre_responses(profile):
+    def open_response(request, timeout=15):
+        if request.full_url.endswith("/users/me"):
+            if isinstance(profile, Exception):
+                raise profile
+            return TokenResponse(profile)
+        return TokenResponse(TOKEN)
+
+    return open_response

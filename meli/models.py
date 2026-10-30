@@ -86,3 +86,65 @@ class MercadoLibreNotification(models.Model):
 
     def __str__(self):
         return f"{self.topic} {self.resource}".strip()
+
+
+class SellerProfile(models.Model):
+    """The Mercado Libre seller connected to an organization."""
+
+    organization = models.OneToOneField(
+        "accounts.Organization",
+        on_delete=models.CASCADE,
+        related_name="seller_profile",
+    )
+    meli_user_id = models.CharField(max_length=64, blank=True)
+    nickname = models.CharField(max_length=128, blank=True)
+    first_name = models.CharField(max_length=200, blank=True)
+    last_name = models.CharField(max_length=200, blank=True)
+    email = models.CharField(max_length=254, blank=True)
+    site_id = models.CharField(max_length=16, blank=True)
+    country_id = models.CharField(max_length=8, blank=True)
+    permalink = models.CharField(max_length=512, blank=True)
+    payload = models.JSONField(default=dict)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "seller_profile"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["meli_user_id"],
+                condition=models.Q(deleted_at__isnull=True)
+                & ~models.Q(meli_user_id=""),
+                name="uniq_seller_profile_live_user",
+            ),
+        ]
+
+    def __str__(self):
+        return self.nickname or self.meli_user_id
+
+    def display_name(self):
+        return " ".join(part for part in (self.first_name, self.last_name) if part)
+
+    def profile_url(self):
+        if self.permalink.startswith(("http://", "https://")):
+            return self.permalink
+        return ""
+
+    def store_user_profile(self, payload):
+        self.meli_user_id = _text(payload.get("id"), 64)
+        self.nickname = _text(payload.get("nickname"), 128)
+        self.first_name = _text(payload.get("first_name"), 200)
+        self.last_name = _text(payload.get("last_name"), 200)
+        self.email = _text(payload.get("email"), 254)
+        self.site_id = _text(payload.get("site_id"), 16)
+        self.country_id = _text(payload.get("country_id"), 8)
+        self.permalink = _text(payload.get("permalink"), 512)
+        self.payload = payload
+        self.deleted_at = None
+
+
+def _text(value, limit):
+    if value is None:
+        return ""
+    return str(value)[:limit]
