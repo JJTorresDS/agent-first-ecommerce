@@ -7,7 +7,9 @@
   <title>{% trans "Sign In" %}</title>
   <style>
     body { font-family: sans-serif; max-width: 32rem; margin: 3rem auto; padding: 0 1rem; background: #fff; color: #1a1a1a; }
-    button { font: inherit; padding: 0.5rem 1rem; }
+    button { font: inherit; cursor: pointer; padding: 0.5rem 1rem; border: 1px solid #d9d6d0; background: #fff; border-radius: 6px; transition: background-color 0.12s ease, transform 0.12s ease; }
+    button:hover { background: #f6f5f2; }
+    button:active { background: #eceae4; transform: scale(0.97); }
   </style>
 </head>
 <body>
