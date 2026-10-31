@@ -33,3 +33,5 @@ services:
         sync: false
       - key: MELI_WEBHOOK_SECRET
         sync: false
+      - key: REDIS_URL
+        sync: false

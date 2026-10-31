@@ -35,3 +35,7 @@ class MeliConfig(AppConfig):
         register_reconciler(reconcile_item_questions)
         register_list_action(questions_sync_action)
         register_list_action(postsale_sync_action)
+
+        from .jobs import start_postsale_worker
+
+        start_postsale_worker()

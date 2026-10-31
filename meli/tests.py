@@ -867,6 +867,29 @@ def sale_order(order_id, pack_id, created, first, last, title):
     }
 
 
+class _FakeRedis:
+    def __init__(self):
+        self.values = {}
+        self.lists = {}
+
+    def get(self, key):
+        return self.values.get(key)
+
+    def set(self, key, value, ex=None):
+        self.values[key] = value
+        return True
+
+    def lpush(self, key, value):
+        self.lists.setdefault(key, []).insert(0, value)
+        return len(self.lists[key])
+
+    def brpop(self, key, timeout=0):
+        items = self.lists.get(key) or []
+        if not items:
+            return None
+        return (key, items.pop())
+
+
 def sale_thread(text, message_id="msg-1", sender=99, created=None):
     return {
         "conversation_status": {"status": "active"},
@@ -1070,6 +1093,69 @@ class PostSaleTests(TestCase):
         hidden = self.client.get("/inbox/")
         self.assertContains(hidden, "Theirs")
         self.assertNotContains(hidden, "Necesito medidas?")
+
+    @override_settings(REDIS_URL="redis://postsale-test")
+    def test_sync_is_queued_until_the_worker_runs(self):
+        from meli.jobs import QUEUE, run_next_postsale_job, status_key
+
+        fake = _FakeRedis()
+        now = timezone.now()
+
+        def open_response(request, timeout=15):
+            url = request.full_url
+            if "/orders/search" in url:
+                return TokenResponse(
+                    {
+                        "results": [
+                            sale_order(
+                                PACK,
+                                PACK,
+                                now.isoformat(),
+                                "Willian",
+                                "Guido",
+                                "Remera",
+                            )
+                        ],
+                        "paging": {"total": 1, "limit": 50, "offset": 0},
+                    }
+                )
+            if "/messages/unread" in url:
+                return TokenResponse({"results": []})
+            if f"/messages/packs/{PACK}/" in url:
+                return TokenResponse(sale_thread("Necesito medidas?"))
+            raise AssertionError(url)
+
+        with (
+            patch("meli.jobs._client", return_value=fake),
+            patch("meli.client.urlopen", side_effect=open_response) as opened,
+        ):
+            response = self.client.post("/meli/postsale/sync/")
+            self.assertRedirects(
+                response,
+                "/inbox/?channel=meli-postsales&sync=queued",
+            )
+            self.assertEqual(opened.call_count, 0)
+            self.assertEqual(fake.lists[QUEUE], [str(self.organization.pk)])
+            again = self.client.post("/meli/postsale/sync/")
+            self.assertRedirects(
+                again,
+                "/inbox/?channel=meli-postsales&sync=queued",
+            )
+            self.assertEqual(fake.lists[QUEUE], [str(self.organization.pk)])
+            waiting = self.client.get("/inbox/?channel=meli-postsales")
+            self.assertContains(waiting, "Post-sale messages are loading.")
+            self.assertContains(waiting, 'hx-trigger="every 3s"')
+            self.assertFalse(Conversation.objects.filter(external_id=PACK).exists())
+            self.assertTrue(run_next_postsale_job(block_seconds=0))
+            loaded = self.client.get("/inbox/?channel=meli-postsales")
+        self.assertEqual(fake.values[status_key(self.organization.pk)], "ok")
+        self.assertContains(loaded, "Post-sale messages loaded.")
+        self.assertNotContains(loaded, "Post-sale messages are loading.")
+        self.assertNotContains(loaded, 'hx-trigger="every 3s"')
+        self.assertEqual(
+            Conversation.objects.get(external_id=PACK).messages.get().body,
+            "Necesito medidas?",
+        )
 
     def test_reply_posts_to_the_pack_and_clears_the_dot(self):
         now = timezone.now()

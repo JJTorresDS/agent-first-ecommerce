@@ -172,6 +172,9 @@ else:
         "Set DATABASE_URL in .env to your Neon connection string."
     )
 
+# Upstash connection string. Empty means post-sale sync runs inside the request.
+REDIS_URL = "" if _COMMAND == "test" else os.environ.get("REDIS_URL", "").strip()
+
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},

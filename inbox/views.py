@@ -112,10 +112,23 @@ def inbox(request):
             "show_older": show_older,
             "list_actions": list_actions(organization),
             "reply_error": request.GET.get("reply") == "failed",
-            "sync_error": request.GET.get("sync") == "failed",
-            "sync_ok": request.GET.get("sync") == "ok",
+            **_sync_flags(organization, request.GET.get("sync") or ""),
         },
     )
+
+
+def _sync_flags(organization, query_sync):
+    from meli.jobs import postsale_status
+
+    postsale = postsale_status(organization)
+    pending = postsale in {"queued", "running"}
+    return {
+        "sync_pending": pending,
+        "postsale_error": postsale == "failed",
+        "postsale_ok": postsale == "ok",
+        "sync_error": query_sync == "failed" and postsale != "failed" and not pending,
+        "sync_ok": query_sync == "ok" and postsale != "ok" and not pending,
+    }
 
 
 @login_required

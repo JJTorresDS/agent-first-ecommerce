@@ -1,5 +1,6 @@
 import hmac
 import json
+import logging
 import re
 from datetime import datetime, timezone as dt_timezone
 from urllib.parse import urlencode
@@ -33,6 +34,8 @@ from .models import (
     MercadoLibreNotification,
     SellerProfile,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _clip(value, limit):
@@ -567,7 +570,22 @@ def mercadolibre_postsale_sync(request):
     from inbox.models import Channel
     from inbox.views import inbox_location
 
+    from .jobs import enqueue_postsale_sync, postsale_queue_enabled
     from .postsale import sync_recent_postsale
+
+    if postsale_queue_enabled():
+        failed = False
+        try:
+            enqueue_postsale_sync(membership.organization)
+        except Exception:
+            logger.exception("Could not queue the post-sale sync")
+            failed = True
+        return redirect(
+            inbox_location(
+                channel=Channel.MELI_POSTSALES,
+                sync="failed" if failed else "queued",
+            )
+        )
 
     failed = False
     try:
