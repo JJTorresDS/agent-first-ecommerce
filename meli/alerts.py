@@ -17,6 +17,29 @@ def unanswered_count(organization):
     ).count()
 
 
+def postsale_count(organization):
+    if organization is None:
+        return 0
+    return Conversation.objects.filter(
+        organization=organization,
+        channel=Channel.MELI_POSTSALES,
+        needs_reply=True,
+    ).count()
+
+
+def postsale_messages(organization):
+    count = postsale_count(organization)
+    if not count:
+        return None
+    noun = "message" if count == 1 else "messages"
+    url = f"{reverse('inbox')}?{urlencode([('channel', Channel.MELI_POSTSALES)])}"
+    return {
+        "count": count,
+        "message": f"You have {count} unanswered post-sale {noun}",
+        "url": url,
+    }
+
+
 def presales_questions(organization):
     count = unanswered_count(organization)
     if not count:

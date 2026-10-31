@@ -1,14 +1,17 @@
+from datetime import timedelta
 from urllib.parse import urlencode
 
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
+from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from accounts.models import membership_for
 
-from .channels import ReplyFailed, list_actions, open_inbox, sender_for
+from .channels import ReplyFailed, list_actions, open_inbox, reply_limit_for, sender_for
 from .models import Conversation
 
 
@@ -64,6 +67,7 @@ def inbox(request):
     organization = membership.organization
     open_inbox(organization)
     channel = request.GET.get("channel") or ""
+    show_older = request.GET.get("since") == "all"
     conversations = Conversation.objects.filter(organization=organization)
     channels = list(
         conversations.order_by("channel").values_list("channel", flat=True).distinct()
@@ -72,14 +76,28 @@ def inbox(request):
         channels.append(channel)
     if channel:
         conversations = conversations.filter(channel=channel)
+    if not show_older:
+        cutoff = timezone.now() - timedelta(days=7)
+        conversations = conversations.filter(
+            Q(needs_reply=True)
+            | Q(last_message_at__gte=cutoff)
+            | Q(last_message_at__isnull=True, created_at__gte=cutoff)
+        )
+    conversations = conversations.order_by(
+        "-needs_reply",
+        "-last_message_at",
+        "-created_at",
+    )
     selected = _selected(conversations, request.GET.get("conversation") or "")
     if selected is None:
         selected = conversations.first()
     messages = []
     can_reply = False
+    reply_limit = 2000
     if selected is not None:
         messages = selected.messages.filter(organization=organization)
         can_reply = selected.needs_reply and sender_for(selected.channel) is not None
+        reply_limit = reply_limit_for(selected.channel)
     return render(
         request,
         "inbox/inbox.html",
@@ -90,6 +108,8 @@ def inbox(request):
             "selected": selected,
             "messages": messages,
             "can_reply": can_reply,
+            "reply_limit": reply_limit,
+            "show_older": show_older,
             "list_actions": list_actions(organization),
             "reply_error": request.GET.get("reply") == "failed",
             "sync_error": request.GET.get("sync") == "failed",

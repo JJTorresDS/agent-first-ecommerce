@@ -1,5 +1,5 @@
 import json
-from datetime import timedelta
+from datetime import timedelta, timezone as dt_timezone
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
@@ -95,6 +95,123 @@ def post_answer(access_token, question_id, text):
         "https://api.mercadolibre.com/answers",
         {"question_id": int(question_id), "text": text},
     )
+
+
+def _user_id(value):
+    text = str(value)
+    if text.isdigit():
+        return int(text)
+    return text
+
+
+def fetch_message(access_token, message_id):
+    message = quote(str(message_id), safe="")
+    return _api_request(
+        access_token,
+        f"https://api.mercadolibre.com/messages/{message}",
+    )
+
+
+def fetch_pack_messages(access_token, pack_id, seller_id):
+    """The full post-sale thread. Does not mark the messages read."""
+    pack = quote(str(pack_id), safe="")
+    seller = quote(str(seller_id), safe="")
+    messages = []
+    status = {}
+    offset = 0
+    while offset < 200:
+        query = urlencode(
+            {
+                "tag": "post_sale",
+                "mark_as_read": "false",
+                "limit": 50,
+                "offset": offset,
+            }
+        )
+        payload = _api_request(
+            access_token,
+            f"https://api.mercadolibre.com/messages/packs/{pack}/sellers/{seller}?{query}",
+        )
+        batch = payload.get("messages")
+        if not isinstance(batch, list):
+            raise ValueError("Mercado Libre response had no messages.")
+        if not status and isinstance(payload.get("conversation_status"), dict):
+            status = payload["conversation_status"]
+        messages.extend(item for item in batch if isinstance(item, dict))
+        paging = payload.get("paging") if isinstance(payload.get("paging"), dict) else {}
+        total = paging.get("total")
+        offset += 50
+        if not batch or (isinstance(total, int) and offset >= total):
+            break
+    return {"messages": messages, "conversation_status": status}
+
+
+def fetch_unread_post_sale(access_token):
+    query = urlencode({"tag": "post_sale", "role": "seller"})
+    return _api_request(
+        access_token,
+        f"https://api.mercadolibre.com/messages/unread?{query}",
+    )
+
+
+def fetch_recent_orders(access_token, seller_id, since, until):
+    """Orders in the window, newest first, capped at 150."""
+    orders = []
+    offset = 0
+    while offset < 150:
+        query = urlencode(
+            {
+                "seller": seller_id,
+                "order.date_created.from": _iso(since),
+                "order.date_created.to": _iso(until),
+                "sort": "date_desc",
+                "limit": 50,
+                "offset": offset,
+            }
+        )
+        payload = _api_request(
+            access_token,
+            f"https://api.mercadolibre.com/orders/search?{query}",
+        )
+        batch = payload.get("results")
+        if not isinstance(batch, list):
+            raise ValueError("Mercado Libre response had no orders.")
+        orders.extend(item for item in batch if isinstance(item, dict))
+        paging = payload.get("paging") if isinstance(payload.get("paging"), dict) else {}
+        total = paging.get("total")
+        offset += 50
+        if len(batch) < 50 or (isinstance(total, int) and offset >= total):
+            break
+    return orders[:150]
+
+
+def fetch_order(access_token, order_id):
+    order = quote(str(order_id), safe="")
+    return _api_request(access_token, f"https://api.mercadolibre.com/orders/{order}")
+
+
+def fetch_pack(access_token, pack_id):
+    pack = quote(str(pack_id), safe="")
+    return _api_request(access_token, f"https://api.mercadolibre.com/packs/{pack}")
+
+
+def post_pack_message(access_token, pack_id, seller_id, buyer_id, text):
+    pack = quote(str(pack_id), safe="")
+    seller = quote(str(seller_id), safe="")
+    query = urlencode({"tag": "post_sale"})
+    return _api_request(
+        access_token,
+        f"https://api.mercadolibre.com/messages/packs/{pack}/sellers/{seller}?{query}",
+        {
+            "from": {"user_id": _user_id(seller_id)},
+            "to": {"user_id": _user_id(buyer_id)},
+            "text": text,
+        },
+    )
+
+
+def _iso(value):
+    return value.astimezone(dt_timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
 
 def refresh_access_token(refresh_token):
