@@ -4,10 +4,10 @@
 
 {% block content %}
   {% if sync_error %}
-    <p class="error">{% if channel == "meli-postsales" %}Post-sale messages could not be loaded.{% else %}Open questions could not be loaded.{% endif %}</p>
+    <p class="error">Open questions could not be loaded.</p>
   {% endif %}
   {% if sync_ok %}
-    <p class="muted">{% if channel == "meli-postsales" %}Post-sale messages loaded.{% else %}Open questions loaded.{% endif %}</p>
+    <p class="muted">Open questions loaded.</p>
   {% endif %}
   {% for action in list_actions %}
     <form class="sync" method="post" action="{{ action.url }}">
@@ -15,13 +15,6 @@
       <button class="primary" type="submit">{{ action.label }}</button>
     </form>
   {% endfor %}
-  <p class="muted">
-    {% if show_older %}
-      <a href="{% querystring since=None conversation=None reply=None sync=None %}">Last 7 days</a>
-    {% else %}
-      <a href="{% querystring since="all" conversation=None reply=None sync=None %}">Show older</a>
-    {% endif %}
-  </p>
   <nav class="tabs" aria-label="Channels">
     <a class="tab{% if not channel %} active{% endif %}" href="{% querystring channel=None conversation=None reply=None sync=None %}">All</a>
     {% for item in channels %}
@@ -62,7 +55,7 @@
         {% if can_reply %}
           <form class="composer" method="post" action="{% url 'inbox_reply' selected.id %}">
             {% csrf_token %}
-            <textarea name="text" maxlength="{{ reply_limit }}" required placeholder="Write a reply"></textarea>
+            <textarea name="text" maxlength="2000" required placeholder="Write a reply"></textarea>
             <div class="actions">
               <button class="primary" type="submit">Send</button>
             </div>

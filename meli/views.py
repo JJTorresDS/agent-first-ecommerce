@@ -130,12 +130,6 @@ def mercadolibre_webhook(request, secret):
             _load_question_from_notification(parsed)
         except (OSError, ValueError, InvalidToken):
             pass
-        try:
-            from .postsale import load_postsale_from_notification
-
-            load_postsale_from_notification(parsed)
-        except (OSError, ValueError, InvalidToken):
-            pass
     return HttpResponse("ok")
 
 
@@ -556,27 +550,3 @@ def mercadolibre_question_reply(request, question_id):
         external_id=question.question_id,
     )
     return send_and_redirect(request, conversation)
-
-
-@login_required
-@require_POST
-def mercadolibre_postsale_sync(request):
-    membership = membership_for(request.user)
-    if membership is None:
-        return redirect("organization_setup")
-    from inbox.models import Channel
-    from inbox.views import inbox_location
-
-    from .postsale import sync_recent_postsale
-
-    failed = False
-    try:
-        sync_recent_postsale(membership.organization)
-    except (OSError, ValueError, InvalidToken):
-        failed = True
-    return redirect(
-        inbox_location(
-            channel=Channel.MELI_POSTSALES,
-            sync="failed" if failed else "ok",
-        )
-    )

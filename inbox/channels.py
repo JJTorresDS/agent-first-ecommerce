@@ -4,27 +4,18 @@ _senders = {}
 _reconcilers = []
 _openers = []
 _list_actions = []
-_DEFAULT_REPLY_LIMIT = 2000
 
 
 class ReplyFailed(Exception):
     """The channel rejected the reply, or the text cannot be sent."""
 
 
-def register_sender(channel, send, max_length=_DEFAULT_REPLY_LIMIT):
-    _senders[channel] = {"send": send, "max_length": max_length}
+def register_sender(channel, send):
+    _senders[channel] = send
 
 
 def sender_for(channel):
-    row = _senders.get(channel)
-    return row["send"] if row else None
-
-
-def reply_limit_for(channel):
-    row = _senders.get(channel)
-    if row is None:
-        return _DEFAULT_REPLY_LIMIT
-    return row["max_length"]
+    return _senders.get(channel)
 
 
 def register_reconciler(reconcile):

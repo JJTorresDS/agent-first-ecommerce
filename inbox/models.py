@@ -10,7 +10,6 @@ BUENOS_AIRES = ZoneInfo("America/Argentina/Buenos_Aires")
 
 class Channel(models.TextChoices):
     MELI_ITEM_QUESTIONS = "meli-itemquestions", "meli-itemquestions"
-    MELI_POSTSALES = "meli-postsales", "meli-postsales"
 
 
 class Conversation(TenantModel):
@@ -28,7 +27,7 @@ class Conversation(TenantModel):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ["-needs_reply", "-last_message_at", "-created_at"]
+        ordering = ["-last_message_at", "-created_at"]
         constraints = [
             models.UniqueConstraint(
                 fields=["organization", "channel", "external_id"],
