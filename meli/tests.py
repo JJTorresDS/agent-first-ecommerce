@@ -1,5 +1,5 @@
 import json
-from datetime import timedelta
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from unittest.mock import patch
 from urllib.error import URLError
@@ -849,3 +849,409 @@ class ItemQuestionTests(TestCase):
         self.assertEqual(conversation.messages.get().body, "Tienen stock?")
         project_questions(apps, None)
         self.assertEqual(conversation.messages.count(), 1)
+
+
+PACK = "2000000089077943"
+TAKEN = "2000000089077944"
+OLD = "2000000089077000"
+UNREAD = "2000000089077999"
+
+
+def sale_order(order_id, pack_id, created, first, last, title):
+    return {
+        "id": int(order_id),
+        "pack_id": int(pack_id) if pack_id else None,
+        "date_created": created,
+        "buyer": {"id": 99, "first_name": first, "last_name": last},
+        "order_items": [{"item": {"title": title}}],
+    }
+
+
+def sale_thread(text, message_id="msg-1", sender=99, created=None):
+    return {
+        "conversation_status": {"status": "active"},
+        "paging": {"total": 1, "limit": 50, "offset": 0},
+        "messages": [
+            {
+                "id": message_id,
+                "from": {"user_id": sender},
+                "to": {"user_id": 468424240 if sender != 468424240 else 99},
+                "text": text,
+                "message_date": {"created": created or timezone.now().isoformat()},
+            }
+        ],
+    }
+
+
+@override_settings(
+    MELI_WEBHOOK_SECRET=WEBHOOK_SECRET,
+    MELI_CLIENT_ID=str(SAMPLE["application_id"]),
+)
+class PostSaleTests(TestCase):
+    def setUp(self):
+        self.organization = connect_seller()
+        self.user = User.objects.create_user("ada", email="ada@example.com")
+        Membership.objects.create(
+            user=self.user,
+            organization=self.organization,
+            role=Membership.Role.OWNER,
+        )
+        self.client.force_login(self.user)
+        account = MercadoLibreAccount.objects.get(organization=self.organization)
+        account.access_token = encrypt_secret("access-1")
+        account.refresh_token = encrypt_secret("refresh-1")
+        account.save(update_fields=["access_token", "refresh_token", "updated_at"])
+
+    def test_messages_webhook_creates_the_chat_and_the_bell(self):
+        created = timezone.now().isoformat()
+        message = {
+            "id": "msg-1",
+            "from": {"user_id": 99},
+            "to": {"user_id": 468424240},
+            "text": "Necesito medidas?",
+            "message_resources": [{"id": PACK, "name": "packs"}],
+            "message_date": {"created": created},
+        }
+        order = sale_order(PACK, PACK, created, "Willian", "Guido", "Remera")
+
+        def open_response(request, timeout=15):
+            url = request.full_url
+            if url.endswith(f"/messages/{message['id']}"):
+                return TokenResponse(message)
+            if "/messages/packs/" in url:
+                self.assertIn("mark_as_read=false", url)
+                self.assertIn("tag=post_sale", url)
+                return TokenResponse(sale_thread("Necesito medidas?", created=created))
+            if f"/orders/{PACK}" in url:
+                return TokenResponse(order)
+            raise AssertionError(url)
+
+        body = json.dumps(
+            {
+                **SAMPLE,
+                "_id": "post-sale-note",
+                "topic": "messages",
+                "resource": "/messages/msg-1",
+            }
+        )
+        with patch("meli.client.urlopen", side_effect=open_response):
+            response = self.client.post(
+                WEBHOOK_URL,
+                data=body,
+                content_type="application/json",
+            )
+            self.client.post(WEBHOOK_URL, data=body, content_type="application/json")
+        self.assertEqual(response.status_code, 200)
+        conversation = Conversation.objects.get()
+        self.assertEqual(conversation.organization, self.organization)
+        self.assertEqual(conversation.channel, "meli-postsales")
+        self.assertEqual(conversation.external_id, PACK)
+        self.assertEqual(conversation.title, "Willian Guido · Remera")
+        self.assertTrue(conversation.needs_reply)
+        inbound = conversation.messages.get()
+        self.assertEqual(inbound.direction, Message.Direction.INBOUND)
+        self.assertEqual(inbound.body, "Necesito medidas?")
+        self.assertEqual(inbound.external_id, "msg-1")
+        self.assertEqual(Message.objects.count(), 1)
+        page = self.client.get("/organization/")
+        self.assertContains(page, "You have 1 unanswered post-sale message")
+        self.assertContains(page, 'href="/inbox/?channel=meli-postsales"')
+        self.assertNotContains(page, "post-sale messages")
+        other_user = User.objects.create_user("bea", email="bea@example.com")
+        other = Organization.objects.create(name="Other")
+        Membership.objects.create(
+            user=other_user,
+            organization=other,
+            role=Membership.Role.OWNER,
+        )
+        self.client.force_login(other_user)
+        hidden = self.client.get("/inbox/")
+        self.assertNotContains(hidden, "Necesito medidas?")
+        self.assertContains(hidden, "No messages yet.")
+        reply = self.client.post(
+            f"/inbox/{conversation.pk}/reply/",
+            {"text": "Mide 67x60cm"},
+        )
+        self.assertEqual(reply.status_code, 404)
+        self.assertFalse(
+            conversation.messages.filter(direction=Message.Direction.OUTBOUND).exists()
+        )
+
+    def test_sync_loads_recent_orders_and_unread_packs(self):
+        now = timezone.now()
+        recent = sale_order(PACK, PACK, now.isoformat(), "Willian", "Guido", "Remera")
+        old = sale_order(
+            OLD,
+            None,
+            (now - timedelta(days=30)).isoformat(),
+            "Old",
+            "Buyer",
+            "Hidden",
+        )
+        taken = sale_order(TAKEN, TAKEN, now.isoformat(), "Other", "Buyer", "Taken")
+        other = Organization.objects.create(name="Other")
+        Conversation.objects.create(
+            organization=other,
+            channel="meli-postsales",
+            external_id=TAKEN,
+            title="Theirs",
+            needs_reply=True,
+            last_message_at=now,
+        )
+        calls = []
+
+        def open_response(request, timeout=15):
+            url = request.full_url
+            calls.append(url)
+            if "/orders/search" in url:
+                self.assertIn("seller=468424240", url)
+                query = parse_qs(urlparse(url).query)
+                start = datetime.fromisoformat(
+                    query["order.date_created.from"][0].replace("Z", "+00:00")
+                )
+                self.assertLess(
+                    abs(now - timedelta(days=7) - start),
+                    timedelta(minutes=5),
+                )
+                return TokenResponse(
+                    {
+                        "results": [recent, old, taken],
+                        "paging": {"total": 3, "limit": 50, "offset": 0},
+                    }
+                )
+            if "/messages/unread" in url:
+                self.assertIn("tag=post_sale", url)
+                return TokenResponse(
+                    {"results": [{"resource": f"/packs/{UNREAD}", "count": 1}]}
+                )
+            if f"/messages/packs/{PACK}/" in url:
+                self.assertIn("mark_as_read=false", url)
+                return TokenResponse(sale_thread("Necesito medidas?"))
+            if f"/messages/packs/{UNREAD}/" in url:
+                self.assertIn("mark_as_read=false", url)
+                return TokenResponse(sale_thread("Mensaje viejo", message_id="msg-old"))
+            if f"/orders/{UNREAD}" in url:
+                return TokenResponse(
+                    sale_order(UNREAD, UNREAD, now.isoformat(), "Ana", "Paz", "Pantalon")
+                )
+            raise AssertionError(url)
+
+        page = self.client.get("/inbox/")
+        self.assertContains(page, "Get recent post-sale messages")
+        with patch("meli.client.urlopen", side_effect=open_response):
+            response = self.client.post("/meli/postsale/sync/")
+        self.assertRedirects(
+            response,
+            "/inbox/?channel=meli-postsales&sync=ok",
+        )
+        self.assertFalse(Conversation.objects.filter(external_id=OLD).exists())
+        kept = Conversation.objects.get(external_id=TAKEN)
+        self.assertEqual(kept.organization, other)
+        self.assertEqual(kept.title, "Theirs")
+        loaded = Conversation.objects.get(external_id=PACK)
+        self.assertEqual(loaded.organization, self.organization)
+        self.assertEqual(loaded.title, "Willian Guido · Remera")
+        self.assertEqual(loaded.messages.get().body, "Necesito medidas?")
+        unread = Conversation.objects.get(external_id=UNREAD)
+        self.assertEqual(unread.messages.get().body, "Mensaje viejo")
+        self.assertFalse(any(TAKEN in url or OLD in url for url in calls if "/messages/packs/" in url))
+        shown = self.client.get("/inbox/?channel=meli-postsales&sync=ok")
+        self.assertContains(shown, "Post-sale messages loaded.")
+        self.assertContains(shown, "Necesito medidas?")
+        self.assertNotContains(shown, "Theirs")
+        self.client.force_login(
+            User.objects.create_user("bea", email="bea@example.com")
+        )
+        Membership.objects.create(
+            user=User.objects.get(username="bea"),
+            organization=other,
+            role=Membership.Role.OWNER,
+        )
+        hidden = self.client.get("/inbox/")
+        self.assertContains(hidden, "Theirs")
+        self.assertNotContains(hidden, "Necesito medidas?")
+
+    def test_reply_posts_to_the_pack_and_clears_the_dot(self):
+        now = timezone.now()
+        conversation = Conversation.objects.create(
+            organization=self.organization,
+            channel="meli-postsales",
+            external_id=PACK,
+            title="Willian Guido · Remera",
+            needs_reply=True,
+            last_message_at=now,
+        )
+        Message.objects.create(
+            organization=self.organization,
+            conversation=conversation,
+            direction=Message.Direction.INBOUND,
+            body="Necesito medidas?",
+            external_id="msg-1",
+            sent_at=now,
+        )
+        after = {
+            "conversation_status": {"status": "active"},
+            "paging": {"total": 2, "limit": 50, "offset": 0},
+            "messages": [
+                sale_thread("Necesito medidas?", created=now.isoformat())["messages"][0],
+                {
+                    "id": "msg-2",
+                    "from": {"user_id": 468424240},
+                    "to": {"user_id": 99},
+                    "text": "Mide 67x60cm",
+                    "message_date": {"created": timezone.now().isoformat()},
+                },
+            ],
+        }
+        calls = []
+
+        def open_response(request, timeout=15):
+            calls.append(request.full_url)
+            if getattr(request, "data", None):
+                self.assertIn("/messages/packs/", request.full_url)
+                self.assertIn("tag=post_sale", request.full_url)
+                return TokenResponse({"id": "msg-2"})
+            if "/messages/packs/" in request.full_url:
+                if sum("/messages/packs/" in url for url in calls) > 1:
+                    return TokenResponse(after)
+                return TokenResponse(sale_thread("Necesito medidas?", created=now.isoformat()))
+            if "/orders/" in request.full_url:
+                return TokenResponse(
+                    sale_order(PACK, PACK, now.isoformat(), "Willian", "Guido", "Remera")
+                )
+            raise AssertionError(request.full_url)
+
+        with patch("meli.client.urlopen", side_effect=open_response):
+            response = self.client.post(
+                f"/inbox/{conversation.pk}/reply/",
+                {"text": "Mide 67x60cm"},
+            )
+        self.assertTrue(any("/messages/packs/" in url and "tag=post_sale" in url for url in calls))
+        self.assertRedirects(
+            response,
+            f"/inbox/?channel=meli-postsales&conversation={conversation.pk}",
+        )
+        conversation.refresh_from_db()
+        self.assertFalse(conversation.needs_reply)
+        outbound = conversation.messages.get(direction=Message.Direction.OUTBOUND)
+        self.assertEqual(outbound.body, "Mide 67x60cm")
+        page = self.client.get(f"/inbox/?conversation={conversation.pk}")
+        self.assertContains(page, "Mide 67x60cm")
+        self.assertNotContains(page, "Write a reply")
+
+    def test_failed_reply_leaves_the_thread_unanswered(self):
+        now = timezone.now()
+        conversation = Conversation.objects.create(
+            organization=self.organization,
+            channel="meli-postsales",
+            external_id=PACK,
+            title="Willian Guido",
+            needs_reply=True,
+            last_message_at=now,
+        )
+
+        def open_response(request, timeout=15):
+            if getattr(request, "data", None):
+                raise URLError("down")
+            if "/messages/packs/" in request.full_url:
+                return TokenResponse(sale_thread("Necesito medidas?", created=now.isoformat()))
+            raise AssertionError(request.full_url)
+
+        with patch("meli.client.urlopen", side_effect=open_response):
+            response = self.client.post(
+                f"/inbox/{conversation.pk}/reply/",
+                {"text": "Mide 67x60cm"},
+            )
+        self.assertRedirects(
+            response,
+            f"/inbox/?channel=meli-postsales&conversation={conversation.pk}&reply=failed",
+        )
+        conversation.refresh_from_db()
+        self.assertTrue(conversation.needs_reply)
+        self.assertFalse(
+            conversation.messages.filter(direction=Message.Direction.OUTBOUND).exists()
+        )
+        page = self.client.get(response.url)
+        self.assertContains(page, "The answer could not be posted.")
+        self.assertContains(page, "Write a reply")
+
+    def test_reply_over_350_characters_is_rejected(self):
+        conversation = Conversation.objects.create(
+            organization=self.organization,
+            channel="meli-postsales",
+            external_id=PACK,
+            title="Willian Guido",
+            needs_reply=True,
+            last_message_at=timezone.now(),
+        )
+        with patch("meli.client.urlopen", side_effect=AssertionError("network")):
+            response = self.client.post(
+                f"/inbox/{conversation.pk}/reply/",
+                {"text": "a" * 351},
+            )
+        self.assertRedirects(
+            response,
+            f"/inbox/?channel=meli-postsales&conversation={conversation.pk}&reply=failed",
+        )
+        conversation.refresh_from_db()
+        self.assertTrue(conversation.needs_reply)
+
+    def test_unanswered_comes_first_and_old_answered_is_hidden(self):
+        now = timezone.now()
+        Conversation.objects.create(
+            organization=self.organization,
+            channel="meli-postsales",
+            external_id="old",
+            title="Old sale",
+            needs_reply=False,
+            last_message_at=now - timedelta(days=8),
+        )
+        Conversation.objects.create(
+            organization=self.organization,
+            channel="meli-postsales",
+            external_id="answered",
+            title="Answered sale",
+            needs_reply=False,
+            last_message_at=now - timedelta(hours=1),
+        )
+        Conversation.objects.create(
+            organization=self.organization,
+            channel="meli-postsales",
+            external_id="waiting",
+            title="Waiting sale",
+            needs_reply=True,
+            last_message_at=now - timedelta(days=2),
+        )
+        page = self.client.get("/inbox/")
+        content = page.content.decode()
+        self.assertLess(content.index("Waiting sale"), content.index("Answered sale"))
+        self.assertNotContains(page, "Old sale")
+        self.assertContains(page, "Show older")
+        older = self.client.get("/inbox/?since=all")
+        self.assertContains(older, "Old sale")
+        self.assertContains(older, "Waiting sale")
+        self.assertContains(older, "Last 7 days")
+
+    def test_attachment_only_message_is_labeled(self):
+        from meli.postsale import project_pack
+
+        project_pack(
+            self.organization,
+            "468424240",
+            PACK,
+            {
+                "conversation_status": {"status": "active"},
+                "messages": [
+                    {
+                        "id": "file-1",
+                        "from": {"user_id": 99},
+                        "text": "  ",
+                        "message_attachments": ["photo.jpg"],
+                        "message_date": {"created": timezone.now().isoformat()},
+                    }
+                ],
+            },
+            sale_order(PACK, PACK, timezone.now().isoformat(), "Willian", "Guido", "Remera"),
+        )
+        self.assertEqual(Conversation.objects.get().messages.get().body, "Attachment")
+        self.assertTrue(Conversation.objects.get().needs_reply)
