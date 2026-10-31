@@ -31,7 +31,7 @@ class AlertPanelTests(TestCase):
         self.assertContains(page, 'class="badge">3<')
         self.assertContains(
             page,
-            'href="/meli/questions/">You have 3 unanswered presales questions<',
+            'href="/inbox/?channel=meli-itemquestions">You have 3 unanswered presales questions<',
         )
 
     def test_one_unanswered_question_uses_the_singular(self):

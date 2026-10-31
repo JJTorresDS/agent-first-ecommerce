@@ -15,6 +15,7 @@ from accounts.views import (
     profile_menu,
     set_app_access,
 )
+from inbox.views import inbox, inbox_reply
 from meli.views import (
     mercadolibre_callback,
     mercadolibre_connect,
@@ -48,6 +49,8 @@ urlpatterns = [
     path("access/<int:user_id>/", set_app_access, name="set_app_access"),
     path("accounts/", include("allauth.urls")),
     path("health/", health, name="health"),
+    path("inbox/", inbox, name="inbox"),
+    path("inbox/<uuid:conversation_id>/reply/", inbox_reply, name="inbox_reply"),
     path("meli/", mercadolibre_settings, name="mercadolibre_settings"),
     path("meli/questions/", mercadolibre_questions, name="mercadolibre_questions"),
     path(

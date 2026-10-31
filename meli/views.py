@@ -26,7 +26,6 @@ from .client import (
     fetch_question,
     fetch_unanswered_questions,
     fetch_user_profile,
-    post_answer,
 )
 from .models import (
     ItemQuestion,
@@ -201,6 +200,9 @@ def _upsert_question(organization, payload, item):
         question_id=question_id,
         defaults=defaults,
     )
+    from .projection import project_question
+
+    project_question(question)
     return question
 
 
@@ -464,11 +466,26 @@ def _sync_open_questions(organization):
         _upsert_question(organization, raw, item)
 
 
-def _questions_redirect(question_id, failed=False):
-    url = f"{reverse('mercadolibre_questions')}?question={question_id}"
-    if failed:
-        return redirect(f"{url}&reply=failed")
-    return redirect(url)
+def _inbox_for_question(organization, question_id, *, failed=False, sync=""):
+    from inbox.models import Channel, Conversation
+    from inbox.views import inbox_location
+
+    channel = Channel.MELI_ITEM_QUESTIONS
+    conversation = None
+    if question_id:
+        conversation = Conversation.objects.filter(
+            organization=organization,
+            channel=channel,
+            external_id=question_id,
+        ).first()
+    return redirect(
+        inbox_location(
+            channel=channel,
+            conversation=conversation,
+            failed=failed,
+            sync=sync,
+        )
+    )
 
 
 @login_required
@@ -478,26 +495,17 @@ def mercadolibre_questions(request):
         return redirect("organization_setup")
     organization = membership.organization
     _backfill_questions(organization)
-    questions = ItemQuestion.objects.filter(organization=organization)
-    selected_id = request.GET.get("question")
-    selected = None
-    if selected_id:
-        selected = questions.filter(question_id=selected_id).first()
-    if selected is None:
-        selected = questions.first()
-    return render(
-        request,
-        "meli/questions.html",
-        {
-            "active_tab": "questions",
-            "questions": questions,
-            "selected": selected,
-            "reply_error": request.GET.get("reply") == "failed",
-            "can_sync": _account_for(organization) is not None,
-            "sync_error": request.GET.get("sync") == "failed",
-            "sync_ok": request.GET.get("sync") == "ok",
-            "open_question_count": unanswered_count(organization),
-        },
+    from inbox.channels import reconcile
+
+    reconcile(organization)
+    sync = request.GET.get("sync") or ""
+    if sync not in {"ok", "failed"}:
+        sync = ""
+    return _inbox_for_question(
+        organization,
+        request.GET.get("question") or "",
+        failed=request.GET.get("reply") == "failed",
+        sync=sync,
     )
 
 
@@ -507,12 +515,16 @@ def mercadolibre_questions_sync(request):
     membership = membership_for(request.user)
     if membership is None:
         return redirect("organization_setup")
-    url = reverse("mercadolibre_questions")
+    failed = False
     try:
         _sync_open_questions(membership.organization)
     except (OSError, ValueError, InvalidToken):
-        return redirect(f"{url}?sync=failed")
-    return redirect(f"{url}?sync=ok")
+        failed = True
+    return _inbox_for_question(
+        membership.organization,
+        "",
+        sync="failed" if failed else "ok",
+    )
 
 
 @login_required
@@ -526,24 +538,15 @@ def mercadolibre_question_reply(request, question_id):
         organization=membership.organization,
         question_id=question_id,
     )
-    text = (request.POST.get("text") or "").strip()
-    if not question.can_reply():
-        return _questions_redirect(question.question_id)
-    if not text or len(text) > 2000:
-        return _questions_redirect(question.question_id, failed=True)
-    account = _account_for(membership.organization)
-    if account is None:
-        return _questions_redirect(question.question_id, failed=True)
-    try:
-        post_answer(account.fresh_access_token(), question.question_id, text)
-    except (OSError, ValueError, InvalidToken):
-        return _questions_redirect(question.question_id, failed=True)
-    question.answer_text = text
-    question.status = "ANSWERED"
-    question.answered_at = timezone.now()
-    question.save(update_fields=["answer_text", "status", "answered_at", "updated_at"])
-    try:
-        _load_question(membership.organization, question.question_id)
-    except (OSError, ValueError, InvalidToken):
-        pass
-    return _questions_redirect(question.question_id)
+    from inbox.models import Channel, Conversation
+    from inbox.views import send_and_redirect
+
+    from .projection import project_question
+
+    project_question(question)
+    conversation = Conversation.objects.get(
+        organization=membership.organization,
+        channel=Channel.MELI_ITEM_QUESTIONS,
+        external_id=question.question_id,
+    )
+    return send_and_redirect(request, conversation)

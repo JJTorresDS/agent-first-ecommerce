@@ -94,6 +94,7 @@ INSTALLED_APPS = [
     "accounts",
     "tasks",
     "notifications",
+    "inbox",
     "meli",
 ]
 

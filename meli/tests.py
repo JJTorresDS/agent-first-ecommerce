@@ -10,6 +10,7 @@ from django.test import Client, TestCase, override_settings
 from django.utils import timezone
 
 from accounts.models import Membership, Organization
+from inbox.models import Conversation, Message
 from meli.models import (
     ItemQuestion,
     MercadoLibreAccount,
@@ -501,9 +502,23 @@ class ItemQuestionTests(TestCase):
         self.assertEqual(question.organization, self.organization)
         self.assertEqual(question.text, "Tienen stock?")
         self.assertEqual(question.item_title, "Perfume")
-        page = self.client.get("/meli/questions/")
+        conversation = Conversation.objects.get()
+        self.assertEqual(conversation.organization, self.organization)
+        self.assertEqual(conversation.channel, "meli-itemquestions")
+        self.assertEqual(conversation.external_id, question.question_id)
+        self.assertTrue(conversation.needs_reply)
+        inbound = conversation.messages.get()
+        self.assertEqual(inbound.direction, Message.Direction.INBOUND)
+        self.assertEqual(inbound.body, "Tienen stock?")
+        self.assertEqual(inbound.organization, self.organization)
+        with patch("meli.client.urlopen", side_effect=question_api):
+            self.client.post(WEBHOOK_URL, data=body, content_type="application/json")
+        self.assertEqual(Conversation.objects.count(), 1)
+        self.assertEqual(Message.objects.count(), 1)
+        page = self.client.get("/meli/questions/", follow=True)
         self.assertContains(page, "Tienen stock?")
         self.assertContains(page, "Perfume")
+        self.assertContains(page, "meli-itemquestions")
 
     def test_reply_is_posted_to_mercadolibre(self):
         ItemQuestion.objects.create(
@@ -514,6 +529,8 @@ class ItemQuestionTests(TestCase):
             text="Tienen stock?",
             status="UNANSWERED",
         )
+        self.client.get("/inbox/")
+        conversation = Conversation.objects.get(external_id="13683341904")
         calls = []
 
         def open_response(request, timeout=15):
@@ -524,16 +541,20 @@ class ItemQuestionTests(TestCase):
 
         with patch("meli.client.urlopen", side_effect=open_response):
             response = self.client.post(
-                "/meli/questions/13683341904/reply/",
+                f"/inbox/{conversation.pk}/reply/",
                 {"text": "Si hay"},
             )
         self.assertTrue(any(url.endswith("/answers") for url in calls))
         self.assertRedirects(
             response,
-            "/meli/questions/?question=13683341904",
+            f"/inbox/?channel=meli-itemquestions&conversation={conversation.pk}",
         )
         self.assertEqual(ItemQuestion.objects.get().answer_text, "Si hay")
-        page = self.client.get("/meli/questions/?question=13683341904")
+        outbound = conversation.messages.get(direction=Message.Direction.OUTBOUND)
+        self.assertEqual(outbound.body, "Si hay")
+        self.assertEqual(outbound.organization, self.organization)
+        self.assertFalse(Conversation.objects.get().needs_reply)
+        page = self.client.get(f"/inbox/?conversation={conversation.pk}")
         self.assertContains(page, "Si hay")
         self.assertNotContains(page, "Write a reply")
 
@@ -552,9 +573,9 @@ class ItemQuestionTests(TestCase):
             role=Membership.Role.OWNER,
         )
         self.client.force_login(other_user)
-        page = self.client.get("/meli/questions/")
+        page = self.client.get("/meli/questions/", follow=True)
         self.assertNotContains(page, "Tienen stock?")
-        self.assertContains(page, "No questions yet.")
+        self.assertContains(page, "No messages yet.")
 
     def test_open_question_shows_a_count(self):
         ItemQuestion.objects.create(
@@ -564,7 +585,7 @@ class ItemQuestionTests(TestCase):
             text="Tienen stock?",
             status="UNANSWERED",
         )
-        page = self.client.get("/meli/questions/")
+        page = self.client.get("/meli/questions/", follow=True)
         self.assertContains(page, 'class="badge">1<')
         self.assertContains(page, 'class="open-dot"')
         organization = self.client.get("/organization/")
@@ -572,7 +593,7 @@ class ItemQuestionTests(TestCase):
         self.assertContains(organization, 'class="badge">1<')
         self.assertContains(organization, 'aria-label="Alerts, 1"')
         self.assertContains(organization, "You have 1 unanswered presales question")
-        self.assertContains(organization, 'href="/meli/questions/"')
+        self.assertContains(organization, 'href="/inbox/?channel=meli-itemquestions"')
 
     def test_answered_question_has_no_count(self):
         ItemQuestion.objects.create(
@@ -582,7 +603,7 @@ class ItemQuestionTests(TestCase):
             status="ANSWERED",
             answer_text="Si hay",
         )
-        page = self.client.get("/meli/questions/")
+        page = self.client.get("/meli/questions/", follow=True)
         self.assertNotContains(page, 'class="badge"')
         self.assertNotContains(page, 'class="open-dot"')
         organization = self.client.get("/organization/")
@@ -597,7 +618,7 @@ class ItemQuestionTests(TestCase):
             text="Only other",
             status="UNANSWERED",
         )
-        page = self.client.get("/meli/questions/")
+        page = self.client.get("/meli/questions/", follow=True)
         self.assertNotContains(page, "Only other")
         self.assertNotContains(page, 'class="badge"')
         organization = self.client.get("/organization/")
@@ -640,19 +661,26 @@ class ItemQuestionTests(TestCase):
                 return TokenResponse({"questions": [QUESTION], "total": 1})
             return question_api(request, timeout)
 
-        page = self.client.get("/meli/questions/")
+        page = self.client.get("/meli/questions/", follow=True)
         self.assertContains(page, "Get open questions")
         with patch("meli.client.urlopen", side_effect=open_response):
             response = self.client.post("/meli/questions/sync/")
-        self.assertRedirects(response, "/meli/questions/?sync=ok")
+        self.assertRedirects(response, "/inbox/?channel=meli-itemquestions&sync=ok")
         self.assertEqual(sum("/questions/search" in url for url in calls), 1)
         question = ItemQuestion.objects.get()
         self.assertEqual(question.organization, self.organization)
         self.assertEqual(question.text, "Tienen stock?")
         self.assertEqual(question.item_title, "Perfume")
+        conversation = Conversation.objects.get()
+        self.assertEqual(conversation.organization, self.organization)
+        self.assertEqual(conversation.channel, "meli-itemquestions")
+        self.assertEqual(
+            conversation.messages.get(direction=Message.Direction.INBOUND).body,
+            "Tienen stock?",
+        )
         calls.clear()
         with patch("meli.client.urlopen", side_effect=open_response):
-            shown = self.client.get("/meli/questions/?sync=ok")
+            shown = self.client.get("/meli/questions/?sync=ok", follow=True)
         self.assertEqual(calls, [])
         self.assertContains(shown, "Tienen stock?")
         self.assertContains(shown, "Open questions loaded.")
@@ -664,7 +692,7 @@ class ItemQuestionTests(TestCase):
             role=Membership.Role.OWNER,
         )
         self.client.force_login(other_user)
-        hidden = self.client.get("/meli/questions/")
+        hidden = self.client.get("/meli/questions/", follow=True)
         self.assertNotContains(hidden, "Tienen stock?")
 
     def test_sync_leaves_another_organizations_question_in_place(self):
@@ -686,14 +714,138 @@ class ItemQuestionTests(TestCase):
         row = ItemQuestion.objects.get(question_id="13683341904")
         self.assertEqual(row.organization, other)
         self.assertEqual(row.text, "Theirs")
-        page = self.client.get("/meli/questions/")
+        self.assertFalse(Conversation.objects.filter(organization=self.organization).exists())
+        self.assertFalse(Conversation.objects.filter(external_id="13683341904").exists())
+        page = self.client.get("/meli/questions/", follow=True)
         self.assertNotContains(page, "Theirs")
         self.assertNotContains(page, "Tienen stock?")
 
     def test_sync_failure_stores_nothing(self):
         with patch("meli.client.urlopen", side_effect=URLError("down")):
             response = self.client.post("/meli/questions/sync/")
-        self.assertRedirects(response, "/meli/questions/?sync=failed")
+        self.assertRedirects(response, "/inbox/?channel=meli-itemquestions&sync=failed")
         self.assertEqual(ItemQuestion.objects.count(), 0)
-        page = self.client.get("/meli/questions/?sync=failed")
+        page = self.client.get("/meli/questions/?sync=failed", follow=True)
         self.assertContains(page, "Open questions could not be loaded.")
+
+    def test_failed_reply_leaves_the_question_unanswered(self):
+        ItemQuestion.objects.create(
+            organization=self.organization,
+            question_id="13683341904",
+            text="Tienen stock?",
+            status="UNANSWERED",
+        )
+        self.client.get("/inbox/")
+        conversation = Conversation.objects.get()
+        with patch("meli.client.urlopen", side_effect=URLError("down")):
+            response = self.client.post(
+                f"/inbox/{conversation.pk}/reply/",
+                {"text": "Si hay"},
+            )
+        self.assertRedirects(
+            response,
+            f"/inbox/?channel=meli-itemquestions&conversation={conversation.pk}&reply=failed",
+        )
+        question = ItemQuestion.objects.get()
+        self.assertEqual(question.status, "UNANSWERED")
+        self.assertEqual(question.answer_text, "")
+        self.assertFalse(conversation.messages.filter(direction=Message.Direction.OUTBOUND).exists())
+        page = self.client.get(response.url)
+        self.assertContains(page, "The answer could not be posted.")
+        self.assertContains(page, "Write a reply")
+
+    def test_another_organization_cannot_open_or_reply(self):
+        ItemQuestion.objects.create(
+            organization=self.organization,
+            question_id="13683341904",
+            text="Tienen stock?",
+            status="UNANSWERED",
+        )
+        self.client.get("/inbox/")
+        conversation = Conversation.objects.get()
+        other_user = User.objects.create_user("bea", email="bea@example.com")
+        other = Organization.objects.create(name="Other")
+        Membership.objects.create(
+            user=other_user,
+            organization=other,
+            role=Membership.Role.OWNER,
+        )
+        self.client.force_login(other_user)
+        page = self.client.get(f"/inbox/?conversation={conversation.pk}")
+        self.assertNotContains(page, "Tienen stock?")
+        self.assertContains(page, "No messages yet.")
+        reply = self.client.post(
+            f"/inbox/{conversation.pk}/reply/",
+            {"text": "No"},
+        )
+        self.assertEqual(reply.status_code, 404)
+        self.assertEqual(ItemQuestion.objects.get().answer_text, "")
+
+    def test_unknown_channel_hides_every_organization(self):
+        ItemQuestion.objects.create(
+            organization=self.organization,
+            question_id="1",
+            text="Mine",
+            status="UNANSWERED",
+        )
+        other = Organization.objects.create(name="Other")
+        ItemQuestion.objects.create(
+            organization=other,
+            question_id="2",
+            text="Only other",
+            status="UNANSWERED",
+        )
+        page = self.client.get("/inbox/?channel=not-a-channel")
+        self.assertNotContains(page, "Mine")
+        self.assertNotContains(page, "Only other")
+        self.assertContains(page, "No messages yet.")
+
+    def test_clearing_an_answer_removes_the_outbound_message(self):
+        from meli.projection import project_question
+
+        question = ItemQuestion.objects.create(
+            organization=self.organization,
+            question_id="13683341904",
+            text="Tienen stock?",
+            status="ANSWERED",
+            answer_text="Si hay",
+        )
+        project_question(question)
+        project_question(question)
+        self.assertEqual(Message.objects.count(), 2)
+        question.answer_text = ""
+        question.status = "UNANSWERED"
+        question.answered_at = None
+        question.save()
+        project_question(question)
+        conversation = Conversation.objects.get()
+        self.assertTrue(conversation.needs_reply)
+        self.assertEqual(conversation.messages.count(), 1)
+        self.assertEqual(conversation.messages.get().direction, Message.Direction.INBOUND)
+
+    def test_migration_projects_an_existing_question(self):
+        import importlib
+
+        from django.apps import apps
+
+        project_questions = importlib.import_module(
+            "meli.migrations.0006_project_item_questions"
+        ).project_questions
+        ItemQuestion.objects.create(
+            organization=self.organization,
+            question_id="55",
+            item_title="Perfume",
+            item_permalink="https://articulo.mercadolibre.com.ar/MLA1",
+            text="Tienen stock?",
+            status="UNANSWERED",
+        )
+        project_questions(apps, None)
+        conversation = Conversation.objects.get(external_id="55")
+        self.assertEqual(conversation.organization, self.organization)
+        self.assertEqual(conversation.channel, "meli-itemquestions")
+        self.assertEqual(conversation.title, "Perfume")
+        self.assertTrue(conversation.needs_reply)
+        self.assertEqual(conversation.safe_link(), "https://articulo.mercadolibre.com.ar/MLA1")
+        self.assertEqual(conversation.messages.get().body, "Tienen stock?")
+        project_questions(apps, None)
+        self.assertEqual(conversation.messages.count(), 1)

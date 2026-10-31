@@ -1,15 +1,19 @@
+from urllib.parse import urlencode
+
 from django.urls import reverse
 
-from .models import ItemQuestion
+from inbox.channels import reconcile
+from inbox.models import Channel, Conversation
 
 
 def unanswered_count(organization):
     if organization is None:
         return 0
-    return ItemQuestion.objects.filter(
+    reconcile(organization)
+    return Conversation.objects.filter(
         organization=organization,
-        status__iexact="UNANSWERED",
-        answer_text="",
+        channel=Channel.MELI_ITEM_QUESTIONS,
+        needs_reply=True,
     ).count()
 
 
@@ -18,8 +22,9 @@ def presales_questions(organization):
     if not count:
         return None
     noun = "question" if count == 1 else "questions"
+    url = f"{reverse('inbox')}?{urlencode([('channel', Channel.MELI_ITEM_QUESTIONS)])}"
     return {
         "count": count,
         "message": f"You have {count} unanswered presales {noun}",
-        "url": reverse("mercadolibre_questions"),
+        "url": url,
     }

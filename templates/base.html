@@ -108,6 +108,8 @@
     .tab:active { transform: scale(0.97); }
     .badge { display: inline-flex; align-items: center; justify-content: center; min-width: 1.1rem; height: 1.1rem; margin-left: 0.35rem; padding: 0 0.3rem; border-radius: 999px; background: #e23b2f; color: #fff; font-size: 0.7rem; line-height: 1; vertical-align: middle; }
     .open-dot { display: inline-block; width: 0.45rem; height: 0.45rem; margin-left: 0.3rem; border-radius: 50%; background: #e23b2f; vertical-align: middle; }
+    .chat-list .channel, .chat-thread .channel { color: #777; font-size: 0.75rem; font-weight: 400; }
+    .chat-thread .channel { margin: 0; }
     .topbar { display: flex; justify-content: flex-end; margin: -0.75rem 0 0.5rem; }
     .alerts-wrap { position: relative; }
     button.alerts { border: 0; background: transparent; padding: 0; cursor: pointer; }
@@ -316,8 +318,17 @@
       {% endif %}
       {% if organization %}
         <div class="nav-section">
+          <p class="nav-label">Inbox</p>
+          <a class="nav-link{% if url_name == 'inbox' or url_name == 'inbox_reply' %} active{% endif %}" title="Inbox" href="{% url 'inbox' %}">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 3.5h10v7.2H6.2L3 13.2z"/></svg>
+            <span class="nav-text">Inbox</span>
+          </a>
+        </div>
+      {% endif %}
+      {% if organization %}
+        <div class="nav-section">
           <p class="nav-label">Integrations</p>
-          <a class="nav-link{% if url_name == 'mercadolibre_settings' or url_name == 'mercadolibre_token' or url_name == 'mercadolibre_questions' or url_name == 'mercadolibre_question_reply' %} active{% endif %}" title="Mercado Libre" href="{% url 'mercadolibre_settings' %}">
+          <a class="nav-link{% if url_name == 'mercadolibre_settings' or url_name == 'mercadolibre_token' %} active{% endif %}" title="Mercado Libre" href="{% url 'mercadolibre_settings' %}">
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 2.5v3M10 2.5v3M4.5 5.5h7v3.2a3.5 3.5 0 0 1-7 0zM8 11.7V14"/></svg>
             <span class="nav-text">Mercado Libre</span>
           </a>
