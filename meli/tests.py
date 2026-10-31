@@ -547,7 +547,7 @@ class ItemQuestionTests(TestCase):
         self.assertTrue(any(url.endswith("/answers") for url in calls))
         self.assertRedirects(
             response,
-            f"/inbox/?channel=meli-itemquestions&conversation={conversation.pk}",
+            f"/inbox/?conversation={conversation.pk}",
         )
         self.assertEqual(ItemQuestion.objects.get().answer_text, "Si hay")
         outbound = conversation.messages.get(direction=Message.Direction.OUTBOUND)
@@ -593,7 +593,7 @@ class ItemQuestionTests(TestCase):
         self.assertContains(organization, 'class="badge">1<')
         self.assertContains(organization, 'aria-label="Alerts, 1"')
         self.assertContains(organization, "You have 1 unanswered presales question")
-        self.assertContains(organization, 'href="/inbox/?channel=meli-itemquestions"')
+        self.assertContains(organization, 'href="/inbox/"')
 
     def test_answered_question_has_no_count(self):
         ItemQuestion.objects.create(
@@ -665,7 +665,7 @@ class ItemQuestionTests(TestCase):
         self.assertContains(page, "Get open questions")
         with patch("meli.client.urlopen", side_effect=open_response):
             response = self.client.post("/meli/questions/sync/")
-        self.assertRedirects(response, "/inbox/?channel=meli-itemquestions&sync=ok")
+        self.assertRedirects(response, "/inbox/?sync=ok")
         self.assertEqual(sum("/questions/search" in url for url in calls), 1)
         question = ItemQuestion.objects.get()
         self.assertEqual(question.organization, self.organization)
@@ -723,7 +723,7 @@ class ItemQuestionTests(TestCase):
     def test_sync_failure_stores_nothing(self):
         with patch("meli.client.urlopen", side_effect=URLError("down")):
             response = self.client.post("/meli/questions/sync/")
-        self.assertRedirects(response, "/inbox/?channel=meli-itemquestions&sync=failed")
+        self.assertRedirects(response, "/inbox/?sync=failed")
         self.assertEqual(ItemQuestion.objects.count(), 0)
         page = self.client.get("/meli/questions/?sync=failed", follow=True)
         self.assertContains(page, "Open questions could not be loaded.")
@@ -744,7 +744,7 @@ class ItemQuestionTests(TestCase):
             )
         self.assertRedirects(
             response,
-            f"/inbox/?channel=meli-itemquestions&conversation={conversation.pk}&reply=failed",
+            f"/inbox/?conversation={conversation.pk}&reply=failed",
         )
         question = ItemQuestion.objects.get()
         self.assertEqual(question.status, "UNANSWERED")
@@ -781,7 +781,7 @@ class ItemQuestionTests(TestCase):
         self.assertEqual(reply.status_code, 404)
         self.assertEqual(ItemQuestion.objects.get().answer_text, "")
 
-    def test_unknown_channel_hides_every_organization(self):
+    def test_channel_query_still_hides_another_organization(self):
         ItemQuestion.objects.create(
             organization=self.organization,
             question_id="1",
@@ -796,9 +796,9 @@ class ItemQuestionTests(TestCase):
             status="UNANSWERED",
         )
         page = self.client.get("/inbox/?channel=not-a-channel")
-        self.assertNotContains(page, "Mine")
+        self.assertContains(page, "Mine")
+        self.assertContains(page, "meli-itemquestions")
         self.assertNotContains(page, "Only other")
-        self.assertContains(page, "No messages yet.")
 
     def test_clearing_an_answer_removes_the_outbound_message(self):
         from meli.projection import project_question
@@ -978,7 +978,7 @@ class PostSaleTests(TestCase):
         self.assertEqual(Message.objects.count(), 1)
         page = self.client.get("/organization/")
         self.assertContains(page, "You have 1 unanswered post-sale message")
-        self.assertContains(page, 'href="/inbox/?channel=meli-postsales"')
+        self.assertContains(page, 'href="/inbox/"')
         self.assertNotContains(page, "post-sale messages")
         other_user = User.objects.create_user("bea", email="bea@example.com")
         other = Organization.objects.create(name="Other")
@@ -1065,7 +1065,7 @@ class PostSaleTests(TestCase):
             response = self.client.post("/meli/postsale/sync/")
         self.assertRedirects(
             response,
-            "/inbox/?channel=meli-postsales&sync=ok",
+            "/inbox/?sync=ok",
         )
         self.assertFalse(Conversation.objects.filter(external_id=OLD).exists())
         kept = Conversation.objects.get(external_id=TAKEN)
@@ -1078,7 +1078,7 @@ class PostSaleTests(TestCase):
         unread = Conversation.objects.get(external_id=UNREAD)
         self.assertEqual(unread.messages.get().body, "Mensaje viejo")
         self.assertFalse(any(TAKEN in url or OLD in url for url in calls if "/messages/packs/" in url))
-        shown = self.client.get("/inbox/?channel=meli-postsales&sync=ok")
+        shown = self.client.get("/inbox/?sync=ok")
         self.assertContains(shown, "Post-sale messages loaded.")
         self.assertContains(shown, "Necesito medidas?")
         self.assertNotContains(shown, "Theirs")
@@ -1132,22 +1132,22 @@ class PostSaleTests(TestCase):
             response = self.client.post("/meli/postsale/sync/")
             self.assertRedirects(
                 response,
-                "/inbox/?channel=meli-postsales&sync=queued",
+                "/inbox/?sync=queued",
             )
             self.assertEqual(opened.call_count, 0)
             self.assertEqual(fake.lists[QUEUE], [str(self.organization.pk)])
             again = self.client.post("/meli/postsale/sync/")
             self.assertRedirects(
                 again,
-                "/inbox/?channel=meli-postsales&sync=queued",
+                "/inbox/?sync=queued",
             )
             self.assertEqual(fake.lists[QUEUE], [str(self.organization.pk)])
-            waiting = self.client.get("/inbox/?channel=meli-postsales")
+            waiting = self.client.get("/inbox/")
             self.assertContains(waiting, "Post-sale messages are loading.")
             self.assertContains(waiting, 'hx-trigger="every 3s"')
             self.assertFalse(Conversation.objects.filter(external_id=PACK).exists())
             self.assertTrue(run_next_postsale_job(block_seconds=0))
-            loaded = self.client.get("/inbox/?channel=meli-postsales")
+            loaded = self.client.get("/inbox/")
         self.assertEqual(fake.values[status_key(self.organization.pk)], "ok")
         self.assertContains(loaded, "Post-sale messages loaded.")
         self.assertNotContains(loaded, "Post-sale messages are loading.")
@@ -1215,7 +1215,7 @@ class PostSaleTests(TestCase):
         self.assertTrue(any("/messages/packs/" in url and "tag=post_sale" in url for url in calls))
         self.assertRedirects(
             response,
-            f"/inbox/?channel=meli-postsales&conversation={conversation.pk}",
+            f"/inbox/?conversation={conversation.pk}",
         )
         conversation.refresh_from_db()
         self.assertFalse(conversation.needs_reply)
@@ -1250,7 +1250,7 @@ class PostSaleTests(TestCase):
             )
         self.assertRedirects(
             response,
-            f"/inbox/?channel=meli-postsales&conversation={conversation.pk}&reply=failed",
+            f"/inbox/?conversation={conversation.pk}&reply=failed",
         )
         conversation.refresh_from_db()
         self.assertTrue(conversation.needs_reply)
@@ -1277,7 +1277,7 @@ class PostSaleTests(TestCase):
             )
         self.assertRedirects(
             response,
-            f"/inbox/?channel=meli-postsales&conversation={conversation.pk}&reply=failed",
+            f"/inbox/?conversation={conversation.pk}&reply=failed",
         )
         conversation.refresh_from_db()
         self.assertTrue(conversation.needs_reply)

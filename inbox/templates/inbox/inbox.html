@@ -14,10 +14,10 @@
     <p class="muted">Post-sale messages loaded.</p>
   {% endif %}
   {% if sync_error %}
-    <p class="error">{% if channel == "meli-postsales" %}Post-sale messages could not be loaded.{% else %}Open questions could not be loaded.{% endif %}</p>
+    <p class="error">{% if selected.channel == "meli-postsales" %}Post-sale messages could not be loaded.{% else %}Open questions could not be loaded.{% endif %}</p>
   {% endif %}
   {% if sync_ok %}
-    <p class="muted">{% if channel == "meli-postsales" %}Post-sale messages loaded.{% else %}Open questions loaded.{% endif %}</p>
+    <p class="muted">{% if selected.channel == "meli-postsales" %}Post-sale messages loaded.{% else %}Open questions loaded.{% endif %}</p>
   {% endif %}
   {% for action in list_actions %}
     <form class="sync" method="post" action="{{ action.url }}">
@@ -32,12 +32,6 @@
       <a href="{% querystring since="all" conversation=None reply=None sync=None %}">Show older</a>
     {% endif %}
   </p>
-  <nav class="tabs" aria-label="Channels">
-    <a class="tab{% if not channel %} active{% endif %}" href="{% querystring channel=None conversation=None reply=None sync=None %}">All</a>
-    {% for item in channels %}
-      <a class="tab{% if channel == item %} active{% endif %}" href="{% querystring channel=item conversation=None reply=None sync=None %}">{{ item }}</a>
-    {% endfor %}
-  </nav>
   <div class="chat">
     <aside class="chat-list">
       {% for conversation in conversations %}

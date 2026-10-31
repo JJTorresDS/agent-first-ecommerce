@@ -489,7 +489,6 @@ def _inbox_for_question(organization, question_id, *, failed=False, sync=""):
         ).first()
     return redirect(
         inbox_location(
-            channel=channel,
             conversation=conversation,
             failed=failed,
             sync=sync,
@@ -567,7 +566,6 @@ def mercadolibre_postsale_sync(request):
     membership = membership_for(request.user)
     if membership is None:
         return redirect("organization_setup")
-    from inbox.models import Channel
     from inbox.views import inbox_location
 
     from .jobs import enqueue_postsale_sync, postsale_queue_enabled
@@ -582,7 +580,6 @@ def mercadolibre_postsale_sync(request):
             failed = True
         return redirect(
             inbox_location(
-                channel=Channel.MELI_POSTSALES,
                 sync="failed" if failed else "queued",
             )
         )
@@ -594,7 +591,6 @@ def mercadolibre_postsale_sync(request):
         failed = True
     return redirect(
         inbox_location(
-            channel=Channel.MELI_POSTSALES,
             sync="failed" if failed else "ok",
         )
     )

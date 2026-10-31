@@ -1,5 +1,3 @@
-from urllib.parse import urlencode
-
 from django.urls import reverse
 
 from inbox.channels import reconcile
@@ -32,11 +30,10 @@ def postsale_messages(organization):
     if not count:
         return None
     noun = "message" if count == 1 else "messages"
-    url = f"{reverse('inbox')}?{urlencode([('channel', Channel.MELI_POSTSALES)])}"
     return {
         "count": count,
         "message": f"You have {count} unanswered post-sale {noun}",
-        "url": url,
+        "url": reverse("inbox"),
     }
 
 
@@ -45,9 +42,8 @@ def presales_questions(organization):
     if not count:
         return None
     noun = "question" if count == 1 else "questions"
-    url = f"{reverse('inbox')}?{urlencode([('channel', Channel.MELI_ITEM_QUESTIONS)])}"
     return {
         "count": count,
         "message": f"You have {count} unanswered presales {noun}",
-        "url": url,
+        "url": reverse("inbox"),
     }

@@ -15,11 +15,8 @@ from .channels import ReplyFailed, list_actions, open_inbox, reply_limit_for, se
 from .models import Conversation
 
 
-def inbox_location(*, channel="", conversation=None, failed=False, sync=""):
+def inbox_location(*, conversation=None, failed=False, sync=""):
     params = []
-    chosen = channel or (conversation.channel if conversation is not None else "")
-    if chosen:
-        params.append(("channel", chosen))
     if conversation is not None:
         params.append(("conversation", str(conversation.pk)))
     if failed:
@@ -52,7 +49,6 @@ def send_and_redirect(request, conversation):
             failed = True
     return redirect(
         inbox_location(
-            channel=conversation.channel,
             conversation=conversation,
             failed=failed,
         )
@@ -66,16 +62,8 @@ def inbox(request):
         return redirect("organization_setup")
     organization = membership.organization
     open_inbox(organization)
-    channel = request.GET.get("channel") or ""
     show_older = request.GET.get("since") == "all"
     conversations = Conversation.objects.filter(organization=organization)
-    channels = list(
-        conversations.order_by("channel").values_list("channel", flat=True).distinct()
-    )
-    if channel and channel not in channels:
-        channels.append(channel)
-    if channel:
-        conversations = conversations.filter(channel=channel)
     if not show_older:
         cutoff = timezone.now() - timedelta(days=7)
         conversations = conversations.filter(
@@ -103,8 +91,6 @@ def inbox(request):
         "inbox/inbox.html",
         {
             "conversations": conversations,
-            "channels": channels,
-            "channel": channel,
             "selected": selected,
             "messages": messages,
             "can_reply": can_reply,
