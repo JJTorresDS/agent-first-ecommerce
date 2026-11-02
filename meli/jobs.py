@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import sys
@@ -10,9 +11,11 @@ from django.db import close_old_connections
 logger = logging.getLogger(__name__)
 
 QUEUE = "vimple:postsale:queue"
+REPLY_QUEUE = "vimple:reply:queue"
 ACTIVE_TTL = 30 * 60
 DONE_TTL = 2 * 60
 BLOCK_SECONDS = 5
+_local_reply_status = {}
 
 _started = False
 _start_lock = threading.Lock()
@@ -24,6 +27,10 @@ def postsale_queue_enabled():
 
 def status_key(organization_id):
     return f"vimple:postsale:status:{organization_id}"
+
+
+def reply_status_key(conversation_id):
+    return f"vimple:reply:status:{conversation_id}"
 
 
 def _client():
@@ -91,10 +98,151 @@ def _run_job(organization_id):
         close_old_connections()
 
 
+def reply_status(conversation):
+    """queued, running, ok, failed, or an empty string when no reply is in flight."""
+    if conversation is None:
+        return ""
+    if postsale_queue_enabled():
+        try:
+            return _client().get(reply_status_key(conversation.pk)) or ""
+        except Exception:
+            logger.exception("Could not read the reply status")
+            return ""
+    return _local_reply_status.get(str(conversation.pk), "")
+
+
+def _set_reply_status(conversation_id, value):
+    ttl = ACTIVE_TTL if value in {"queued", "running"} else DONE_TTL
+    if postsale_queue_enabled():
+        _client().set(reply_status_key(conversation_id), value, ex=ttl)
+        return
+    _local_reply_status[str(conversation_id)] = value
+
+
+def enqueue_reply(conversation):
+    """Queue one reply. A reply already queued or running is left as it is."""
+    client = _client()
+    key = reply_status_key(conversation.pk)
+    current = client.get(key)
+    if current in {"queued", "running"}:
+        return current
+    client.set(key, "queued", ex=ACTIVE_TTL)
+    client.lpush(
+        REPLY_QUEUE,
+        json.dumps(
+            {
+                "organization_id": str(conversation.organization_id),
+                "conversation_id": str(conversation.pk),
+            }
+        ),
+    )
+    return "queued"
+
+
+def dispatch_reply(conversation):
+    """Queue the reply, or run it now when Redis is unset.
+
+    manage.py test runs it inline so the existing reply tests stay deterministic.
+    A local server without Redis starts a daemon thread and returns immediately.
+    """
+    if postsale_queue_enabled():
+        try:
+            return enqueue_reply(conversation)
+        except Exception:
+            logger.exception("Could not queue the reply")
+            _drop_pending(conversation.pk)
+            return "failed"
+    if _under_test():
+        run_reply_job(conversation.organization_id, conversation.pk)
+        return reply_status(conversation) or "ok"
+    _set_reply_status(conversation.pk, "queued")
+    threading.Thread(
+        target=run_reply_job,
+        args=(str(conversation.organization_id), str(conversation.pk)),
+        name="inbox-reply",
+        daemon=True,
+    ).start()
+    return "queued"
+
+
+def run_next_reply_job(block_seconds=BLOCK_SECONDS):
+    """Run one queued reply. Returns False when the list is empty."""
+    item = _client().brpop(REPLY_QUEUE, timeout=block_seconds)
+    if not item:
+        return False
+    _queue_name, payload = item
+    try:
+        job = json.loads(payload)
+    except ValueError:
+        logger.exception("Reply queue item was not JSON")
+        return True
+    run_reply_job(job.get("organization_id"), job.get("conversation_id"))
+    return True
+
+
+def run_reply_job(organization_id, conversation_id):
+    from inbox.channels import ReplyFailed, sender_for
+    from inbox.models import Conversation, Message
+
+    close_old_connections()
+    try:
+        conversation = Conversation.objects.filter(
+            organization_id=organization_id,
+            pk=conversation_id,
+        ).first()
+        if conversation is None:
+            return
+        _set_reply_status(conversation_id, "running")
+        pending = conversation.messages.filter(external_id="pending").first()
+        if pending is None:
+            _set_reply_status(
+                conversation_id,
+                "ok" if not conversation.needs_reply else "failed",
+            )
+            return
+        send = sender_for(conversation.channel)
+        try:
+            if send is not None:
+                send(conversation, pending.body)
+        except ReplyFailed:
+            _drop_pending(conversation.pk)
+            _set_reply_status(conversation_id, "failed")
+        else:
+            if Message.objects.filter(
+                conversation_id=conversation.pk,
+                external_id="pending",
+            ).exists():
+                _drop_pending(conversation.pk)
+                _set_reply_status(conversation_id, "failed")
+            else:
+                _set_reply_status(conversation_id, "ok")
+    except Exception:
+        logger.exception("Reply failed for %s", conversation_id)
+        _drop_pending(conversation_id)
+        _set_reply_status(conversation_id, "failed")
+    finally:
+        close_old_connections()
+
+
+def _drop_pending(conversation_id):
+    from inbox.models import Message
+
+    Message.objects.filter(
+        conversation_id=conversation_id,
+        external_id="pending",
+    ).delete()
+
+
+def _under_test():
+    command = sys.argv[1] if len(sys.argv) > 1 else ""
+    return command == "test"
+
+
 def _worker_loop():
     while True:
         try:
             run_next_postsale_job()
+            run_next_reply_job(block_seconds=0)
         except Exception:
             logger.exception("Post-sale worker lost the Redis connection")
             close_old_connections()

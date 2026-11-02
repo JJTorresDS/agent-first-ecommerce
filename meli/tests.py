@@ -17,6 +17,7 @@ from meli.models import (
     MercadoLibreNotification,
     SellerProfile,
 )
+from meli.projection import project_question
 from meli.tokens import encrypt_secret
 
 User = get_user_model()
@@ -529,7 +530,7 @@ class ItemQuestionTests(TestCase):
             text="Tienen stock?",
             status="UNANSWERED",
         )
-        self.client.get("/inbox/")
+        project_question(ItemQuestion.objects.get())
         conversation = Conversation.objects.get(external_id="13683341904")
         calls = []
 
@@ -567,6 +568,7 @@ class ItemQuestionTests(TestCase):
             text="Tienen stock?",
             status="UNANSWERED",
         )
+        project_question(ItemQuestion.objects.get())
         client = Client(enforce_csrf_checks=True)
         client.force_login(self.user)
         page = client.get("/inbox/")
@@ -586,6 +588,122 @@ class ItemQuestionTests(TestCase):
         self.assertRedirects(
             response,
             f"/inbox/?conversation={conversation.pk}",
+        )
+
+    def test_opening_the_inbox_does_not_call_mercadolibre(self):
+        MercadoLibreNotification.objects.create(
+            organization=self.organization,
+            topic="questions",
+            resource="/questions/13683341904",
+            user_id="468424240",
+            payload={
+                "topic": "questions",
+                "resource": "/questions/13683341904",
+            },
+        )
+        with patch("meli.client.urlopen", return_value=TokenResponse(QUESTION)) as opened:
+            page = self.client.get("/inbox/")
+        self.assertEqual(opened.call_count, 0)
+        self.assertEqual(ItemQuestion.objects.count(), 0)
+        self.assertContains(page, "No messages yet.")
+
+    def test_bell_counts_needs_reply_without_rewriting_questions(self):
+        project_question(
+            ItemQuestion.objects.create(
+                organization=self.organization,
+                question_id="1",
+                text="Mine",
+                status="UNANSWERED",
+            )
+        )
+        ItemQuestion.objects.create(
+            organization=self.organization,
+            question_id="2",
+            text="Not projected",
+            status="UNANSWERED",
+        )
+        other = Organization.objects.create(name="Other")
+        project_question(
+            ItemQuestion.objects.create(
+                organization=other,
+                question_id="3",
+                text="Theirs",
+                status="UNANSWERED",
+            )
+        )
+        with patch("inbox.channels.reconcile", side_effect=AssertionError("reconcile")):
+            page = self.client.get("/organization/")
+        self.assertEqual(page.context["alert_count"], 1)
+        self.assertContains(page, "You have 1 unanswered presales question")
+
+    @override_settings(REDIS_URL="redis://reply-test")
+    def test_reply_is_queued_until_the_worker_runs(self):
+        import json
+
+        from meli.jobs import REPLY_QUEUE, reply_status_key, run_next_reply_job, run_reply_job
+
+        project_question(
+            ItemQuestion.objects.create(
+                organization=self.organization,
+                question_id="13683341904",
+                item_id="MLA1",
+                item_title="Perfume",
+                text="Tienen stock?",
+                status="UNANSWERED",
+            )
+        )
+        conversation = Conversation.objects.get(external_id="13683341904")
+        fake = _FakeRedis()
+
+        def open_response(request, timeout=15):
+            if "/questions/" in request.full_url and not request.full_url.endswith("/answers"):
+                return TokenResponse(ANSWERED)
+            return question_api(request, timeout)
+
+        with (
+            patch("meli.jobs._client", return_value=fake),
+            patch("meli.client.urlopen", side_effect=open_response) as opened,
+        ):
+            response = self.client.post(
+                f"/inbox/{conversation.pk}/reply/",
+                {"text": "Si hay"},
+                HTTP_HX_REQUEST="true",
+                HTTP_HX_TARGET="thread",
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertContains(response, 'id="thread"')
+            self.assertContains(response, "Si hay")
+            self.assertContains(response, 'hx-trigger="every 2s"')
+            self.assertContains(response, 'hx-swap-oob="outerHTML"')
+            self.assertNotContains(response, 'id="chat-list"')
+            self.assertNotContains(response, "Write a reply")
+            self.assertEqual(opened.call_count, 0)
+            queued = json.loads(fake.lists[REPLY_QUEUE][0])
+            self.assertEqual(queued["organization_id"], str(self.organization.pk))
+            self.assertEqual(queued["conversation_id"], str(conversation.pk))
+            self.assertEqual(ItemQuestion.objects.get().answer_text, "")
+            again = self.client.post(
+                f"/inbox/{conversation.pk}/reply/",
+                {"text": "Otra"},
+                HTTP_HX_REQUEST="true",
+                HTTP_HX_TARGET="thread",
+            )
+            self.assertEqual(again.status_code, 200)
+            self.assertEqual(len(fake.lists[REPLY_QUEUE]), 1)
+            self.assertEqual(opened.call_count, 0)
+            other = Organization.objects.create(name="Other")
+            run_reply_job(other.pk, conversation.pk)
+            self.assertEqual(opened.call_count, 0)
+            self.assertEqual(ItemQuestion.objects.get().answer_text, "")
+            self.assertTrue(run_next_reply_job(block_seconds=0))
+        self.assertEqual(fake.values[reply_status_key(conversation.pk)], "ok")
+        self.assertEqual(ItemQuestion.objects.get().answer_text, "Si hay")
+        self.assertFalse(
+            conversation.messages.filter(external_id="pending").exists()
+        )
+        self.assertEqual(
+            conversation.messages.get(direction=Message.Direction.OUTBOUND).body,
+            "Si hay",
         )
 
     def test_another_organization_does_not_see_the_question(self):
@@ -642,11 +760,13 @@ class ItemQuestionTests(TestCase):
 
     def test_another_organization_does_not_change_the_count(self):
         other = Organization.objects.create(name="Other")
-        ItemQuestion.objects.create(
-            organization=other,
-            question_id="999",
-            text="Only other",
-            status="UNANSWERED",
+        project_question(
+            ItemQuestion.objects.create(
+                organization=other,
+                question_id="999",
+                text="Only other",
+                status="UNANSWERED",
+            )
         )
         page = self.client.get("/meli/questions/", follow=True)
         self.assertNotContains(page, "Only other")
@@ -765,7 +885,7 @@ class ItemQuestionTests(TestCase):
             text="Tienen stock?",
             status="UNANSWERED",
         )
-        self.client.get("/inbox/")
+        project_question(ItemQuestion.objects.get())
         conversation = Conversation.objects.get()
         with patch("meli.client.urlopen", side_effect=URLError("down")):
             response = self.client.post(
@@ -791,7 +911,7 @@ class ItemQuestionTests(TestCase):
             text="Tienen stock?",
             status="UNANSWERED",
         )
-        self.client.get("/inbox/")
+        project_question(ItemQuestion.objects.get())
         conversation = Conversation.objects.get()
         other_user = User.objects.create_user("bea", email="bea@example.com")
         other = Organization.objects.create(name="Other")
@@ -812,18 +932,22 @@ class ItemQuestionTests(TestCase):
         self.assertEqual(ItemQuestion.objects.get().answer_text, "")
 
     def test_channel_query_still_hides_another_organization(self):
-        ItemQuestion.objects.create(
-            organization=self.organization,
-            question_id="1",
-            text="Mine",
-            status="UNANSWERED",
+        project_question(
+            ItemQuestion.objects.create(
+                organization=self.organization,
+                question_id="1",
+                text="Mine",
+                status="UNANSWERED",
+            )
         )
         other = Organization.objects.create(name="Other")
-        ItemQuestion.objects.create(
-            organization=other,
-            question_id="2",
-            text="Only other",
-            status="UNANSWERED",
+        project_question(
+            ItemQuestion.objects.create(
+                organization=other,
+                question_id="2",
+                text="Only other",
+                status="UNANSWERED",
+            )
         )
         page = self.client.get("/inbox/?channel=not-a-channel")
         self.assertContains(page, "Mine")

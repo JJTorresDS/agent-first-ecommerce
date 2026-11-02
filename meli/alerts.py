@@ -1,13 +1,11 @@
 from django.urls import reverse
 
-from inbox.channels import reconcile
 from inbox.models import Channel, Conversation
 
 
 def unanswered_count(organization):
     if organization is None:
         return 0
-    reconcile(organization)
     return Conversation.objects.filter(
         organization=organization,
         channel=Channel.MELI_ITEM_QUESTIONS,

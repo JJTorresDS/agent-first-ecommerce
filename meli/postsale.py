@@ -190,7 +190,7 @@ def remember_reply(conversation, text, sent_at):
             "body": message.body,
             "sent_at": message.sent_at,
         }
-        for message in conversation.messages.all()
+        for message in conversation.messages.exclude(external_id="pending")
     ]
     messages.append(
         {

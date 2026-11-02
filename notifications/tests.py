@@ -3,6 +3,7 @@ from django.test import TestCase
 
 from accounts.models import Membership, Organization
 from meli.models import ItemQuestion
+from meli.projection import project_question
 
 User = get_user_model()
 
@@ -20,11 +21,13 @@ class AlertPanelTests(TestCase):
 
     def test_three_unanswered_questions_are_one_group(self):
         for number in range(3):
-            ItemQuestion.objects.create(
-                organization=self.organization,
-                question_id=str(number),
-                text="Tienen stock?",
-                status="UNANSWERED",
+            project_question(
+                ItemQuestion.objects.create(
+                    organization=self.organization,
+                    question_id=str(number),
+                    text="Tienen stock?",
+                    status="UNANSWERED",
+                )
             )
         page = self.client.get("/organization/")
         self.assertEqual(page.context["alert_count"], 3)
@@ -35,21 +38,25 @@ class AlertPanelTests(TestCase):
         )
 
     def test_one_unanswered_question_uses_the_singular(self):
-        ItemQuestion.objects.create(
-            organization=self.organization,
-            question_id="1",
-            status="UNANSWERED",
+        project_question(
+            ItemQuestion.objects.create(
+                organization=self.organization,
+                question_id="1",
+                status="UNANSWERED",
+            )
         )
         page = self.client.get("/organization/")
         self.assertContains(page, "You have 1 unanswered presales question")
         self.assertNotContains(page, "presales questions")
 
     def test_an_answered_question_adds_no_group(self):
-        ItemQuestion.objects.create(
-            organization=self.organization,
-            question_id="1",
-            status="ANSWERED",
-            answer_text="Si hay",
+        project_question(
+            ItemQuestion.objects.create(
+                organization=self.organization,
+                question_id="1",
+                status="ANSWERED",
+                answer_text="Si hay",
+            )
         )
         page = self.client.get("/organization/")
         self.assertEqual(page.context["alert_count"], 0)
@@ -59,10 +66,12 @@ class AlertPanelTests(TestCase):
 
     def test_another_organization_stays_out_of_the_panel(self):
         other = Organization.objects.create(name="Other")
-        ItemQuestion.objects.create(
-            organization=other,
-            question_id="9",
-            status="UNANSWERED",
+        project_question(
+            ItemQuestion.objects.create(
+                organization=other,
+                question_id="9",
+                status="UNANSWERED",
+            )
         )
         page = self.client.get("/organization/")
         self.assertEqual(page.context["alert_count"], 0)

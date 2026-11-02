@@ -3,22 +3,24 @@
 {% block title %}Inbox{% endblock %}
 
 {% block content %}
-<div id="inbox"{% if sync_pending %} hx-get="{% querystring sync=None %}" hx-trigger="every 3s" hx-select="#inbox" hx-target="#inbox" hx-swap="outerHTML"{% endif %}>
-  {% if sync_pending %}
-    <p class="muted">Post-sale messages are loading.</p>
-  {% endif %}
-  {% if postsale_error %}
-    <p class="error">Post-sale messages could not be loaded.</p>
-  {% endif %}
-  {% if postsale_ok %}
-    <p class="muted">Post-sale messages loaded.</p>
-  {% endif %}
-  {% if sync_error %}
-    <p class="error">{% if selected.channel == "meli-postsales" %}Post-sale messages could not be loaded.{% else %}Open questions could not be loaded.{% endif %}</p>
-  {% endif %}
-  {% if sync_ok %}
-    <p class="muted">{% if selected.channel == "meli-postsales" %}Post-sale messages loaded.{% else %}Open questions loaded.{% endif %}</p>
-  {% endif %}
+<div id="inbox">
+  <div id="inbox-status"{% if sync_pending %} hx-get="{% querystring sync=None %}" hx-trigger="every 3s" hx-select="#inbox-status" hx-target="#inbox-status" hx-swap="outerHTML"{% endif %}>
+    {% if sync_pending %}
+      <p class="muted">Post-sale messages are loading.</p>
+    {% endif %}
+    {% if postsale_error %}
+      <p class="error">Post-sale messages could not be loaded.</p>
+    {% endif %}
+    {% if postsale_ok %}
+      <p class="muted">Post-sale messages loaded.</p>
+    {% endif %}
+    {% if sync_error %}
+      <p class="error">{% if selected.channel == "meli-postsales" %}Post-sale messages could not be loaded.{% else %}Open questions could not be loaded.{% endif %}</p>
+    {% endif %}
+    {% if sync_ok %}
+      <p class="muted">{% if selected.channel == "meli-postsales" %}Post-sale messages loaded.{% else %}Open questions loaded.{% endif %}</p>
+    {% endif %}
+  </div>
   {% for action in list_actions %}
     <form class="sync" method="post" action="{{ action.url }}">
       {% csrf_token %}
@@ -27,55 +29,20 @@
   {% endfor %}
   <p class="muted">
     {% if show_older %}
-      <a href="{% querystring since=None conversation=None reply=None sync=None %}">Last 7 days</a>
+      <a href="{% querystring since=None conversation=None reply=None sync=None %}" hx-get="{% querystring since=None conversation=None reply=None sync=None %}" hx-target="#chat-list" hx-select="#chat-list" hx-swap="outerHTML" hx-push-url="true">Last 7 days</a>
     {% else %}
-      <a href="{% querystring since="all" conversation=None reply=None sync=None %}">Show older</a>
+      <a href="{% querystring since="all" conversation=None reply=None sync=None %}" hx-get="{% querystring since="all" conversation=None reply=None sync=None %}" hx-target="#chat-list" hx-select="#chat-list" hx-swap="outerHTML" hx-push-url="true">Show older</a>
     {% endif %}
   </p>
   <div class="chat">
-    <aside class="chat-list">
+    <aside id="chat-list" class="chat-list"{% if sync_pending %} hx-get="{% querystring sync=None %}" hx-trigger="every 3s" hx-select="#chat-list" hx-target="#chat-list" hx-swap="outerHTML"{% endif %}>
       {% for conversation in conversations %}
-        <a class="{% if selected.id == conversation.id %}active{% endif %}" href="{% querystring conversation=conversation.id reply=None sync=None %}">
-          <strong>{{ conversation.title }}{% if conversation.needs_reply %} <span class="open-dot" aria-label="Open"></span>{% endif %}</strong>
-          <span class="channel">{{ conversation.channel }}</span>
-          <span>{{ conversation.preview|truncatechars:80 }}</span>
-        </a>
+        {% include "inbox/_row.html" with conversation=conversation %}
       {% empty %}
         <p class="muted" style="padding: 0.9rem;">No messages yet.</p>
       {% endfor %}
     </aside>
-    <section class="chat-thread">
-      {% if selected %}
-        <h1>
-          {% if selected.safe_link %}
-            <a href="{{ selected.safe_link }}" target="_blank" rel="noopener">{{ selected.title }}</a>
-          {% else %}
-            {{ selected.title }}
-          {% endif %}
-        </h1>
-        <p class="channel">{{ selected.channel }}</p>
-        {% for message in messages %}
-          <div class="bubble {% if message.direction == 'inbound' %}buyer{% else %}seller{% endif %}">
-            {{ message.body }}
-            {% if message.sent_label %}<time>{{ message.sent_label }}</time>{% endif %}
-          </div>
-        {% endfor %}
-        {% if reply_error %}
-          <p class="error">The answer could not be posted.</p>
-        {% endif %}
-        {% if can_reply %}
-          <form class="composer" method="post" action="{% url 'inbox_reply' selected.id %}">
-            {% csrf_token %}
-            <textarea name="text" maxlength="{{ reply_limit }}" required placeholder="Write a reply"></textarea>
-            <div class="actions">
-              <button class="primary" type="submit">Send</button>
-            </div>
-          </form>
-        {% endif %}
-      {% else %}
-        <p class="muted">No messages yet.</p>
-      {% endif %}
-    </section>
+    {% include "inbox/_thread.html" %}
   </div>
 </div>
 {% endblock %}

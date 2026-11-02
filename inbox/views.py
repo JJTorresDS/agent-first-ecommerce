@@ -11,8 +11,8 @@ from django.views.decorators.http import require_POST
 
 from accounts.models import membership_for
 
-from .channels import ReplyFailed, list_actions, open_inbox, reply_limit_for, sender_for
-from .models import Conversation
+from .channels import list_actions, reply_limit_for, sender_for
+from .models import Conversation, Message
 
 
 def inbox_location(*, conversation=None, failed=False, sync=""):
@@ -38,15 +38,36 @@ def _selected(conversations, selected_id):
         return None
 
 
+def _save_pending(conversation, text):
+    Message.objects.update_or_create(
+        conversation=conversation,
+        external_id="pending",
+        defaults={
+            "organization": conversation.organization,
+            "direction": Message.Direction.OUTBOUND,
+            "body": text,
+            "sent_at": timezone.now(),
+        },
+    )
+    conversation.preview = text[:200]
+    conversation.save(update_fields=["preview", "updated_at"])
+
+
 def send_and_redirect(request, conversation):
-    text = request.POST.get("text") or ""
+    from meli.jobs import dispatch_reply, reply_status
+
+    text = (request.POST.get("text") or "").strip()
     send = sender_for(conversation.channel)
     failed = False
     if conversation.needs_reply and send is not None:
-        try:
-            send(conversation, text)
-        except ReplyFailed:
+        if not text or len(text) > reply_limit_for(conversation.channel):
             failed = True
+        elif reply_status(conversation) not in {"queued", "running"}:
+            _save_pending(conversation, text)
+            failed = dispatch_reply(conversation) == "failed"
+            conversation.refresh_from_db()
+    if request.headers.get("HX-Request") == "true":
+        return _render_thread(request, conversation, failed=failed)
     return redirect(
         inbox_location(
             conversation=conversation,
@@ -55,13 +76,52 @@ def send_and_redirect(request, conversation):
     )
 
 
+def _thread_request(request):
+    return (
+        request.headers.get("HX-Request") == "true"
+        and request.headers.get("HX-Target") == "thread"
+    )
+
+
+def _thread_context(organization, conversation, *, reply_error=False):
+    from meli.jobs import reply_status
+
+    messages = []
+    can_reply = False
+    reply_limit = 2000
+    status = ""
+    if conversation is not None:
+        messages = conversation.messages.filter(organization=organization)
+        status = reply_status(conversation)
+        can_reply = (
+            conversation.needs_reply
+            and sender_for(conversation.channel) is not None
+            and status not in {"queued", "running"}
+        )
+        reply_limit = reply_limit_for(conversation.channel)
+    return {
+        "selected": conversation,
+        "messages": messages,
+        "can_reply": can_reply,
+        "reply_limit": reply_limit,
+        "reply_error": reply_error or status == "failed",
+        "reply_pending": status in {"queued", "running"},
+    }
+
+
+def _render_thread(request, conversation, *, failed=False):
+    organization = conversation.organization
+    context = _thread_context(organization, conversation, reply_error=failed)
+    context["oob"] = True
+    return render(request, "inbox/_thread.html", context)
+
+
 @login_required
 def inbox(request):
     membership = membership_for(request.user)
     if membership is None:
         return redirect("organization_setup")
     organization = membership.organization
-    open_inbox(organization)
     show_older = request.GET.get("since") == "all"
     conversations = Conversation.objects.filter(organization=organization)
     if not show_older:
@@ -79,28 +139,21 @@ def inbox(request):
     selected = _selected(conversations, request.GET.get("conversation") or "")
     if selected is None:
         selected = conversations.first()
-    messages = []
-    can_reply = False
-    reply_limit = 2000
-    if selected is not None:
-        messages = selected.messages.filter(organization=organization)
-        can_reply = selected.needs_reply and sender_for(selected.channel) is not None
-        reply_limit = reply_limit_for(selected.channel)
-    return render(
-        request,
-        "inbox/inbox.html",
-        {
-            "conversations": conversations,
-            "selected": selected,
-            "messages": messages,
-            "can_reply": can_reply,
-            "reply_limit": reply_limit,
-            "show_older": show_older,
-            "list_actions": list_actions(organization),
-            "reply_error": request.GET.get("reply") == "failed",
-            **_sync_flags(organization, request.GET.get("sync") or ""),
-        },
-    )
+    context = {
+        "conversations": conversations,
+        "show_older": show_older,
+        "list_actions": list_actions(organization),
+        "oob": _thread_request(request),
+        **_thread_context(
+            organization,
+            selected,
+            reply_error=request.GET.get("reply") == "failed",
+        ),
+        **_sync_flags(organization, request.GET.get("sync") or ""),
+    }
+    if context["oob"]:
+        return render(request, "inbox/_thread.html", context)
+    return render(request, "inbox/inbox.html", context)
 
 
 def _sync_flags(organization, query_sync):
