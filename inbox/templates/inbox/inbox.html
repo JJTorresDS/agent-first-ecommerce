@@ -8,23 +8,58 @@
     var url = new URL(window.location.href);
     url.searchParams.delete("sync");
     url.searchParams.delete("reply");
+    var inbox = document.getElementById("inbox");
+    var open = inbox && inbox.getAttribute("data-open");
+    if (open) url.searchParams.set("conversation", open);
     return url.pathname + url.search;
   }
   var inboxBubbleScroll = 0;
+  // outerHTML swaps leave event.detail.target pointing at the removed element,
+  // so always read the live #thread and #chat-list.
+  function inboxMarkShown(setOpen) {
+    var thread = document.getElementById("thread");
+    var shown = thread && thread.getAttribute("data-conversation");
+    if (!shown) return;
+    var inbox = document.getElementById("inbox");
+    if (inbox) {
+      if (setOpen) inbox.setAttribute("data-open", shown);
+      inbox.setAttribute("data-shown", shown);
+    }
+    var rows = document.querySelectorAll("#chat-list a");
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i].id === "conversation-" + shown) rows[i].classList.add("active");
+      else rows[i].classList.remove("active");
+    }
+  }
   document.body.addEventListener("htmx:beforeSwap", function (event) {
     var target = event.detail && event.detail.target;
-    if (!target || target.id !== "conversation-body") return;
-    var bubbles = document.getElementById("bubbles");
-    inboxBubbleScroll = bubbles ? bubbles.scrollTop : 0;
+    if (!target || !target.id) return;
+    if (target.id === "chat-list") {
+      var inbox = document.getElementById("inbox");
+      var shown = inbox && inbox.getAttribute("data-shown");
+      var response = (event.detail.xhr && event.detail.xhr.responseText) || "";
+      if (shown && response.indexOf('id="conversation-' + shown + '" class="active"') === -1) {
+        event.detail.shouldSwap = false;
+      }
+      return;
+    }
+    if (target.id.indexOf("conversation-body") === 0) {
+      var bubbles = document.getElementById("bubbles");
+      inboxBubbleScroll = bubbles ? bubbles.scrollTop : 0;
+    }
   });
   document.body.addEventListener("htmx:afterSwap", function (event) {
     var target = event.detail && event.detail.target;
-    if (!target || target.id !== "conversation-body") return;
-    var bubbles = document.getElementById("bubbles");
-    if (bubbles) bubbles.scrollTop = inboxBubbleScroll;
+    if (!target || !target.id) return;
+    if (target.id === "thread") inboxMarkShown(true);
+    if (target.id === "chat-list") inboxMarkShown(false);
+    if (target.id.indexOf("conversation-body") === 0) {
+      var bubbles = document.getElementById("bubbles");
+      if (bubbles) bubbles.scrollTop = inboxBubbleScroll;
+    }
   });
 </script>
-<div id="inbox">
+<div id="inbox"{% if selected %} data-open="{{ selected.id }}" data-shown="{{ selected.id }}"{% endif %}>
   <div id="inbox-status"{% if sync_pending %} hx-get="{% querystring sync=None %}" hx-trigger="every 3s" hx-select="#inbox-status" hx-target="#inbox-status" hx-swap="outerHTML"{% endif %}>
     {% if sync_pending %}
       <p class="muted">Post-sale messages are loading.</p>
@@ -50,9 +85,9 @@
   {% endfor %}
   <p class="muted">
     {% if show_older %}
-      <a href="{% querystring since=None conversation=None reply=None sync=None %}" hx-get="{% querystring since=None conversation=None reply=None sync=None %}" hx-target="#chat-list" hx-select="#chat-list" hx-swap="outerHTML" hx-push-url="true">Last 7 days</a>
+      <a href="{% querystring since=None conversation=None reply=None sync=None %}" hx-get="{% querystring since=None conversation=None reply=None sync=None %}" hx-target="#chat-list" hx-select="#chat-list" hx-swap="outerHTML" hx-push-url="true" hx-on:click="var inbox = document.getElementById('inbox'); if (inbox) { inbox.removeAttribute('data-open'); inbox.removeAttribute('data-shown'); }">Last 7 days</a>
     {% else %}
-      <a href="{% querystring since="all" conversation=None reply=None sync=None %}" hx-get="{% querystring since="all" conversation=None reply=None sync=None %}" hx-target="#chat-list" hx-select="#chat-list" hx-swap="outerHTML" hx-push-url="true">Show older</a>
+      <a href="{% querystring since="all" conversation=None reply=None sync=None %}" hx-get="{% querystring since="all" conversation=None reply=None sync=None %}" hx-target="#chat-list" hx-select="#chat-list" hx-swap="outerHTML" hx-push-url="true" hx-on:click="var inbox = document.getElementById('inbox'); if (inbox) { inbox.removeAttribute('data-open'); inbox.removeAttribute('data-shown'); }">Show older</a>
     {% endif %}
   </p>
   <div class="chat">

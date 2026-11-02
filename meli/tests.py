@@ -1607,10 +1607,25 @@ class PostSaleTests(TestCase):
         content = page.content.decode()
         self.assertIn(f'id="conversation-{sale.pk}" class="active"', content)
         self.assertIn(f'id="conversation-{first.pk}" class=""', content)
+        self.assertIn(f'data-open="{sale.pk}"', content)
+        self.assertIn(f'data-shown="{sale.pk}"', content)
+        self.assertIn(f'data-conversation="{sale.pk}"', content)
+        self.assertIn(f'id="conversation-body-{sale.pk}"', content)
+        self.assertNotIn("hx-sync=", content)
+        self.assertIn("setAttribute('data-open'", content)
+        self.assertIn('getAttribute("data-shown")', content)
+        self.assertIn("removeAttribute('data-open')", content)
+        self.assertIn("removeAttribute('data-shown')", content)
+        self.assertIn('rows[i].classList.add("active")', content)
+        self.assertIn('document.getElementById("thread")', content)
+        self.assertNotIn('target.getAttribute("data-conversation")', content)
+        self.assertNotIn("inboxDebug", content)
         self.assertContains(page, "Necesito medidas?")
         self.assertContains(page, "Mide 67x60cm")
         self.assertNotContains(page, "Only other org")
-        body = content.split('id="conversation-body"', 1)[1].split('id="composer-slot"', 1)[0]
+        self.assertIn('id="composer-slot"', content)
+        marker = f'id="conversation-body-{sale.pk}"'
+        body = content.split(marker, 1)[1].split('id="composer-slot"', 1)[0]
         self.assertIn("Willian sale", body)
         self.assertIn("meli-postsales", body)
         self.assertIn("Necesito medidas?", body)
@@ -1624,9 +1639,7 @@ class PostSaleTests(TestCase):
             headers={"HX-Request": "true", "HX-Target": "conversation-body"},
         )
         polled_html = polled.content.decode()
-        polled_body = polled_html.split('id="conversation-body"', 1)[1].split(
-            'id="composer-slot"', 1
-        )[0]
+        polled_body = polled_html.split(marker, 1)[1].split('id="composer-slot"', 1)[0]
         self.assertIn("Willian sale", polled_body)
         self.assertIn("meli-postsales", polled_body)
         self.assertIn("Necesito medidas?", polled_body)
@@ -1675,7 +1688,7 @@ class PostSaleTests(TestCase):
         page = self.client.get(f"/inbox/?conversation={conversation.pk}")
         self.assertContains(page, "Line 0")
         self.assertContains(page, "Line 50")
-        transcript = page.content.decode().split('id="conversation-body"', 1)[1]
+        transcript = page.content.decode().split(f'id="conversation-body-{conversation.pk}"', 1)[1]
         self.assertLess(transcript.index("Line 0"), transcript.index("Line 50"))
 
     def test_unanswered_comes_first_and_old_answered_is_hidden(self):

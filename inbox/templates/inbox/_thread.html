@@ -1,7 +1,7 @@
-<section id="thread" class="chat-thread"{% if reply_pending %} hx-get="{% url 'inbox' %}?conversation={{ selected.id }}" hx-trigger="every 2s" hx-target="#thread" hx-select="#thread" hx-swap="outerHTML settle:0s swap:0s"{% endif %}>
+<section id="thread" class="chat-thread"{% if selected %} data-conversation="{{ selected.id }}"{% endif %}{% if reply_pending %} hx-get="{% url 'inbox' %}?conversation={{ selected.id }}" hx-trigger="every 2s" hx-target="#thread" hx-select="#thread" hx-swap="outerHTML settle:0s swap:0s"{% endif %}>
   {% if selected %}
     <div id="conversation" class="conversation">
-      <div id="conversation-body" hx-get="{% url 'inbox' %}?conversation={{ selected.id }}" hx-trigger="every 3s" hx-target="this" hx-select="#conversation-body" hx-swap="outerHTML settle:0s swap:0s">
+      <div id="conversation-body-{{ selected.id }}" hx-get="{% url 'inbox' %}?conversation={{ selected.id }}" hx-trigger="every 3s" hx-target="this" hx-select="#conversation-body-{{ selected.id }}" hx-swap="outerHTML settle:0s swap:0s">
         <h1>
           {% if selected.safe_link %}
             <a href="{{ selected.safe_link }}" target="_blank" rel="noopener">{{ selected.title }}</a>
