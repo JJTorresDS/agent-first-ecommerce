@@ -3,6 +3,23 @@
 {% block title %}Inbox{% endblock %}
 
 {% block content %}
+<script>
+  function inboxPollUrl() {
+    var url = new URL(window.location.href);
+    url.searchParams.delete("sync");
+    url.searchParams.delete("reply");
+    return url.pathname + url.search;
+  }
+  function inboxScrollTranscript() {
+    var node = document.getElementById("bubbles");
+    if (node) node.scrollTop = node.scrollHeight;
+  }
+  document.body.addEventListener("htmx:afterSwap", function (event) {
+    var target = event.detail && event.detail.target;
+    if (target && target.id === "thread") inboxScrollTranscript();
+  });
+  inboxScrollTranscript();
+</script>
 <div id="inbox">
   <div id="inbox-status"{% if sync_pending %} hx-get="{% querystring sync=None %}" hx-trigger="every 3s" hx-select="#inbox-status" hx-target="#inbox-status" hx-swap="outerHTML"{% endif %}>
     {% if sync_pending %}
@@ -35,7 +52,7 @@
     {% endif %}
   </p>
   <div class="chat">
-    <aside id="chat-list" class="chat-list" hx-get="{% querystring sync=None %}" hx-trigger="every 3s" hx-select="#chat-list" hx-target="#chat-list" hx-swap="outerHTML">
+    <aside id="chat-list" class="chat-list" hx-get="{% url 'inbox' %}" hx-trigger="every 3s" hx-select="#chat-list" hx-target="#chat-list" hx-swap="outerHTML settle:0s swap:0s" hx-on:htmx:config-request="if (event.detail.elt !== this) return; event.detail.path = inboxPollUrl();">
       {% for conversation in conversations %}
         {% include "inbox/_row.html" with conversation=conversation %}
       {% empty %}

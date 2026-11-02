@@ -1,0 +1,12 @@
+{% if reply_error %}
+  <p class="error">The answer could not be posted.</p>
+{% endif %}
+{% if can_reply %}
+  <form id="composer" class="composer" method="post" action="{% url 'inbox_reply' selected.id %}" hx-post="{% url 'inbox_reply' selected.id %}" hx-target="#thread" hx-swap="outerHTML settle:0s swap:0s" hx-disabled-elt="find button"{% if preserve_composer %} hx-preserve="true"{% endif %}>
+    {% csrf_token %}
+    <textarea id="composer-text" name="text" maxlength="{{ reply_limit }}" required placeholder="Write a reply"></textarea>
+    <div class="actions">
+      <button class="primary" type="submit">Send</button>
+    </div>
+  </form>
+{% endif %}

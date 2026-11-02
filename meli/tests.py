@@ -1552,6 +1552,123 @@ class PostSaleTests(TestCase):
         conversation.refresh_from_db()
         self.assertTrue(conversation.needs_reply)
 
+    def test_open_post_sale_stays_selected_and_shows_every_message(self):
+        now = timezone.now()
+        first = Conversation.objects.create(
+            organization=self.organization,
+            channel="meli-itemquestions",
+            external_id="anillo",
+            title="Anillo Acero",
+            needs_reply=True,
+            last_message_at=now,
+        )
+        sale = Conversation.objects.create(
+            organization=self.organization,
+            channel="meli-postsales",
+            external_id=PACK,
+            title="Willian sale",
+            needs_reply=True,
+            last_message_at=now - timedelta(hours=1),
+        )
+        Message.objects.create(
+            organization=self.organization,
+            conversation=sale,
+            direction=Message.Direction.INBOUND,
+            body="Necesito medidas?",
+            external_id="m1",
+            sent_at=now - timedelta(hours=2),
+        )
+        Message.objects.create(
+            organization=self.organization,
+            conversation=sale,
+            direction=Message.Direction.OUTBOUND,
+            body="Mide 67x60cm",
+            external_id="m2",
+            sent_at=now - timedelta(hours=1),
+        )
+        other = Organization.objects.create(name="Other")
+        hidden = Conversation.objects.create(
+            organization=other,
+            channel="meli-postsales",
+            external_id="hidden-pack",
+            title="Hidden sale",
+            needs_reply=True,
+            last_message_at=now,
+        )
+        Message.objects.create(
+            organization=other,
+            conversation=hidden,
+            direction=Message.Direction.INBOUND,
+            body="Only other org",
+            external_id="secret",
+            sent_at=now,
+        )
+        page = self.client.get(f"/inbox/?conversation={sale.pk}")
+        content = page.content.decode()
+        self.assertIn(f'id="conversation-{sale.pk}" class="active"', content)
+        self.assertIn(f'id="conversation-{first.pk}" class=""', content)
+        self.assertContains(page, "Necesito medidas?")
+        self.assertContains(page, "Mide 67x60cm")
+        self.assertNotContains(page, "Only other org")
+        start = content.index('id="transcript"')
+        slot = content.index('id="composer-slot"')
+        self.assertNotIn('id="composer-text"', content[start:slot])
+        self.assertIn('id="composer-text"', content[slot:])
+        self.assertIn("inboxPollUrl", content)
+        polled = self.client.get(
+            f"/inbox/?conversation={sale.pk}",
+            headers={"HX-Request": "true", "HX-Target": "transcript"},
+        )
+        polled_html = polled.content.decode()
+        self.assertIn("Necesito medidas?", polled_html)
+        self.assertIn("Mide 67x60cm", polled_html)
+        self.assertIn(f'id="conversation-{sale.pk}" class="active"', polled_html)
+        self.assertNotIn("Only other org", polled_html)
+
+    def test_pack_keeps_every_page_of_the_conversation(self):
+        from meli.postsale import load_pack
+
+        created = "2026-11-01T12:00:00+00:00"
+
+        def message(index):
+            return {
+                "id": f"msg-{index}",
+                "from": {"user_id": 99 if index % 2 else 468424240},
+                "to": {"user_id": 468424240 if index % 2 else 99},
+                "text": f"Line {index}",
+                "message_date": {"created": f"2026-11-01T12:00:{index:02d}+00:00"},
+            }
+
+        def open_response(request, timeout=15):
+            url = request.full_url
+            if "/messages/packs/" in url:
+                offset = int(parse_qs(urlparse(url).query)["offset"][0])
+                batch = [
+                    message(index) for index in range(offset, min(offset + 50, 51))
+                ]
+                return TokenResponse(
+                    {
+                        "conversation_status": {"status": "active"},
+                        "paging": {"total": 51, "limit": 50, "offset": offset},
+                        "messages": batch,
+                    }
+                )
+            if f"/orders/{PACK}" in url:
+                return TokenResponse(
+                    sale_order(PACK, PACK, created, "Willian", "Guido", "Remera")
+                )
+            raise AssertionError(url)
+
+        with patch("meli.client.urlopen", side_effect=open_response):
+            load_pack(Organization.objects.get(pk=self.organization.pk), PACK)
+        conversation = Conversation.objects.get(external_id=PACK)
+        self.assertEqual(conversation.messages.count(), 51)
+        page = self.client.get(f"/inbox/?conversation={conversation.pk}")
+        self.assertContains(page, "Line 0")
+        self.assertContains(page, "Line 50")
+        transcript = page.content.decode().split('id="transcript"', 1)[1]
+        self.assertLess(transcript.index("Line 0"), transcript.index("Line 50"))
+
     def test_unanswered_comes_first_and_old_answered_is_hidden(self):
         now = timezone.now()
         Conversation.objects.create(

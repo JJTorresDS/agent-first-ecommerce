@@ -1,4 +1,4 @@
-<section id="thread" class="chat-thread"{% if reply_pending %} hx-get="{% url 'inbox' %}?conversation={{ selected.id }}" hx-trigger="every 2s" hx-target="#thread" hx-select="#thread" hx-swap="outerHTML"{% endif %}>
+<section id="thread" class="chat-thread"{% if reply_pending %} hx-get="{% url 'inbox' %}?conversation={{ selected.id }}" hx-trigger="every 2s" hx-target="#thread" hx-select="#thread" hx-swap="outerHTML settle:0s swap:0s"{% endif %}>
   {% if selected %}
     <h1>
       {% if selected.safe_link %}
@@ -8,30 +8,30 @@
       {% endif %}
     </h1>
     <p class="channel">{{ selected.channel }}</p>
-    <div id="bubbles" hx-get="{% querystring conversation=selected.id sync=None %}" hx-trigger="every 3s" hx-target="#bubbles" hx-select="#bubbles" hx-swap="outerHTML">
-      {% for message in messages %}
-        <div class="bubble {% if message.direction == 'inbound' %}buyer{% else %}seller{% endif %}">
-          {{ message.body }}
-          {% if message.sent_label %}<time>{{ message.sent_label }}</time>{% endif %}
-        </div>
-      {% endfor %}
-      {% if reply_error %}
-        <p class="error">The answer could not be posted.</p>
-      {% endif %}
-      {% if can_reply %}
-        <form class="composer" method="post" action="{% url 'inbox_reply' selected.id %}" hx-post="{% url 'inbox_reply' selected.id %}" hx-target="#thread" hx-swap="outerHTML" hx-disabled-elt="find button">
-          {% csrf_token %}
-          <textarea id="composer-text" name="text" maxlength="{{ reply_limit }}" required placeholder="Write a reply" hx-preserve="true"></textarea>
-          <div class="actions">
-            <button class="primary" type="submit">Send</button>
+    <div id="bubbles">
+      <div id="transcript" hx-get="{% url 'inbox' %}" hx-trigger="every 3s" hx-target="#transcript" hx-select="#transcript" hx-swap="outerHTML settle:0s swap:0s" hx-on:htmx:config-request="if (event.detail.elt !== this) return; event.detail.path = inboxPollUrl();">
+        {% for message in messages %}
+          <div class="bubble {% if message.direction == 'inbound' %}buyer{% else %}seller{% endif %}">
+            {{ message.body }}
+            {% if message.sent_label %}<time>{{ message.sent_label }}</time>{% endif %}
           </div>
-        </form>
-      {% endif %}
+        {% endfor %}
+      </div>
     </div>
+    {% if not live_poll %}
+      <div id="composer-slot">
+        {% include "inbox/_composer.html" %}
+      </div>
+    {% endif %}
   {% else %}
     <p class="muted">No messages yet.</p>
   {% endif %}
 </section>
+{% if live_poll and selected %}
+  <div id="composer-slot" hx-swap-oob="outerHTML">
+    {% include "inbox/_composer.html" with preserve_composer=True %}
+  </div>
+{% endif %}
 {% if oob and selected %}
   {% include "inbox/_row.html" with conversation=selected oob=True %}
 {% endif %}

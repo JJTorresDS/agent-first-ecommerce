@@ -83,6 +83,10 @@ def _thread_request(request):
     )
 
 
+def _live_poll(request):
+    return request.headers.get("HX-Target") == "transcript"
+
+
 def _thread_context(organization, conversation, *, reply_error=False):
     from meli.jobs import reply_status
 
@@ -113,6 +117,7 @@ def _render_thread(request, conversation, *, failed=False):
     organization = conversation.organization
     context = _thread_context(organization, conversation, reply_error=failed)
     context["oob"] = True
+    context["live_poll"] = False
     return render(request, "inbox/_thread.html", context)
 
 
@@ -153,6 +158,7 @@ def inbox(request):
             reply_error=request.GET.get("reply") == "failed",
         ),
         **_sync_flags(organization, request.GET.get("sync") or ""),
+        "live_poll": _live_poll(request),
     }
     if context["oob"]:
         return render(request, "inbox/_thread.html", context)

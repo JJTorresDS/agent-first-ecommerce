@@ -84,17 +84,20 @@
     button.profile-backdrop:hover, button.profile-backdrop:active { background: transparent; transform: none; }
     .error { color: #a32020; }
     .sync { display: flex; justify-content: flex-end; margin: 0 0 1rem; }
-    .chat { display: flex; gap: 1rem; align-items: stretch; min-height: 28rem; }
+    .chat { display: flex; gap: 1rem; align-items: stretch; height: calc(100vh - 12rem); min-height: 22rem; }
     .chat-list, .chat-thread { border: 1px solid #e6e6e6; border-radius: 12px; background: #fff; }
-    .chat-list { width: 18rem; flex: none; overflow: auto; }
+    .chat-list { width: 18rem; flex: none; overflow: auto; min-height: 0; }
     .chat-list a { display: block; padding: 0.75rem 0.9rem; border-bottom: 1px solid #eee; text-decoration: none; cursor: pointer; transition: background-color 0.12s ease, transform 0.12s ease; }
     .chat-list a.active, .chat-list a:hover { background: #f6f5f2; }
     .chat-list a:active { background: #e0ddd6; transform: scale(0.97); }
     .chat-list strong, .chat-list span { display: block; }
     .chat-list span { color: #555; font-size: 0.85rem; margin-top: 0.2rem; }
-    .chat-thread { flex: 1; min-width: 0; padding: 1.25rem; display: flex; flex-direction: column; gap: 0.75rem; }
+    .chat-thread { flex: 1; min-width: 0; min-height: 0; padding: 1.25rem; display: flex; flex-direction: column; gap: 0.75rem; overflow: hidden; }
     .chat-thread h1 { font-size: 1.15rem; margin: 0; }
-    .bubble { max-width: 36rem; padding: 0.7rem 0.85rem; border-radius: 12px; }
+    #bubbles { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
+    #transcript { display: flex; flex-direction: column; gap: 0.75rem; }
+    .bubble { max-width: min(36rem, 100%); padding: 0.7rem 0.85rem; border-radius: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .composer { flex: none; }
     .bubble.buyer { align-self: flex-start; background: #f4f4f4; }
     .bubble.seller { align-self: flex-end; background: #111; color: #fff; }
     .bubble time { display: block; margin-top: 0.35rem; font-size: 0.75rem; opacity: 0.7; }
