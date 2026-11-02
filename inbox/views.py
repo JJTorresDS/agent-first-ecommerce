@@ -122,6 +122,9 @@ def inbox(request):
     if membership is None:
         return redirect("organization_setup")
     organization = membership.organization
+    from meli.jobs import dispatch_refresh
+
+    dispatch_refresh(organization)
     show_older = request.GET.get("since") == "all"
     conversations = Conversation.objects.filter(organization=organization)
     if not show_older:

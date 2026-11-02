@@ -35,7 +35,7 @@
     {% endif %}
   </p>
   <div class="chat">
-    <aside id="chat-list" class="chat-list"{% if sync_pending %} hx-get="{% querystring sync=None %}" hx-trigger="every 3s" hx-select="#chat-list" hx-target="#chat-list" hx-swap="outerHTML"{% endif %}>
+    <aside id="chat-list" class="chat-list" hx-get="{% querystring sync=None %}" hx-trigger="every 3s" hx-select="#chat-list" hx-target="#chat-list" hx-swap="outerHTML">
       {% for conversation in conversations %}
         {% include "inbox/_row.html" with conversation=conversation %}
       {% empty %}

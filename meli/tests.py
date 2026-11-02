@@ -607,6 +607,63 @@ class ItemQuestionTests(TestCase):
         self.assertEqual(ItemQuestion.objects.count(), 0)
         self.assertContains(page, "No messages yet.")
 
+    def test_refresh_stores_an_answer_made_on_mercadolibre(self):
+        from meli.jobs import refresh_unanswered
+
+        project_question(
+            ItemQuestion.objects.create(
+                organization=self.organization,
+                question_id="13683341904",
+                item_id="MLA1",
+                item_title="Perfume",
+                text="Tienen stock?",
+                status="UNANSWERED",
+            )
+        )
+        other = Organization.objects.create(name="Other")
+        project_question(
+            ItemQuestion.objects.create(
+                organization=other,
+                question_id="999",
+                item_id="MLA9",
+                text="Only other",
+                status="UNANSWERED",
+            )
+        )
+
+        def open_response(request, timeout=15):
+            url = request.full_url
+            self.assertNotIn("/questions/999", url)
+            if "/questions/" in url:
+                return TokenResponse(ANSWERED)
+            if "/items/" in url:
+                return TokenResponse(ITEM)
+            raise AssertionError(url)
+
+        with patch("meli.client.urlopen", side_effect=open_response) as opened:
+            page = self.client.get("/inbox/")
+            self.assertEqual(opened.call_count, 0)
+            self.assertContains(page, 'class="open-dot"')
+            refresh_unanswered(self.organization.pk)
+            self.assertGreater(opened.call_count, 0)
+        question = ItemQuestion.objects.get(question_id="13683341904")
+        self.assertEqual(question.answer_text, "Si hay")
+        self.assertEqual(question.status, "ANSWERED")
+        conversation = Conversation.objects.get(
+            organization=self.organization,
+            external_id="13683341904",
+        )
+        self.assertFalse(conversation.needs_reply)
+        outbound = conversation.messages.get(direction=Message.Direction.OUTBOUND)
+        self.assertEqual(outbound.body, "Si hay")
+        self.assertEqual(
+            ItemQuestion.objects.get(question_id="999").status,
+            "UNANSWERED",
+        )
+        shown = self.client.get(f"/inbox/?conversation={conversation.pk}")
+        self.assertContains(shown, "Si hay")
+        self.assertNotContains(shown, 'class="open-dot"')
+
     def test_bell_counts_needs_reply_without_rewriting_questions(self):
         project_question(
             ItemQuestion.objects.create(
@@ -1154,6 +1211,65 @@ class PostSaleTests(TestCase):
             conversation.messages.filter(direction=Message.Direction.OUTBOUND).exists()
         )
 
+    def test_seller_reply_on_mercadolibre_clears_the_dot(self):
+        created = "2026-11-01T12:00:00+00:00"
+        answered = "2026-11-01T12:05:00+00:00"
+        seller_message = {
+            "id": "msg-2",
+            "from": {"user_id": 468424240},
+            "to": {"user_id": 99},
+            "text": "Mide 67x60cm",
+            "message_resources": [{"id": PACK, "name": "packs"}],
+            "message_date": {"created": answered},
+        }
+        thread = {
+            "conversation_status": {"status": "active"},
+            "paging": {"total": 2, "limit": 50, "offset": 0},
+            "messages": [
+                sale_thread("Necesito medidas?", created=created)["messages"][0],
+                seller_message,
+            ],
+        }
+
+        def open_response(request, timeout=15):
+            url = request.full_url
+            if url.endswith("/messages/msg-2"):
+                return TokenResponse(seller_message)
+            if "/messages/packs/" in url:
+                return TokenResponse(thread)
+            if f"/orders/{PACK}" in url:
+                return TokenResponse(
+                    sale_order(PACK, PACK, created, "Willian", "Guido", "Remera")
+                )
+            raise AssertionError(url)
+
+        body = json.dumps(
+            {
+                **SAMPLE,
+                "_id": "seller-reply",
+                "topic": "messages",
+                "resource": "/messages/msg-2",
+            }
+        )
+        with patch("meli.client.urlopen", side_effect=open_response):
+            response = self.client.post(
+                WEBHOOK_URL,
+                data=body,
+                content_type="application/json",
+            )
+        self.assertEqual(response.status_code, 200)
+        conversation = Conversation.objects.get(external_id=PACK)
+        self.assertEqual(conversation.organization, self.organization)
+        self.assertFalse(conversation.needs_reply)
+        self.assertEqual(
+            conversation.messages.get(direction=Message.Direction.INBOUND).body,
+            "Necesito medidas?",
+        )
+        self.assertEqual(
+            conversation.messages.get(direction=Message.Direction.OUTBOUND).body,
+            "Mide 67x60cm",
+        )
+
     def test_sync_loads_recent_orders_and_unread_packs(self):
         now = timezone.now()
         recent = sale_order(PACK, PACK, now.isoformat(), "Willian", "Guido", "Remera")
@@ -1305,7 +1421,7 @@ class PostSaleTests(TestCase):
         self.assertEqual(fake.values[status_key(self.organization.pk)], "ok")
         self.assertContains(loaded, "Post-sale messages loaded.")
         self.assertNotContains(loaded, "Post-sale messages are loading.")
-        self.assertNotContains(loaded, 'hx-trigger="every 3s"')
+        self.assertNotContains(loaded, 'id="inbox-status" hx-get=')
         self.assertEqual(
             Conversation.objects.get(external_id=PACK).messages.get().body,
             "Necesito medidas?",

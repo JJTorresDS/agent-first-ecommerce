@@ -8,24 +8,26 @@
       {% endif %}
     </h1>
     <p class="channel">{{ selected.channel }}</p>
-    {% for message in messages %}
-      <div class="bubble {% if message.direction == 'inbound' %}buyer{% else %}seller{% endif %}">
-        {{ message.body }}
-        {% if message.sent_label %}<time>{{ message.sent_label }}</time>{% endif %}
-      </div>
-    {% endfor %}
-    {% if reply_error %}
-      <p class="error">The answer could not be posted.</p>
-    {% endif %}
-    {% if can_reply %}
-      <form class="composer" method="post" action="{% url 'inbox_reply' selected.id %}" hx-post="{% url 'inbox_reply' selected.id %}" hx-target="#thread" hx-swap="outerHTML" hx-disabled-elt="find button">
-        {% csrf_token %}
-        <textarea name="text" maxlength="{{ reply_limit }}" required placeholder="Write a reply"></textarea>
-        <div class="actions">
-          <button class="primary" type="submit">Send</button>
+    <div id="bubbles" hx-get="{% querystring conversation=selected.id sync=None %}" hx-trigger="every 3s" hx-target="#bubbles" hx-select="#bubbles" hx-swap="outerHTML">
+      {% for message in messages %}
+        <div class="bubble {% if message.direction == 'inbound' %}buyer{% else %}seller{% endif %}">
+          {{ message.body }}
+          {% if message.sent_label %}<time>{{ message.sent_label }}</time>{% endif %}
         </div>
-      </form>
-    {% endif %}
+      {% endfor %}
+      {% if reply_error %}
+        <p class="error">The answer could not be posted.</p>
+      {% endif %}
+      {% if can_reply %}
+        <form class="composer" method="post" action="{% url 'inbox_reply' selected.id %}" hx-post="{% url 'inbox_reply' selected.id %}" hx-target="#thread" hx-swap="outerHTML" hx-disabled-elt="find button">
+          {% csrf_token %}
+          <textarea id="composer-text" name="text" maxlength="{{ reply_limit }}" required placeholder="Write a reply" hx-preserve="true"></textarea>
+          <div class="actions">
+            <button class="primary" type="submit">Send</button>
+          </div>
+        </form>
+      {% endif %}
+    </div>
   {% else %}
     <p class="muted">No messages yet.</p>
   {% endif %}

@@ -12,10 +12,14 @@ logger = logging.getLogger(__name__)
 
 QUEUE = "vimple:postsale:queue"
 REPLY_QUEUE = "vimple:reply:queue"
+REFRESH_QUEUE = "vimple:refresh:queue"
 ACTIVE_TTL = 30 * 60
 DONE_TTL = 2 * 60
+REFRESH_COOLDOWN = 60
+REFRESH_LIMIT = 20
 BLOCK_SECONDS = 5
 _local_reply_status = {}
+_local_refresh = {}
 
 _started = False
 _start_lock = threading.Lock()
@@ -31,6 +35,10 @@ def status_key(organization_id):
 
 def reply_status_key(conversation_id):
     return f"vimple:reply:status:{conversation_id}"
+
+
+def refresh_status_key(organization_id):
+    return f"vimple:refresh:status:{organization_id}"
 
 
 def _client():
@@ -238,11 +246,133 @@ def _under_test():
     return command == "test"
 
 
+def enqueue_refresh(organization):
+    """Queue one refresh. A recent or in-flight refresh is left as it is."""
+    client = _client()
+    key = refresh_status_key(organization.pk)
+    current = client.get(key)
+    if current in {"queued", "running", "ok", "failed"}:
+        return current
+    client.set(key, "queued", ex=ACTIVE_TTL)
+    client.lpush(REFRESH_QUEUE, str(organization.pk))
+    return "queued"
+
+
+def dispatch_refresh(organization):
+    """Queue a refresh of threads that still need a reply.
+
+    manage.py test does not refresh, so opening the inbox stays a database read.
+    A local server without Redis starts a daemon thread and returns immediately.
+    """
+    if organization is None or _under_test():
+        return
+    if postsale_queue_enabled():
+        try:
+            enqueue_refresh(organization)
+        except Exception:
+            logger.exception("Could not queue the unanswered refresh")
+        return
+    key = str(organization.pk)
+    if _refresh_blocked(key):
+        return
+    _local_refresh[key] = ("active",)
+    threading.Thread(
+        target=_refresh_in_thread,
+        args=(key,),
+        name="inbox-refresh",
+        daemon=True,
+    ).start()
+
+
+def _refresh_blocked(organization_id):
+    state = _local_refresh.get(str(organization_id))
+    if not state:
+        return False
+    if state[0] == "active":
+        return True
+    return time.monotonic() < state[1]
+
+
+def _refresh_in_thread(organization_id):
+    close_old_connections()
+    try:
+        refresh_unanswered(organization_id)
+    except Exception:
+        logger.exception("Unanswered refresh failed for %s", organization_id)
+    finally:
+        _local_refresh[str(organization_id)] = (
+            "done",
+            time.monotonic() + REFRESH_COOLDOWN,
+        )
+        close_old_connections()
+
+
+def run_next_refresh_job(block_seconds=BLOCK_SECONDS):
+    """Run one queued refresh. Returns False when the list is empty."""
+    item = _client().brpop(REFRESH_QUEUE, timeout=block_seconds)
+    if not item:
+        return False
+    _queue_name, organization_id = item
+    _run_refresh(organization_id)
+    return True
+
+
+def _run_refresh(organization_id):
+    key = refresh_status_key(organization_id)
+    client = _client()
+    client.set(key, "running", ex=ACTIVE_TTL)
+    close_old_connections()
+    try:
+        refresh_unanswered(organization_id)
+    except Exception:
+        logger.exception("Unanswered refresh failed for %s", organization_id)
+        _client().set(key, "failed", ex=REFRESH_COOLDOWN)
+    else:
+        _client().set(key, "ok", ex=REFRESH_COOLDOWN)
+    finally:
+        close_old_connections()
+
+
+def refresh_unanswered(organization_id):
+    """Re-fetch up to 20 threads that still need a reply for one organization."""
+    from accounts.models import Organization
+    from cryptography.fernet import InvalidToken
+
+    from inbox.models import Channel, Conversation
+
+    organization = Organization.objects.filter(pk=organization_id).first()
+    if organization is None:
+        return
+    conversations = Conversation.objects.filter(
+        organization=organization,
+        needs_reply=True,
+    ).order_by("-last_message_at", "-created_at")[:REFRESH_LIMIT]
+    for conversation in conversations:
+        try:
+            if conversation.channel == Channel.MELI_ITEM_QUESTIONS:
+                from .views import _load_question
+
+                _load_question(organization, conversation.external_id)
+            elif conversation.channel == Channel.MELI_POSTSALES:
+                from .postsale import load_pack
+
+                load_pack(organization, conversation.external_id)
+        except (OSError, ValueError, InvalidToken):
+            continue
+        except Exception:
+            logger.exception(
+                "Could not refresh %s %s",
+                conversation.channel,
+                conversation.external_id,
+            )
+
+
 def _worker_loop():
     while True:
         try:
             run_next_postsale_job()
             run_next_reply_job(block_seconds=0)
+            run_next_refresh_job(block_seconds=0)
         except Exception:
             logger.exception("Post-sale worker lost the Redis connection")
             close_old_connections()
