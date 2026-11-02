@@ -21,6 +21,9 @@ BLOCK_SECONDS = 5
 _local_reply_status = {}
 _local_refresh = {}
 
+_clients = {}
+_client_lock = threading.Lock()
+
 _started = False
 _start_lock = threading.Lock()
 
@@ -42,14 +45,21 @@ def refresh_status_key(organization_id):
 
 
 def _client():
+    """One client per URL, so its connection pool is reused across calls and threads."""
     import redis
 
-    return redis.Redis.from_url(
-        settings.REDIS_URL,
-        decode_responses=True,
-        socket_connect_timeout=5,
-        socket_timeout=BLOCK_SECONDS + 5,
-    )
+    url = settings.REDIS_URL
+    with _client_lock:
+        client = _clients.get(url)
+        if client is None:
+            client = redis.Redis.from_url(
+                url,
+                decode_responses=True,
+                socket_connect_timeout=5,
+                socket_timeout=BLOCK_SECONDS + 5,
+            )
+            _clients[url] = client
+    return client
 
 
 def postsale_status(organization):

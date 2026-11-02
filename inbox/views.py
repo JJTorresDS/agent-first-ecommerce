@@ -83,8 +83,20 @@ def _thread_request(request):
     )
 
 
-def _live_poll(request):
-    return (request.headers.get("HX-Target") or "").startswith("conversation-body")
+def _list_poll(request):
+    return (
+        request.headers.get("HX-Request") == "true"
+        and request.headers.get("HX-Target") == "chat-list"
+    )
+
+
+def _active_first(conversations, selected_id):
+    """The rows in their usual order, with the selected one moved to the top."""
+    rows = list(conversations)
+    selected = next((row for row in rows if str(row.pk) == selected_id), None)
+    if selected is None:
+        return rows, rows[0] if rows else None
+    return [selected] + [row for row in rows if row.pk != selected.pk], selected
 
 
 def _thread_context(organization, conversation, *, reply_error=False):
@@ -117,7 +129,7 @@ def _render_thread(request, conversation, *, failed=False):
     organization = conversation.organization
     context = _thread_context(organization, conversation, reply_error=failed)
     context["oob"] = True
-    context["live_poll"] = False
+    request.inbox_partial = True
     return render(request, "inbox/_thread.html", context)
 
 
@@ -129,7 +141,13 @@ def inbox(request):
     organization = membership.organization
     from meli.jobs import dispatch_refresh
 
-    dispatch_refresh(organization)
+    thread_request = _thread_request(request)
+    list_poll = _list_poll(request)
+    if thread_request or list_poll:
+        # Partials skip the nav context processor and its queries.
+        request.inbox_partial = True
+    if not thread_request:
+        dispatch_refresh(organization)
     show_older = request.GET.get("since") == "all"
     conversations = Conversation.objects.filter(organization=organization)
     if not show_older:
@@ -144,24 +162,33 @@ def inbox(request):
         "-last_message_at",
         "-created_at",
     )
-    selected = _selected(conversations, request.GET.get("conversation") or "")
-    if selected is None:
-        selected = conversations.first()
+    selected_id = request.GET.get("conversation") or ""
+    if thread_request:
+        selected = _selected(conversations, selected_id) or conversations.first()
+        context = {
+            "oob": True,
+            **_thread_context(
+                organization,
+                selected,
+                reply_error=request.GET.get("reply") == "failed",
+            ),
+        }
+        return render(request, "inbox/_thread.html", context)
+    rows, selected = _active_first(conversations, selected_id)
     context = {
-        "conversations": conversations,
+        "conversations": rows,
         "show_older": show_older,
-        "list_actions": list_actions(organization),
-        "oob": _thread_request(request),
+        "list_poll": list_poll,
         **_thread_context(
             organization,
             selected,
             reply_error=request.GET.get("reply") == "failed",
         ),
-        **_sync_flags(organization, request.GET.get("sync") or ""),
-        "live_poll": _live_poll(request),
     }
-    if context["oob"]:
-        return render(request, "inbox/_thread.html", context)
+    if list_poll:
+        return render(request, "inbox/_list.html", context)
+    context["list_actions"] = list_actions(organization)
+    context.update(_sync_flags(organization, request.GET.get("sync") or ""))
     return render(request, "inbox/inbox.html", context)
 
 

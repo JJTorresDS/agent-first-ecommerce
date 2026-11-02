@@ -14,52 +14,88 @@
     return url.pathname + url.search;
   }
   var inboxBubbleScroll = 0;
-  // outerHTML swaps leave event.detail.target pointing at the removed element,
-  // so always read the live #thread and #chat-list.
-  function inboxMarkShown(setOpen) {
-    var thread = document.getElementById("thread");
-    var shown = thread && thread.getAttribute("data-conversation");
-    if (!shown) return;
-    var inbox = document.getElementById("inbox");
-    if (inbox) {
-      if (setOpen) inbox.setAttribute("data-open", shown);
-      inbox.setAttribute("data-shown", shown);
-    }
+  var inboxLoadingTimer = null;
+  function inboxLoading(show) {
+    clearTimeout(inboxLoadingTimer);
+    var modal = document.getElementById("thread-loading");
+    if (!modal) return;
+    if (show) inboxLoadingTimer = setTimeout(function () { modal.hidden = false; }, 150);
+    else modal.hidden = true;
+  }
+  // Highlight the conversation being opened and keep it at the top of the list.
+  function inboxMarkActive(open) {
+    var list = document.getElementById("chat-list");
+    var row = document.getElementById("conversation-" + open);
+    if (list && row && list.firstElementChild !== row) list.prepend(row);
     var rows = document.querySelectorAll("#chat-list a");
     for (var i = 0; i < rows.length; i++) {
-      if (rows[i].id === "conversation-" + shown) rows[i].classList.add("active");
+      if (rows[i].id === "conversation-" + open) rows[i].classList.add("active");
       else rows[i].classList.remove("active");
     }
+  }
+  function inboxSelectRow(row) {
+    var open = row.id.replace("conversation-", "");
+    var inbox = document.getElementById("inbox");
+    if (inbox) inbox.setAttribute("data-open", open);
+    inboxMarkActive(open);
+    var thread = document.getElementById("thread");
+    if (!thread || thread.getAttribute("data-conversation") !== open) inboxLoading(true);
+  }
+  // outerHTML swaps leave event.detail.target pointing at the removed element,
+  // so always read the live #thread and #chat-list.
+  function inboxOpen() {
+    var inbox = document.getElementById("inbox");
+    var open = inbox && inbox.getAttribute("data-open");
+    if (open) return open;
+    var thread = document.getElementById("thread");
+    open = thread && thread.getAttribute("data-conversation");
+    if (inbox && open) inbox.setAttribute("data-open", open);
+    return open;
   }
   document.body.addEventListener("htmx:beforeSwap", function (event) {
     var target = event.detail && event.detail.target;
     if (!target || !target.id) return;
+    var inbox = document.getElementById("inbox");
+    var open = inbox && inbox.getAttribute("data-open");
+    if (!open) return;
+    // Drop responses requested for a conversation the user has already clicked away from.
     if (target.id === "chat-list") {
-      var inbox = document.getElementById("inbox");
-      var shown = inbox && inbox.getAttribute("data-shown");
       var response = (event.detail.xhr && event.detail.xhr.responseText) || "";
-      if (shown && response.indexOf('id="conversation-' + shown + '" class="active"') === -1) {
-        event.detail.shouldSwap = false;
-      }
-      return;
+      if (response.indexOf('data-requested="' + open + '"') === -1) event.detail.shouldSwap = false;
     }
-    if (target.id.indexOf("conversation-body") === 0) {
-      var bubbles = document.getElementById("bubbles");
-      inboxBubbleScroll = bubbles ? bubbles.scrollTop : 0;
+    var from = event.target;
+    if (target.id === "thread" && from && from.id && from.id.indexOf("conversation-") === 0 && from.id !== "conversation-" + open) {
+      event.detail.shouldSwap = false;
     }
   });
   document.body.addEventListener("htmx:afterSwap", function (event) {
     var target = event.detail && event.detail.target;
     if (!target || !target.id) return;
-    if (target.id === "thread") inboxMarkShown(true);
-    if (target.id === "chat-list") inboxMarkShown(false);
-    if (target.id.indexOf("conversation-body") === 0) {
-      var bubbles = document.getElementById("bubbles");
-      if (bubbles) bubbles.scrollTop = inboxBubbleScroll;
+    if (target.id === "thread") inboxLoading(false);
+    if (target.id === "thread" || target.id === "chat-list") {
+      var open = inboxOpen();
+      if (open) inboxMarkActive(open);
     }
   });
+  document.body.addEventListener("htmx:oobBeforeSwap", function (event) {
+    var target = event.detail && event.detail.target;
+    if (!target || !target.id || target.id.indexOf("conversation-body") !== 0) return;
+    var bubbles = document.getElementById("bubbles");
+    inboxBubbleScroll = bubbles ? bubbles.scrollTop : 0;
+  });
+  document.body.addEventListener("htmx:oobAfterSwap", function (event) {
+    var target = event.detail && event.detail.target;
+    if (!target || !target.id || target.id.indexOf("conversation-body") !== 0) return;
+    var bubbles = document.getElementById("bubbles");
+    if (bubbles) bubbles.scrollTop = inboxBubbleScroll;
+  });
+  document.body.addEventListener("htmx:afterRequest", function (event) {
+    var elt = event.detail && event.detail.elt;
+    if (event.detail.failed && elt && elt.id && elt.id.indexOf("conversation-") === 0) inboxLoading(false);
+  });
+  document.body.addEventListener("htmx:sendError", function () { inboxLoading(false); });
 </script>
-<div id="inbox"{% if selected %} data-open="{{ selected.id }}" data-shown="{{ selected.id }}"{% endif %}>
+<div id="inbox"{% if selected %} data-open="{{ selected.id }}"{% endif %}>
   <div id="inbox-status"{% if sync_pending %} hx-get="{% querystring sync=None %}" hx-trigger="every 3s" hx-select="#inbox-status" hx-target="#inbox-status" hx-swap="outerHTML"{% endif %}>
     {% if sync_pending %}
       <p class="muted">Post-sale messages are loading.</p>
@@ -85,20 +121,17 @@
   {% endfor %}
   <p class="muted">
     {% if show_older %}
-      <a href="{% querystring since=None conversation=None reply=None sync=None %}" hx-get="{% querystring since=None conversation=None reply=None sync=None %}" hx-target="#chat-list" hx-select="#chat-list" hx-swap="outerHTML" hx-push-url="true" hx-on:click="var inbox = document.getElementById('inbox'); if (inbox) { inbox.removeAttribute('data-open'); inbox.removeAttribute('data-shown'); }">Last 7 days</a>
+      <a href="{% querystring since=None conversation=None reply=None sync=None %}" hx-get="{% querystring since=None conversation=None reply=None sync=None %}" hx-target="#chat-list" hx-select="#chat-list" hx-swap="outerHTML" hx-push-url="true" hx-on:click="var inbox = document.getElementById('inbox'); if (inbox) { inbox.removeAttribute('data-open'); }">Last 7 days</a>
     {% else %}
-      <a href="{% querystring since="all" conversation=None reply=None sync=None %}" hx-get="{% querystring since="all" conversation=None reply=None sync=None %}" hx-target="#chat-list" hx-select="#chat-list" hx-swap="outerHTML" hx-push-url="true" hx-on:click="var inbox = document.getElementById('inbox'); if (inbox) { inbox.removeAttribute('data-open'); inbox.removeAttribute('data-shown'); }">Show older</a>
+      <a href="{% querystring since="all" conversation=None reply=None sync=None %}" hx-get="{% querystring since="all" conversation=None reply=None sync=None %}" hx-target="#chat-list" hx-select="#chat-list" hx-swap="outerHTML" hx-push-url="true" hx-on:click="var inbox = document.getElementById('inbox'); if (inbox) { inbox.removeAttribute('data-open'); }">Show older</a>
     {% endif %}
   </p>
   <div class="chat">
-    <aside id="chat-list" class="chat-list" hx-get="{% url 'inbox' %}" hx-trigger="every 3s" hx-select="#chat-list" hx-target="#chat-list" hx-swap="outerHTML settle:0s swap:0s" hx-on:htmx:config-request="if (event.detail.elt !== this) return; event.detail.path = inboxPollUrl();">
-      {% for conversation in conversations %}
-        {% include "inbox/_row.html" with conversation=conversation %}
-      {% empty %}
-        <p class="muted" style="padding: 0.9rem;">No messages yet.</p>
-      {% endfor %}
-    </aside>
+    {% include "inbox/_list.html" %}
     {% include "inbox/_thread.html" %}
+    <div id="thread-loading" class="thread-loading" role="status" aria-live="polite" hidden>
+      <div class="thread-loading-box"><span class="spinner" aria-hidden="true"></span>Loading conversation…</div>
+    </div>
   </div>
 </div>
 {% endblock %}

@@ -1,39 +1,15 @@
 <section id="thread" class="chat-thread"{% if selected %} data-conversation="{{ selected.id }}"{% endif %}{% if reply_pending %} hx-get="{% url 'inbox' %}?conversation={{ selected.id }}" hx-trigger="every 2s" hx-target="#thread" hx-select="#thread" hx-swap="outerHTML settle:0s swap:0s"{% endif %}>
   {% if selected %}
     <div id="conversation" class="conversation">
-      <div id="conversation-body-{{ selected.id }}" hx-get="{% url 'inbox' %}?conversation={{ selected.id }}" hx-trigger="every 3s" hx-target="this" hx-select="#conversation-body-{{ selected.id }}" hx-swap="outerHTML settle:0s swap:0s">
-        <h1>
-          {% if selected.safe_link %}
-            <a href="{{ selected.safe_link }}" target="_blank" rel="noopener">{{ selected.title }}</a>
-          {% else %}
-            {{ selected.title }}
-          {% endif %}
-        </h1>
-        <p class="channel">{{ selected.channel }}</p>
-        <div id="bubbles">
-          {% for message in messages %}
-            <div class="bubble {% if message.direction == 'inbound' %}buyer{% else %}seller{% endif %}">
-              {{ message.body }}
-              {% if message.sent_label %}<time>{{ message.sent_label }}</time>{% endif %}
-            </div>
-          {% endfor %}
-        </div>
-      </div>
+      {% include "inbox/_conversation_body.html" %}
     </div>
-    {% if not live_poll %}
-      <div id="composer-slot">
-        {% include "inbox/_composer.html" %}
-      </div>
-    {% endif %}
+    <div id="composer-slot">
+      {% include "inbox/_composer.html" %}
+    </div>
   {% else %}
     <p class="muted">No messages yet.</p>
   {% endif %}
 </section>
-{% if live_poll and selected %}
-  <div id="composer-slot" hx-swap-oob="outerHTML">
-    {% include "inbox/_composer.html" with preserve_composer=True %}
-  </div>
-{% endif %}
 {% if oob and selected %}
   {% include "inbox/_row.html" with conversation=selected oob=True %}
 {% endif %}

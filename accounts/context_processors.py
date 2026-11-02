@@ -12,6 +12,8 @@ from .models import (
 
 
 def nav(request):
+    if getattr(request, "inbox_partial", False):
+        return {}
     user = getattr(request, "user", None)
     membership = membership_for(user)
     name, initials, avatar = _identity(user)

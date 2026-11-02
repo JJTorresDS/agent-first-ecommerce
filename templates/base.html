@@ -84,12 +84,18 @@
     button.profile-backdrop:hover, button.profile-backdrop:active { background: transparent; transform: none; }
     .error { color: #a32020; }
     .sync { display: flex; justify-content: flex-end; margin: 0 0 1rem; }
-    .chat { display: flex; gap: 1rem; align-items: stretch; height: calc(100vh - 12rem); min-height: 22rem; }
+    .chat { position: relative; display: flex; gap: 1rem; align-items: stretch; height: calc(100vh - 12rem); min-height: 22rem; }
     .chat-list, .chat-thread { border: 1px solid #e6e6e6; border-radius: 12px; background: #fff; }
     .chat-list { width: 18rem; flex: none; overflow: auto; min-height: 0; }
-    .chat-list a { display: block; padding: 0.75rem 0.9rem; border-bottom: 1px solid #eee; text-decoration: none; cursor: pointer; transition: background-color 0.12s ease, transform 0.12s ease; }
-    .chat-list a.active, .chat-list a:hover { background: #f6f5f2; }
-    .chat-list a:active { background: #e0ddd6; transform: scale(0.97); }
+    .chat-list a { display: block; padding: 0.75rem 0.9rem; border-bottom: 1px solid #eee; border-left: 3px solid transparent; text-decoration: none; cursor: pointer; transition: background-color 0.12s ease, transform 0.12s ease; }
+    .chat-list a:hover { background: #f3e8ff; }
+    .chat-list a.active, .chat-list a.active:hover { background: #d8b4fe; border-left-color: #7c3aed; }
+    .chat-list a:active { transform: scale(0.97); }
+    .thread-loading { position: absolute; top: 0; right: 0; bottom: 0; left: calc(18rem + 1rem); z-index: 5; display: flex; align-items: center; justify-content: center; border-radius: 12px; background: rgba(255, 255, 255, 0.75); }
+    .thread-loading[hidden] { display: none; }
+    .thread-loading-box { display: flex; align-items: center; gap: 0.6rem; padding: 0.8rem 1.1rem; border-radius: 10px; background: #fff; border: 1px solid #e6e6e6; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12); }
+    .spinner { width: 1rem; height: 1rem; border: 2px solid #d8b4fe; border-top-color: #7c3aed; border-radius: 50%; animation: spin 0.7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
     .chat-list strong, .chat-list span { display: block; }
     .chat-list span { color: #555; font-size: 0.85rem; margin-top: 0.2rem; }
     .chat-thread { flex: 1; min-width: 0; min-height: 0; padding: 1.25rem; display: flex; flex-direction: column; gap: 0.75rem; overflow: hidden; }

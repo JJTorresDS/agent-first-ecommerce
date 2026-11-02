@@ -1,0 +1,18 @@
+<div id="conversation-body-{{ selected.id }}"{% if body_oob %} hx-swap-oob="outerHTML"{% endif %}>
+  <h1>
+    {% if selected.safe_link %}
+      <a href="{{ selected.safe_link }}" target="_blank" rel="noopener">{{ selected.title }}</a>
+    {% else %}
+      {{ selected.title }}
+    {% endif %}
+  </h1>
+  <p class="channel">{{ selected.channel }}</p>
+  <div id="bubbles">
+    {% for message in messages %}
+      <div class="bubble {% if message.direction == 'inbound' %}buyer{% else %}seller{% endif %}">
+        {{ message.body }}
+        {% if message.sent_label %}<time>{{ message.sent_label }}</time>{% endif %}
+      </div>
+    {% endfor %}
+  </div>
+</div>

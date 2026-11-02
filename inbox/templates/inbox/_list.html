@@ -1,0 +1,13 @@
+<aside id="chat-list" class="chat-list" data-requested="{{ request.GET.conversation }}" hx-get="{% url 'inbox' %}" hx-trigger="every 3s" hx-select="#chat-list" hx-target="#chat-list" hx-swap="outerHTML settle:0s swap:0s" hx-on:htmx:config-request="if (event.detail.elt !== this) return; event.detail.path = inboxPollUrl();">
+  {% for conversation in conversations %}
+    {% include "inbox/_row.html" with conversation=conversation %}
+  {% empty %}
+    <p class="muted" style="padding: 0.9rem;">No messages yet.</p>
+  {% endfor %}
+</aside>
+{% if list_poll and selected %}
+  {% include "inbox/_conversation_body.html" with body_oob=True %}
+  <div id="composer-slot" hx-swap-oob="outerHTML">
+    {% include "inbox/_composer.html" with preserve_composer=True %}
+  </div>
+{% endif %}

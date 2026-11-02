@@ -1608,18 +1608,23 @@ class PostSaleTests(TestCase):
         self.assertIn(f'id="conversation-{sale.pk}" class="active"', content)
         self.assertIn(f'id="conversation-{first.pk}" class=""', content)
         self.assertIn(f'data-open="{sale.pk}"', content)
-        self.assertIn(f'data-shown="{sale.pk}"', content)
         self.assertIn(f'data-conversation="{sale.pk}"', content)
+        self.assertIn(f'data-requested="{sale.pk}"', content)
         self.assertIn(f'id="conversation-body-{sale.pk}"', content)
         self.assertNotIn("hx-sync=", content)
-        self.assertIn("setAttribute('data-open'", content)
-        self.assertIn('getAttribute("data-shown")', content)
+        self.assertIn('inbox.setAttribute("data-open"', content)
         self.assertIn("removeAttribute('data-open')", content)
-        self.assertIn("removeAttribute('data-shown')", content)
         self.assertIn('rows[i].classList.add("active")', content)
         self.assertIn('document.getElementById("thread")', content)
         self.assertNotIn('target.getAttribute("data-conversation")', content)
         self.assertNotIn("inboxDebug", content)
+        self.assertLess(
+            content.index(f'id="conversation-{sale.pk}"'),
+            content.index(f'id="conversation-{first.pk}"'),
+        )
+        self.assertIn('hx-on:htmx:config-request="inboxSelectRow(this)"', content)
+        self.assertIn('id="thread-loading"', content)
+        self.assertIn("Loading conversation", content)
         self.assertContains(page, "Necesito medidas?")
         self.assertContains(page, "Mide 67x60cm")
         self.assertNotContains(page, "Only other org")
@@ -1632,13 +1637,23 @@ class PostSaleTests(TestCase):
         self.assertIn("Mide 67x60cm", body)
         self.assertNotIn("Anillo Acero", body)
         self.assertNotIn('id="composer-text"', body)
-        self.assertIn(f"conversation={sale.pk}", body)
+        self.assertNotIn("hx-trigger", body)
         self.assertIn("inboxPollUrl", content)
         polled = self.client.get(
             f"/inbox/?conversation={sale.pk}",
-            headers={"HX-Request": "true", "HX-Target": "conversation-body"},
+            headers={"HX-Request": "true", "HX-Target": "chat-list"},
         )
         polled_html = polled.content.decode()
+        self.assertTrue(polled_html.startswith('<aside id="chat-list"'))
+        self.assertNotIn("<html", polled_html)
+        self.assertNotIn('class="sidebar"', polled_html)
+        self.assertNotIn("Hidden sale", polled_html)
+        self.assertLess(
+            polled_html.index(f'id="conversation-{sale.pk}" class="active"'),
+            polled_html.index(f'id="conversation-{first.pk}" class=""'),
+        )
+        self.assertIn(f'id="conversation-body-{sale.pk}" hx-swap-oob="outerHTML"', polled_html)
+        self.assertIn('id="composer-slot" hx-swap-oob="outerHTML"', polled_html)
         polled_body = polled_html.split(marker, 1)[1].split('id="composer-slot"', 1)[0]
         self.assertIn("Willian sale", polled_body)
         self.assertIn("meli-postsales", polled_body)
@@ -1646,6 +1661,56 @@ class PostSaleTests(TestCase):
         self.assertIn("Mide 67x60cm", polled_body)
         self.assertNotIn("Anillo Acero", polled_body)
         self.assertNotIn("Only other org", polled_html)
+
+    def test_thread_click_returns_only_the_thread_and_skips_the_nav(self):
+        now = timezone.now()
+        sale = Conversation.objects.create(
+            organization=self.organization,
+            channel="meli-postsales",
+            external_id=PACK,
+            title="Willian sale",
+            needs_reply=True,
+            last_message_at=now,
+        )
+        other = Organization.objects.create(name="Other")
+        hidden = Conversation.objects.create(
+            organization=other,
+            channel="meli-postsales",
+            external_id="hidden-pack",
+            title="Hidden sale",
+            needs_reply=True,
+            last_message_at=now,
+        )
+        headers = {"HX-Request": "true", "HX-Target": "thread"}
+        with self.assertNumQueries(7):
+            clicked = self.client.get(f"/inbox/?conversation={sale.pk}", headers=headers)
+        html = clicked.content.decode()
+        self.assertTrue(html.startswith(f'<section id="thread" class="chat-thread" data-conversation="{sale.pk}"'))
+        self.assertNotIn('class="sidebar"', html)
+        self.assertIn(f'id="conversation-{sale.pk}" hx-swap-oob="outerHTML" class="active"', html)
+        stolen = self.client.get(f"/inbox/?conversation={hidden.pk}", headers=headers)
+        self.assertNotContains(stolen, "Hidden sale")
+        self.assertContains(stolen, "Willian sale")
+        stolen_list = self.client.get(
+            f"/inbox/?conversation={hidden.pk}",
+            headers={"HX-Request": "true", "HX-Target": "chat-list"},
+        )
+        self.assertNotContains(stolen_list, "Hidden sale")
+        self.assertContains(stolen_list, f'id="conversation-{sale.pk}" class="active"')
+
+    def test_redis_client_is_reused_per_url(self):
+        from meli.jobs import _client
+
+        with override_settings(REDIS_URL="redis://reuse-test"):
+            first = _client()
+            self.assertIs(_client(), first)
+        with override_settings(REDIS_URL="redis://other-test"):
+            self.assertIsNot(_client(), first)
+
+    def test_profile_menu_still_gets_the_nav(self):
+        menu = self.client.get("/profile/menu/", headers={"HX-Request": "true"})
+        self.assertEqual(menu.status_code, 200)
+        self.assertContains(menu, "ada@example.com")
 
     def test_pack_keeps_every_page_of_the_conversation(self):
         from meli.postsale import load_pack

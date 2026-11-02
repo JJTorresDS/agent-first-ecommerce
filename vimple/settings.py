@@ -145,6 +145,8 @@ def database_from_url(url):
         raise ImproperlyConfigured("DATABASE_URL is missing the database name")
     options = {key: values[-1] for key, values in parse_qs(parsed.query).items()}
     options.setdefault("sslmode", "require")
+    # Reuse connections across requests and threads; a new Neon connection costs over a second.
+    options["pool"] = {"min_size": 1, "max_size": 8, "timeout": 10}
     return {
         "ENGINE": "django.db.backends.postgresql",
         "NAME": name,

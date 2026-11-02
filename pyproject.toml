@@ -9,7 +9,7 @@ dependencies = [
     "django-allauth[socialaccount]==65.21.0",
     "django-ninja==1.7.1",
     "gunicorn==26.2.0",
-    "psycopg[binary]>=3.2",
+    "psycopg[binary,pool]>=3.2",
     "python-dotenv==1.2.4",
     "redis>=8.1.0",
     "whitenoise==6.12.0",
