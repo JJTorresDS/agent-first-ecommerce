@@ -558,6 +558,36 @@ class ItemQuestionTests(TestCase):
         self.assertContains(page, "Si hay")
         self.assertNotContains(page, "Write a reply")
 
+    def test_reply_from_the_live_origin_is_not_a_csrf_failure(self):
+        ItemQuestion.objects.create(
+            organization=self.organization,
+            question_id="13683341904",
+            item_id="MLA1",
+            item_title="Perfume",
+            text="Tienen stock?",
+            status="UNANSWERED",
+        )
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(self.user)
+        page = client.get("/inbox/")
+        conversation = Conversation.objects.get(external_id="13683341904")
+        token = (
+            page.content.decode()
+            .split('name="csrfmiddlewaretoken" value="', 1)[1]
+            .split('"', 1)[0]
+        )
+        with patch("meli.client.urlopen", side_effect=question_api):
+            response = client.post(
+                f"/inbox/{conversation.pk}/reply/",
+                {"text": "Si hay", "csrfmiddlewaretoken": token},
+                HTTP_ORIGIN="https://vimple-backend.onrender.com",
+            )
+        self.assertNotEqual(response.status_code, 403)
+        self.assertRedirects(
+            response,
+            f"/inbox/?conversation={conversation.pk}",
+        )
+
     def test_another_organization_does_not_see_the_question(self):
         ItemQuestion.objects.create(
             organization=self.organization,
