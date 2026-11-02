@@ -10,15 +10,19 @@
     url.searchParams.delete("reply");
     return url.pathname + url.search;
   }
-  function inboxScrollTranscript() {
-    var node = document.getElementById("bubbles");
-    if (node) node.scrollTop = node.scrollHeight;
-  }
+  var inboxBubbleScroll = 0;
+  document.body.addEventListener("htmx:beforeSwap", function (event) {
+    var target = event.detail && event.detail.target;
+    if (!target || target.id !== "conversation-body") return;
+    var bubbles = document.getElementById("bubbles");
+    inboxBubbleScroll = bubbles ? bubbles.scrollTop : 0;
+  });
   document.body.addEventListener("htmx:afterSwap", function (event) {
     var target = event.detail && event.detail.target;
-    if (target && target.id === "thread") inboxScrollTranscript();
+    if (!target || target.id !== "conversation-body") return;
+    var bubbles = document.getElementById("bubbles");
+    if (bubbles) bubbles.scrollTop = inboxBubbleScroll;
   });
-  inboxScrollTranscript();
 </script>
 <div id="inbox">
   <div id="inbox-status"{% if sync_pending %} hx-get="{% querystring sync=None %}" hx-trigger="every 3s" hx-select="#inbox-status" hx-target="#inbox-status" hx-swap="outerHTML"{% endif %}>

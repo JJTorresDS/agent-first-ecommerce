@@ -1,21 +1,23 @@
 <section id="thread" class="chat-thread"{% if reply_pending %} hx-get="{% url 'inbox' %}?conversation={{ selected.id }}" hx-trigger="every 2s" hx-target="#thread" hx-select="#thread" hx-swap="outerHTML settle:0s swap:0s"{% endif %}>
   {% if selected %}
-    <h1>
-      {% if selected.safe_link %}
-        <a href="{{ selected.safe_link }}" target="_blank" rel="noopener">{{ selected.title }}</a>
-      {% else %}
-        {{ selected.title }}
-      {% endif %}
-    </h1>
-    <p class="channel">{{ selected.channel }}</p>
-    <div id="bubbles">
-      <div id="transcript" hx-get="{% url 'inbox' %}" hx-trigger="every 3s" hx-target="#transcript" hx-select="#transcript" hx-swap="outerHTML settle:0s swap:0s" hx-on:htmx:config-request="if (event.detail.elt !== this) return; event.detail.path = inboxPollUrl();">
-        {% for message in messages %}
-          <div class="bubble {% if message.direction == 'inbound' %}buyer{% else %}seller{% endif %}">
-            {{ message.body }}
-            {% if message.sent_label %}<time>{{ message.sent_label }}</time>{% endif %}
-          </div>
-        {% endfor %}
+    <div id="conversation" class="conversation">
+      <div id="conversation-body" hx-get="{% url 'inbox' %}?conversation={{ selected.id }}" hx-trigger="every 3s" hx-target="this" hx-select="#conversation-body" hx-swap="outerHTML settle:0s swap:0s">
+        <h1>
+          {% if selected.safe_link %}
+            <a href="{{ selected.safe_link }}" target="_blank" rel="noopener">{{ selected.title }}</a>
+          {% else %}
+            {{ selected.title }}
+          {% endif %}
+        </h1>
+        <p class="channel">{{ selected.channel }}</p>
+        <div id="bubbles">
+          {% for message in messages %}
+            <div class="bubble {% if message.direction == 'inbound' %}buyer{% else %}seller{% endif %}">
+              {{ message.body }}
+              {% if message.sent_label %}<time>{{ message.sent_label }}</time>{% endif %}
+            </div>
+          {% endfor %}
+        </div>
       </div>
     </div>
     {% if not live_poll %}

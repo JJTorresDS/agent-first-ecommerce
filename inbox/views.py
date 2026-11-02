@@ -84,7 +84,7 @@ def _thread_request(request):
 
 
 def _live_poll(request):
-    return request.headers.get("HX-Target") == "transcript"
+    return request.headers.get("HX-Target") == "conversation-body"
 
 
 def _thread_context(organization, conversation, *, reply_error=False):

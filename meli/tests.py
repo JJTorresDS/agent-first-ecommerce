@@ -1610,19 +1610,28 @@ class PostSaleTests(TestCase):
         self.assertContains(page, "Necesito medidas?")
         self.assertContains(page, "Mide 67x60cm")
         self.assertNotContains(page, "Only other org")
-        start = content.index('id="transcript"')
-        slot = content.index('id="composer-slot"')
-        self.assertNotIn('id="composer-text"', content[start:slot])
-        self.assertIn('id="composer-text"', content[slot:])
+        body = content.split('id="conversation-body"', 1)[1].split('id="composer-slot"', 1)[0]
+        self.assertIn("Willian sale", body)
+        self.assertIn("meli-postsales", body)
+        self.assertIn("Necesito medidas?", body)
+        self.assertIn("Mide 67x60cm", body)
+        self.assertNotIn("Anillo Acero", body)
+        self.assertNotIn('id="composer-text"', body)
+        self.assertIn(f"conversation={sale.pk}", body)
         self.assertIn("inboxPollUrl", content)
         polled = self.client.get(
             f"/inbox/?conversation={sale.pk}",
-            headers={"HX-Request": "true", "HX-Target": "transcript"},
+            headers={"HX-Request": "true", "HX-Target": "conversation-body"},
         )
         polled_html = polled.content.decode()
-        self.assertIn("Necesito medidas?", polled_html)
-        self.assertIn("Mide 67x60cm", polled_html)
-        self.assertIn(f'id="conversation-{sale.pk}" class="active"', polled_html)
+        polled_body = polled_html.split('id="conversation-body"', 1)[1].split(
+            'id="composer-slot"', 1
+        )[0]
+        self.assertIn("Willian sale", polled_body)
+        self.assertIn("meli-postsales", polled_body)
+        self.assertIn("Necesito medidas?", polled_body)
+        self.assertIn("Mide 67x60cm", polled_body)
+        self.assertNotIn("Anillo Acero", polled_body)
         self.assertNotIn("Only other org", polled_html)
 
     def test_pack_keeps_every_page_of_the_conversation(self):
@@ -1666,7 +1675,7 @@ class PostSaleTests(TestCase):
         page = self.client.get(f"/inbox/?conversation={conversation.pk}")
         self.assertContains(page, "Line 0")
         self.assertContains(page, "Line 50")
-        transcript = page.content.decode().split('id="transcript"', 1)[1]
+        transcript = page.content.decode().split('id="conversation-body"', 1)[1]
         self.assertLess(transcript.index("Line 0"), transcript.index("Line 50"))
 
     def test_unanswered_comes_first_and_old_answered_is_hidden(self):
