@@ -230,6 +230,7 @@ class CashflowMovementTests(TestCase):
         movement.clean_fields()
         self.assertEqual(movement.receipt_id, "")
         self.assertEqual(movement.document_type, "")
+        self.assertIsNone(movement.parsing_confidence)
         self.assertEqual(movement.transaction_date, date(2026, 10, 7))
         self.assertEqual(movement.amount, Decimal("-58000.00"))
         self.assertEqual(movement.exchange_rate_at_purchase, Decimal("1560.9700"))
@@ -309,6 +310,7 @@ class CashflowApiTests(TestCase):
         self.assertEqual(body["source_file_id"], SOURCE_FILE_ID)
         self.assertEqual(body["receipt_id"], "")
         self.assertEqual(body["document_type"], "")
+        self.assertIsNone(body["parsing_confidence"])
         self.assertEqual(body["amount"], "-58000.00")
         self.assertIsNone(body["sub_category"])
         self.assertEqual(body["organization"], self.org_id)
@@ -331,6 +333,35 @@ class CashflowApiTests(TestCase):
         self.assertEqual(updated.json()["receipt_id"], "FAC-1042")
         self.assertEqual(updated.json()["document_type"], "invoice")
         self.assertEqual(CashflowMovement.objects.count(), 1)
+
+    def test_parsing_confidence_is_stored_between_zero_and_one(self):
+        created = self.client.put(
+            self.url,
+            json=cashflow_payload(organization=self.org_id, parsing_confidence="0.850"),
+            headers=self.auth,
+        )
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(created.json()["parsing_confidence"], "0.850")
+        self.assertEqual(
+            CashflowMovement.objects.get().parsing_confidence,
+            Decimal("0.850"),
+        )
+
+        cleared = self.client.patch(
+            f"/cashflow-movements/{created.json()['id']}",
+            json={"organization": self.org_id, "parsing_confidence": None},
+            headers=self.auth,
+        )
+        self.assertEqual(cleared.status_code, 200)
+        self.assertIsNone(cleared.json()["parsing_confidence"])
+
+        rejected = self.client.put(
+            self.url,
+            json=cashflow_payload(organization=self.org_id, parsing_confidence="1.500"),
+            headers=self.auth,
+        )
+        self.assertEqual(rejected.status_code, 422)
+        self.assertIsNone(CashflowMovement.objects.get().parsing_confidence)
 
     def test_document_type_must_be_receipt_or_invoice(self):
         response = self.client.put(

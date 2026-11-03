@@ -2,6 +2,7 @@ import re
 import uuid
 from urllib.parse import urlparse
 
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
 
@@ -146,6 +147,14 @@ class CashflowMovement(TenantModel):
         max_length=16,
         choices=DocumentType.choices,
         blank=True,
+    )
+    parsing_confidence = models.DecimalField(
+        max_digits=4,
+        decimal_places=3,
+        null=True,
+        blank=True,  # rows created before this field have no score
+        validators=[MinValueValidator(0), MaxValueValidator(1)],
+        help_text="0–1: probability that the parsed fields are correct (Jev per-field checks, capped by deterministic checks).",
     )
     white = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
