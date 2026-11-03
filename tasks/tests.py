@@ -493,6 +493,13 @@ class CashflowPageTests(TestCase):
         self.assertContains(page, 'class="description-text clamped"')
         self.assertContains(page, "Page 1 of 1")
 
+        row.parsing_observations = {"note": "Total was hard to read. " * 8}
+        row.save()
+        observations = self.client.get("/cashflow/")
+        self.assertContains(observations, "Total was hard to read.")
+        self.assertEqual(observations.content.decode().count('class="more"'), 2)
+        self.assertEqual(observations.content.decode().count('class="description-text clamped"'), 2)
+
     def test_pages_keep_filters_and_csv_exports_every_row(self):
         CashflowMovement.objects.filter(organization=self.organization).delete()
         for index in range(26):
