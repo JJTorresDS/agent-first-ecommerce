@@ -1,9 +1,11 @@
+import hashlib
 from datetime import timedelta
 from urllib.parse import urlencode
 
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
 from django.db.models import Q
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -99,6 +101,16 @@ def _active_first(conversations, selected_id):
     return [selected] + [row for row in rows if row.pk != selected.pk], selected
 
 
+def _list_version(rows, context):
+    """A fingerprint of what the list poll shows, so an unchanged poll can answer 204."""
+    selected = context["selected"]
+    parts = [str(selected.pk) if selected else ""]
+    parts += [f"{row.pk}:{row.updated_at.isoformat()}:{row.needs_reply}:{row.preview}" for row in rows]
+    parts += [f"{message.pk}:{message.updated_at.isoformat()}" for message in context["messages"]]
+    parts += [str(context[key]) for key in ("can_reply", "reply_pending", "reply_error")]
+    return hashlib.sha1("\n".join(parts).encode()).hexdigest()[:16]
+
+
 def _thread_context(organization, conversation, *, reply_error=False):
     from meli.jobs import reply_status
 
@@ -185,7 +197,11 @@ def inbox(request):
             reply_error=request.GET.get("reply") == "failed",
         ),
     }
+    context["messages"] = list(context["messages"])
+    context["list_version"] = _list_version(rows, context)
     if list_poll:
+        if request.headers.get("X-Inbox-Version") == context["list_version"]:
+            return HttpResponse(status=204)
         return render(request, "inbox/_list.html", context)
     context["list_actions"] = list_actions(organization)
     context.update(_sync_flags(organization, request.GET.get("sync") or ""))

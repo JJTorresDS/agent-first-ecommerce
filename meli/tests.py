@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from unittest.mock import patch
@@ -1697,6 +1698,76 @@ class PostSaleTests(TestCase):
         )
         self.assertNotContains(stolen_list, "Hidden sale")
         self.assertContains(stolen_list, f'id="conversation-{sale.pk}" class="active"')
+
+    def test_list_poll_answers_204_until_something_changes(self):
+        now = timezone.now()
+        sale = Conversation.objects.create(
+            organization=self.organization,
+            channel="meli-postsales",
+            external_id=PACK,
+            title="Willian sale",
+            needs_reply=True,
+            last_message_at=now,
+        )
+        question = Conversation.objects.create(
+            organization=self.organization,
+            channel="meli-itemquestions",
+            external_id="anillo",
+            title="Anillo Acero",
+            needs_reply=True,
+            last_message_at=now,
+        )
+        other = Organization.objects.create(name="Other")
+        hidden = Conversation.objects.create(
+            organization=other,
+            channel="meli-postsales",
+            external_id="hidden-pack",
+            title="Hidden sale",
+            needs_reply=True,
+            last_message_at=now,
+        )
+        poll = {"HX-Request": "true", "HX-Target": "chat-list"}
+        url = f"/inbox/?conversation={sale.pk}"
+        first = self.client.get(url, headers=poll)
+        self.assertEqual(first.status_code, 200)
+        version = re.search(r'data-version="([0-9a-f]+)"', first.content.decode()).group(1)
+        same = self.client.get(url, headers={**poll, "X-Inbox-Version": version})
+        self.assertEqual(same.status_code, 204)
+        self.assertEqual(same.content, b"")
+        Message.objects.create(
+            organization=other,
+            conversation=hidden,
+            direction=Message.Direction.INBOUND,
+            body="Only other org",
+            external_id="secret",
+            sent_at=now,
+        )
+        still = self.client.get(url, headers={**poll, "X-Inbox-Version": version})
+        self.assertEqual(still.status_code, 204)
+        moved = self.client.get(
+            f"/inbox/?conversation={question.pk}",
+            headers={**poll, "X-Inbox-Version": version},
+        )
+        self.assertEqual(moved.status_code, 200)
+        Message.objects.create(
+            organization=self.organization,
+            conversation=sale,
+            direction=Message.Direction.INBOUND,
+            body="Hay talle M?",
+            external_id="m-new",
+            sent_at=now,
+        )
+        changed = self.client.get(url, headers={**poll, "X-Inbox-Version": version})
+        self.assertEqual(changed.status_code, 200)
+        self.assertContains(changed, "Hay talle M?")
+        self.assertNotContains(changed, "Only other org")
+        self.assertNotContains(changed, "Hidden sale")
+        page = self.client.get(url).content.decode()
+        self.assertIn("visibilityState", page)
+        self.assertIn("X-Inbox-Version", page)
+        latest = re.search(r'data-version="([0-9a-f]+)"', changed.content.decode()).group(1)
+        self.assertNotEqual(latest, version)
+        self.assertIn(f'data-version="{latest}"', page)
 
     def test_redis_client_is_reused_per_url(self):
         from meli.jobs import _client

@@ -22,11 +22,12 @@
     if (show) inboxLoadingTimer = setTimeout(function () { modal.hidden = false; }, 150);
     else modal.hidden = true;
   }
-  // Highlight the conversation being opened and keep it at the top of the list.
-  function inboxMarkActive(open) {
+  var inboxListScroll = 0;
+  // Highlight the open conversation. Only a click moves it to the top; polls keep the server order.
+  function inboxMarkActive(open, moveToTop) {
     var list = document.getElementById("chat-list");
     var row = document.getElementById("conversation-" + open);
-    if (list && row && list.firstElementChild !== row) list.prepend(row);
+    if (moveToTop && list && row && list.firstElementChild !== row) list.prepend(row);
     var rows = document.querySelectorAll("#chat-list a");
     for (var i = 0; i < rows.length; i++) {
       if (rows[i].id === "conversation-" + open) rows[i].classList.add("active");
@@ -37,7 +38,7 @@
     var open = row.id.replace("conversation-", "");
     var inbox = document.getElementById("inbox");
     if (inbox) inbox.setAttribute("data-open", open);
-    inboxMarkActive(open);
+    inboxMarkActive(open, true);
     var thread = document.getElementById("thread");
     if (!thread || thread.getAttribute("data-conversation") !== open) inboxLoading(true);
   }
@@ -55,6 +56,10 @@
   document.body.addEventListener("htmx:beforeSwap", function (event) {
     var target = event.detail && event.detail.target;
     if (!target || !target.id) return;
+    if (target.id === "chat-list") {
+      var list = document.getElementById("chat-list");
+      inboxListScroll = list ? list.scrollTop : 0;
+    }
     var inbox = document.getElementById("inbox");
     var open = inbox && inbox.getAttribute("data-open");
     if (!open) return;
@@ -74,7 +79,12 @@
     if (target.id === "thread") inboxLoading(false);
     if (target.id === "thread" || target.id === "chat-list") {
       var open = inboxOpen();
-      if (open) inboxMarkActive(open);
+      if (open) inboxMarkActive(open, false);
+    }
+    // The swap replaces the scrolling <aside>, so put the reader back where they were.
+    if (target.id === "chat-list") {
+      var list = document.getElementById("chat-list");
+      if (list) list.scrollTop = inboxListScroll;
     }
   });
   document.body.addEventListener("htmx:oobBeforeSwap", function (event) {
