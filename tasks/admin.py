@@ -35,7 +35,8 @@ class CashflowMovementAdmin(admin.ModelAdmin):
         "white",
         "sub_category",
         "document_type",
-        "parsing_confidence",
+        "amount_parsing_confidence",
+        "parsing_observations",
     )
     list_filter = ("document_type",)
     search_fields = (

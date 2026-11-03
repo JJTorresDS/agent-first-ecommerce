@@ -230,7 +230,8 @@ class CashflowMovementTests(TestCase):
         movement.clean_fields()
         self.assertEqual(movement.receipt_id, "")
         self.assertEqual(movement.document_type, "")
-        self.assertIsNone(movement.parsing_confidence)
+        self.assertIsNone(movement.amount_parsing_confidence)
+        self.assertEqual(movement.parsing_observations, "")
         self.assertEqual(movement.transaction_date, date(2026, 10, 7))
         self.assertEqual(movement.amount, Decimal("-58000.00"))
         self.assertEqual(movement.exchange_rate_at_purchase, Decimal("1560.9700"))
@@ -310,7 +311,8 @@ class CashflowApiTests(TestCase):
         self.assertEqual(body["source_file_id"], SOURCE_FILE_ID)
         self.assertEqual(body["receipt_id"], "")
         self.assertEqual(body["document_type"], "")
-        self.assertIsNone(body["parsing_confidence"])
+        self.assertIsNone(body["amount_parsing_confidence"])
+        self.assertEqual(body["parsing_observations"], "")
         self.assertEqual(body["amount"], "-58000.00")
         self.assertIsNone(body["sub_category"])
         self.assertEqual(body["organization"], self.org_id)
@@ -334,34 +336,39 @@ class CashflowApiTests(TestCase):
         self.assertEqual(updated.json()["document_type"], "invoice")
         self.assertEqual(CashflowMovement.objects.count(), 1)
 
-    def test_parsing_confidence_is_stored_between_zero_and_one(self):
+    def test_amount_parsing_confidence_is_stored_between_zero_and_one(self):
         created = self.client.put(
             self.url,
-            json=cashflow_payload(organization=self.org_id, parsing_confidence="0.850"),
+            json=cashflow_payload(
+                organization=self.org_id,
+                amount_parsing_confidence="0.850",
+                parsing_observations="Amount matched the ticket total.",
+            ),
             headers=self.auth,
         )
         self.assertEqual(created.status_code, 201)
-        self.assertEqual(created.json()["parsing_confidence"], "0.850")
-        self.assertEqual(
-            CashflowMovement.objects.get().parsing_confidence,
-            Decimal("0.850"),
-        )
+        self.assertEqual(created.json()["amount_parsing_confidence"], "0.850")
+        self.assertEqual(created.json()["parsing_observations"], "Amount matched the ticket total.")
+        stored = CashflowMovement.objects.get()
+        self.assertEqual(stored.amount_parsing_confidence, Decimal("0.850"))
+        self.assertEqual(stored.parsing_observations, "Amount matched the ticket total.")
 
         cleared = self.client.patch(
             f"/cashflow-movements/{created.json()['id']}",
-            json={"organization": self.org_id, "parsing_confidence": None},
+            json={"organization": self.org_id, "amount_parsing_confidence": None},
             headers=self.auth,
         )
         self.assertEqual(cleared.status_code, 200)
-        self.assertIsNone(cleared.json()["parsing_confidence"])
+        self.assertIsNone(cleared.json()["amount_parsing_confidence"])
+        self.assertEqual(cleared.json()["parsing_observations"], "Amount matched the ticket total.")
 
         rejected = self.client.put(
             self.url,
-            json=cashflow_payload(organization=self.org_id, parsing_confidence="1.500"),
+            json=cashflow_payload(organization=self.org_id, amount_parsing_confidence="1.500"),
             headers=self.auth,
         )
         self.assertEqual(rejected.status_code, 422)
-        self.assertIsNone(CashflowMovement.objects.get().parsing_confidence)
+        self.assertIsNone(CashflowMovement.objects.get().amount_parsing_confidence)
 
     def test_document_type_must_be_receipt_or_invoice(self):
         response = self.client.put(
@@ -550,6 +557,83 @@ class CashflowPageTests(TestCase):
         movement(organization=other, description="Hidden books", category="compra")
         hidden = self.client.get("/cashflow/export.csv")
         self.assertNotIn("Hidden books", hidden.content.decode())
+
+    def test_filters_by_amount_parsing_confidence(self):
+        low = CashflowMovement.objects.get(description="Compra SD")
+        low.amount_parsing_confidence = Decimal("0.200")
+        low.parsing_observations = "Total was hard to read."
+        low.save()
+        high = CashflowMovement.objects.get(description="Sale")
+        high.amount_parsing_confidence = Decimal("0.900")
+        high.save()
+        movement(organization=self.organization, description="Unscored")
+
+        page = self.client.get("/cashflow/")
+        self.assertContains(page, "Amount confidence")
+        self.assertContains(page, "Observations")
+        self.assertContains(page, 'id="amount_confidence_from"')
+        self.assertContains(page, "0.200")
+        self.assertContains(page, "0.900")
+        self.assertContains(page, "Total was hard to read.")
+        self.assertContains(page, "Unscored")
+
+        low_only = self.client.get("/cashflow/", {"amount_confidence_to": "0.500"})
+        self.assertContains(low_only, "Compra SD")
+        self.assertContains(low_only, "Total was hard to read.")
+        self.assertNotContains(low_only, "Sale")
+        self.assertNotContains(low_only, "Unscored")
+        self.assertContains(low_only, 'value="0.500"')
+        self.assertContains(low_only, "amount_confidence_to=0.500")
+
+        high_only = self.client.get("/cashflow/", {"amount_confidence_from": "0.800"})
+        self.assertContains(high_only, "Sale")
+        self.assertNotContains(high_only, "Compra SD")
+        self.assertNotContains(high_only, "Unscored")
+
+        swapped = self.client.get(
+            "/cashflow/",
+            {"amount_confidence_from": "0.900", "amount_confidence_to": "0.200"},
+        )
+        self.assertContains(swapped, "Compra SD")
+        self.assertContains(swapped, "Sale")
+        self.assertNotContains(swapped, "Unscored")
+        self.assertContains(
+            swapped,
+            'id="amount_confidence_from" type="number" name="amount_confidence_from" min="0" max="1" step="0.001" value="0.200"',
+        )
+        self.assertContains(
+            swapped,
+            'id="amount_confidence_to" type="number" name="amount_confidence_to" min="0" max="1" step="0.001" value="0.900"',
+        )
+
+        ignored = self.client.get("/cashflow/", {"amount_confidence_from": "nope"})
+        self.assertContains(ignored, "Unscored")
+        self.assertContains(
+            ignored,
+            'id="amount_confidence_from" type="number" name="amount_confidence_from" min="0" max="1" step="0.001" value=""',
+        )
+
+        exported = self.client.get("/cashflow/export.csv", {"amount_confidence_from": "0.800"})
+        text = exported.content.decode()
+        self.assertIn("Amount confidence", text)
+        self.assertIn("Observations", text)
+        self.assertIn("Sale", text)
+        self.assertIn("0.900", text)
+        self.assertNotIn("Compra SD", text)
+        self.assertNotIn("Unscored", text)
+
+        other_user = User.objects.create_user("erin", email="erin@example.com")
+        other = assign_default_organization(other_user)
+        movement(
+            organization=other,
+            description="Hidden confidence",
+            amount_parsing_confidence=Decimal("0.900"),
+            parsing_observations="Other org note",
+        )
+        hidden = self.client.get("/cashflow/", {"amount_confidence_from": "0.800"})
+        self.assertContains(hidden, "Sale")
+        self.assertNotContains(hidden, "Hidden confidence")
+        self.assertNotContains(hidden, "Other org note")
 
     def test_user_without_a_grant_does_not_see_amounts(self):
         outsider = User.objects.create_user("bea", email="bea@example.com")

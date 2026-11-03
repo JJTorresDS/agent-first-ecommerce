@@ -1,5 +1,7 @@
 import csv
 from datetime import date
+from decimal import Decimal, InvalidOperation
+from urllib.parse import urlencode
 
 from django.core.paginator import Paginator
 from django.http import HttpResponse
@@ -27,6 +29,18 @@ def _chosen_date(raw):
         return None
 
 
+def _chosen_confidence(raw):
+    if not raw:
+        return None
+    try:
+        value = Decimal(raw)
+    except InvalidOperation:
+        return None
+    if value < 0 or value > 1:
+        return None
+    return value
+
+
 def _filtered_movements(request):
     category = request.GET.get("category") or ""
     currency = request.GET.get("currency") or ""
@@ -34,6 +48,14 @@ def _filtered_movements(request):
     date_to = _chosen_date(request.GET.get("date_to") or "")
     if date_from and date_to and date_from > date_to:
         date_from, date_to = date_to, date_from
+    confidence_from = _chosen_confidence(request.GET.get("amount_confidence_from") or "")
+    confidence_to = _chosen_confidence(request.GET.get("amount_confidence_to") or "")
+    if (
+        confidence_from is not None
+        and confidence_to is not None
+        and confidence_from > confidence_to
+    ):
+        confidence_from, confidence_to = confidence_to, confidence_from
     organization = membership_for(request.user).organization
     movements = CashflowMovement.objects.filter(organization=organization)
     if category:
@@ -44,11 +66,21 @@ def _filtered_movements(request):
         movements = movements.filter(transaction_date__gte=date_from)
     if date_to:
         movements = movements.filter(transaction_date__lte=date_to)
-    return movements, {
+    if confidence_from is not None:
+        movements = movements.filter(amount_parsing_confidence__gte=confidence_from)
+    if confidence_to is not None:
+        movements = movements.filter(amount_parsing_confidence__lte=confidence_to)
+    filters = {
         "category": category,
         "currency": currency,
         "date_from": date_from.isoformat() if date_from else "",
         "date_to": date_to.isoformat() if date_to else "",
+        "amount_confidence_from": f"{confidence_from:.3f}" if confidence_from is not None else "",
+        "amount_confidence_to": f"{confidence_to:.3f}" if confidence_to is not None else "",
+    }
+    filters["filter_query"] = urlencode(filters)
+    return movements, {
+        **filters,
         "categories": CashflowMovement.objects.filter(organization=organization)
         .order_by("category")
         .values_list("category", flat=True)
@@ -91,6 +123,8 @@ def cashflow_csv(request):
             "White",
             "Receipt",
             "Document type",
+            "Amount confidence",
+            "Observations",
             "Document",
         ]
     )
@@ -107,6 +141,8 @@ def cashflow_csv(request):
                 "Yes" if movement.white else "No",
                 movement.receipt_id,
                 movement.document_type,
+                "" if movement.amount_parsing_confidence is None else movement.amount_parsing_confidence,
+                movement.parsing_observations,
                 movement.source_file_url(),
             ]
         )

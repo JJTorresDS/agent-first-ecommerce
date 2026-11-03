@@ -148,14 +148,15 @@ class CashflowMovement(TenantModel):
         choices=DocumentType.choices,
         blank=True,
     )
-    parsing_confidence = models.DecimalField(
+    amount_parsing_confidence = models.DecimalField(
         max_digits=4,
         decimal_places=3,
         null=True,
         blank=True,  # rows created before this field have no score
         validators=[MinValueValidator(0), MaxValueValidator(1)],
-        help_text="0–1: probability that the parsed fields are correct (Jev per-field checks, capped by deterministic checks).",
+        help_text="0–1: probability that the parsed amount is correct (Jev per-field checks, capped by deterministic checks).",
     )
+    parsing_observations = models.TextField(blank=True)
     white = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

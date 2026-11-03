@@ -1,13 +1,13 @@
 <div id="cashflow-results">
   <p>
-    <a href="{% url 'cashflow_csv' %}?category={{ category|urlencode }}&amp;currency={{ currency|urlencode }}&amp;date_from={{ date_from|urlencode }}&amp;date_to={{ date_to|urlencode }}">Export CSV</a>
+    <a href="{% url 'cashflow_csv' %}?{{ filter_query }}">Export CSV</a>
   </p>
   {% include "cashflow/_table.html" %}
   <nav class="pager" aria-label="Pages">
     {% if page_obj.has_previous %}
       <a
-        href="{% url 'cashflow' %}?page={{ page_obj.previous_page_number }}&amp;category={{ category|urlencode }}&amp;currency={{ currency|urlencode }}&amp;date_from={{ date_from|urlencode }}&amp;date_to={{ date_to|urlencode }}"
-        hx-get="{% url 'cashflow' %}?page={{ page_obj.previous_page_number }}&amp;category={{ category|urlencode }}&amp;currency={{ currency|urlencode }}&amp;date_from={{ date_from|urlencode }}&amp;date_to={{ date_to|urlencode }}"
+        href="{% url 'cashflow' %}?page={{ page_obj.previous_page_number }}&amp;{{ filter_query }}"
+        hx-get="{% url 'cashflow' %}?page={{ page_obj.previous_page_number }}&amp;{{ filter_query }}"
         hx-target="#cashflow-results"
         hx-swap="outerHTML"
         hx-push-url="true"
@@ -16,8 +16,8 @@
     <span>Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
     {% if page_obj.has_next %}
       <a
-        href="{% url 'cashflow' %}?page={{ page_obj.next_page_number }}&amp;category={{ category|urlencode }}&amp;currency={{ currency|urlencode }}&amp;date_from={{ date_from|urlencode }}&amp;date_to={{ date_to|urlencode }}"
-        hx-get="{% url 'cashflow' %}?page={{ page_obj.next_page_number }}&amp;category={{ category|urlencode }}&amp;currency={{ currency|urlencode }}&amp;date_from={{ date_from|urlencode }}&amp;date_to={{ date_to|urlencode }}"
+        href="{% url 'cashflow' %}?page={{ page_obj.next_page_number }}&amp;{{ filter_query }}"
+        hx-get="{% url 'cashflow' %}?page={{ page_obj.next_page_number }}&amp;{{ filter_query }}"
         hx-target="#cashflow-results"
         hx-swap="outerHTML"
         hx-push-url="true"
