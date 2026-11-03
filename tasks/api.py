@@ -175,7 +175,6 @@ _MOVEMENT_TEXT = (
     "source_file_id",
     "receipt_id",
     "document_type",
-    "parsing_observations",
 )
 
 
@@ -194,7 +193,7 @@ class CashflowMovementIn(Schema):
     receipt_id: Optional[str] = None
     document_type: str = ""
     amount_parsing_confidence: Decimal | None = None
-    parsing_observations: str = ""
+    parsing_observations: dict | None = None
     white: bool = False
 
 
@@ -213,7 +212,7 @@ class CashflowMovementPatch(Schema):
     receipt_id: str | None = None
     document_type: str | None = None
     amount_parsing_confidence: Decimal | None = None
-    parsing_observations: str | None = None
+    parsing_observations: dict | None = None
     white: bool | None = None
 
 
@@ -237,7 +236,7 @@ class CashflowMovementOut(Schema):
     receipt_id: str
     document_type: str
     amount_parsing_confidence: Decimal | None
-    parsing_observations: str
+    parsing_observations: dict | None
     white: bool
     created_at: datetime
     updated_at: datetime
@@ -251,6 +250,7 @@ def _apply_movement(movement: CashflowMovement, data: dict) -> CashflowMovement:
             "exchange_rate_at_purchase",
             "sub_category",
             "amount_parsing_confidence",
+            "parsing_observations",
         }:
             continue
         setattr(movement, key, value)

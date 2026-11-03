@@ -1,3 +1,4 @@
+import json
 import re
 import uuid
 from urllib.parse import urlparse
@@ -156,7 +157,7 @@ class CashflowMovement(TenantModel):
         validators=[MinValueValidator(0), MaxValueValidator(1)],
         help_text="0–1: probability that the parsed amount is correct (Jev per-field checks, capped by deterministic checks).",
     )
-    parsing_observations = models.TextField(blank=True)
+    parsing_observations = models.JSONField(null=True, blank=True)
     white = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -177,3 +178,8 @@ class CashflowMovement(TenantModel):
 
     def source_file_url(self):
         return drive_file_url(self.source_file_id)
+
+    def parsing_observations_text(self):
+        if self.parsing_observations is None:
+            return ""
+        return json.dumps(self.parsing_observations, ensure_ascii=False)

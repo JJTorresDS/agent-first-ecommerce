@@ -35,7 +35,7 @@
         <td>{{ movement.receipt_id }}</td>
         <td>{{ movement.get_document_type_display }}</td>
         <td>{% if movement.amount_parsing_confidence is not None %}{{ movement.amount_parsing_confidence }}{% endif %}</td>
-        <td>{{ movement.parsing_observations }}</td>
+        <td>{{ movement.parsing_observations_text }}</td>
         <td>
           {% if movement.source_file_url %}
             <a href="{{ movement.source_file_url }}" target="_blank" rel="noopener">Open</a>

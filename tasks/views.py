@@ -142,7 +142,7 @@ def cashflow_csv(request):
                 movement.receipt_id,
                 movement.document_type,
                 "" if movement.amount_parsing_confidence is None else movement.amount_parsing_confidence,
-                movement.parsing_observations,
+                movement.parsing_observations_text(),
                 movement.source_file_url(),
             ]
         )

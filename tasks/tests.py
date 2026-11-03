@@ -231,7 +231,7 @@ class CashflowMovementTests(TestCase):
         self.assertEqual(movement.receipt_id, "")
         self.assertEqual(movement.document_type, "")
         self.assertIsNone(movement.amount_parsing_confidence)
-        self.assertEqual(movement.parsing_observations, "")
+        self.assertIsNone(movement.parsing_observations)
         self.assertEqual(movement.transaction_date, date(2026, 10, 7))
         self.assertEqual(movement.amount, Decimal("-58000.00"))
         self.assertEqual(movement.exchange_rate_at_purchase, Decimal("1560.9700"))
@@ -312,7 +312,7 @@ class CashflowApiTests(TestCase):
         self.assertEqual(body["receipt_id"], "")
         self.assertEqual(body["document_type"], "")
         self.assertIsNone(body["amount_parsing_confidence"])
-        self.assertEqual(body["parsing_observations"], "")
+        self.assertIsNone(body["parsing_observations"])
         self.assertEqual(body["amount"], "-58000.00")
         self.assertIsNone(body["sub_category"])
         self.assertEqual(body["organization"], self.org_id)
@@ -342,16 +342,16 @@ class CashflowApiTests(TestCase):
             json=cashflow_payload(
                 organization=self.org_id,
                 amount_parsing_confidence="0.850",
-                parsing_observations="Amount matched the ticket total.",
+                parsing_observations={"failed_checks": ["total"]},
             ),
             headers=self.auth,
         )
         self.assertEqual(created.status_code, 201)
         self.assertEqual(created.json()["amount_parsing_confidence"], "0.850")
-        self.assertEqual(created.json()["parsing_observations"], "Amount matched the ticket total.")
+        self.assertEqual(created.json()["parsing_observations"], {"failed_checks": ["total"]})
         stored = CashflowMovement.objects.get()
         self.assertEqual(stored.amount_parsing_confidence, Decimal("0.850"))
-        self.assertEqual(stored.parsing_observations, "Amount matched the ticket total.")
+        self.assertEqual(stored.parsing_observations, {"failed_checks": ["total"]})
 
         cleared = self.client.patch(
             f"/cashflow-movements/{created.json()['id']}",
@@ -360,7 +360,7 @@ class CashflowApiTests(TestCase):
         )
         self.assertEqual(cleared.status_code, 200)
         self.assertIsNone(cleared.json()["amount_parsing_confidence"])
-        self.assertEqual(cleared.json()["parsing_observations"], "Amount matched the ticket total.")
+        self.assertEqual(cleared.json()["parsing_observations"], {"failed_checks": ["total"]})
 
         rejected = self.client.put(
             self.url,
@@ -561,7 +561,7 @@ class CashflowPageTests(TestCase):
     def test_filters_by_amount_parsing_confidence(self):
         low = CashflowMovement.objects.get(description="Compra SD")
         low.amount_parsing_confidence = Decimal("0.200")
-        low.parsing_observations = "Total was hard to read."
+        low.parsing_observations = {"note": "Total was hard to read."}
         low.save()
         high = CashflowMovement.objects.get(description="Sale")
         high.amount_parsing_confidence = Decimal("0.900")
@@ -575,6 +575,7 @@ class CashflowPageTests(TestCase):
         self.assertContains(page, "0.200")
         self.assertContains(page, "0.900")
         self.assertContains(page, "Total was hard to read.")
+        self.assertContains(page, "{&quot;note&quot;: &quot;Total was hard to read.&quot;}")
         self.assertContains(page, "Unscored")
 
         low_only = self.client.get("/cashflow/", {"amount_confidence_to": "0.500"})
@@ -617,6 +618,8 @@ class CashflowPageTests(TestCase):
         text = exported.content.decode()
         self.assertIn("Amount confidence", text)
         self.assertIn("Observations", text)
+        listed = self.client.get("/cashflow/export.csv").content.decode()
+        self.assertIn('"{""note"": ""Total was hard to read.""}"', listed)
         self.assertIn("Sale", text)
         self.assertIn("0.900", text)
         self.assertNotIn("Compra SD", text)
@@ -628,7 +631,7 @@ class CashflowPageTests(TestCase):
             organization=other,
             description="Hidden confidence",
             amount_parsing_confidence=Decimal("0.900"),
-            parsing_observations="Other org note",
+            parsing_observations={"note": "Other org note"},
         )
         hidden = self.client.get("/cashflow/", {"amount_confidence_from": "0.800"})
         self.assertContains(hidden, "Sale")
