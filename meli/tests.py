@@ -1028,6 +1028,19 @@ class ItemQuestionTests(TestCase):
             "Mercado Libre did not accept the message: Question already answered",
         )
 
+    def test_the_composer_shows_the_send_shortcut(self):
+        ItemQuestion.objects.create(
+            organization=self.organization,
+            question_id="13683341904",
+            text="Tienen stock?",
+            status="UNANSWERED",
+        )
+        project_question(ItemQuestion.objects.get())
+        conversation = Conversation.objects.get()
+        page = self.client.get(f"/inbox/?conversation={conversation.pk}")
+        self.assertContains(page, 'aria-keyshortcuts="Meta+Enter Control+Enter"')
+        self.assertContains(page, '<kbd class="key-mac">⌘</kbd><kbd class="key-other">Ctrl</kbd>')
+
     def test_an_answered_question_has_no_composer(self):
         ItemQuestion.objects.create(
             organization=self.organization,
@@ -1040,6 +1053,7 @@ class ItemQuestionTests(TestCase):
         conversation = Conversation.objects.get()
         page = self.client.get(f"/inbox/?conversation={conversation.pk}")
         self.assertNotContains(page, "Write a reply")
+        self.assertNotContains(page, 'class="send-hint"')
 
     def test_another_organization_cannot_open_or_reply(self):
         ItemQuestion.objects.create(
@@ -2001,16 +2015,24 @@ class PostSaleTests(TestCase):
         members = self.client.get("/organization/members/")
         self.assertContains(members, 'class="table-scroll"')
 
-    def _bare_message_api(self, message_id, calls):
+    def _bare_message_api(self, message_id, calls, wrapped=False, resource="packs"):
         created = timezone.now().isoformat()
         message = {
             "id": message_id,
             "from": {"user_id": 99},
             "to": {"user_id": 468424240},
             "text": "Llega mañana?",
-            "message_resources": [{"id": PACK, "name": "packs"}],
+            "message_resources": [{"id": PACK, "name": resource}],
             "message_date": {"created": created},
         }
+        if wrapped:
+            # Mercado Libre returns one message the way it returns a thread.
+            message = {
+                "paging": {"limit": 10, "offset": 0, "total": 1},
+                "conversation_status": {"status": "active"},
+                "messages": [message],
+                "seller_max_message_length": 350,
+            }
         order = sale_order(PACK, PACK, created, "Willian", "Guido", "Remera")
 
         def open_response(request, timeout=15):
@@ -2049,6 +2071,46 @@ class PostSaleTests(TestCase):
         )
         self.assertEqual(polled.status_code, 200)
         self.assertContains(polled, f'id="conversation-{conversation.pk}"')
+
+    def test_bare_message_id_in_a_messages_list_still_loads(self):
+        bare = "01a1a7d0c52b777da9dca3003a4248af"
+        calls = []
+        body = json.dumps({**SAMPLE, "_id": "wrapped-note", "topic": "messages", "resource": bare})
+        with patch(
+            "meli.client.urlopen",
+            side_effect=self._bare_message_api(bare, calls, wrapped=True),
+        ):
+            self.client.post(WEBHOOK_URL, data=body, content_type="application/json")
+        conversation = Conversation.objects.get(organization=self.organization, external_id=PACK)
+        self.assertEqual(conversation.messages.get().body, "Llega mañana?")
+
+    def test_a_sale_without_a_pack_loads_by_its_order(self):
+        bare = "01a1a7d0c52b777da9dca3003a4248b0"
+        calls = []
+        body = json.dumps({**SAMPLE, "_id": "order-note", "topic": "messages", "resource": bare})
+        with patch(
+            "meli.client.urlopen",
+            side_effect=self._bare_message_api(bare, calls, wrapped=True, resource="orders"),
+        ):
+            self.client.post(WEBHOOK_URL, data=body, content_type="application/json")
+        self.assertTrue(
+            Conversation.objects.filter(organization=self.organization, external_id=PACK).exists()
+        )
+
+    def test_a_message_naming_no_sale_is_logged(self):
+        bare = "01a1a7d0c52b777da9dca3003a4248b1"
+        body = json.dumps({**SAMPLE, "_id": "lost-note", "topic": "messages", "resource": bare})
+
+        def open_response(request, timeout=15):
+            return TokenResponse({"messages": [{"id": bare, "text": "Hola"}]})
+
+        with (
+            patch("meli.client.urlopen", side_effect=open_response),
+            self.assertLogs("meli", "WARNING") as logs,
+        ):
+            self.client.post(WEBHOOK_URL, data=body, content_type="application/json")
+        self.assertIn("names no pack or order", "\n".join(logs.output))
+        self.assertFalse(Conversation.objects.exists())
 
     def test_bare_message_id_for_another_seller_stays_out(self):
         bare = "02b2b5175cc08f30be3edef547443379"

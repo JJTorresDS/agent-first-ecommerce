@@ -129,11 +129,32 @@ def _load_from_notification(organization, parsed):
         if not message_id:
             return None
         token = account.fresh_access_token()
-        message = fetch_message(token, message_id)
-        pack_id = _pack_from_message(message)
+        payload = fetch_message(token, message_id)
+        pack_id = _pack_from_message(_message_in(payload, message_id))
+        if not pack_id:
+            logger.warning(
+                "Post-sale message %s for %s names no pack or order (response keys: %s)",
+                message_id,
+                organization.pk,
+                ", ".join(sorted(payload)) if isinstance(payload, dict) else type(payload).__name__,
+            )
     if not pack_id:
         return None
     return load_pack(organization, pack_id)
+
+
+def _message_in(payload, message_id):
+    """The message itself. GET /messages/<id> wraps it in a messages list like a thread."""
+    if not isinstance(payload, dict):
+        return {}
+    listed = payload.get("messages")
+    if not isinstance(listed, list):
+        return payload
+    found = [item for item in listed if isinstance(item, dict)]
+    for item in found:
+        if _ident(item.get("id")) == _ident(message_id):
+            return item
+    return found[0] if found else {}
 
 
 def refresh_postsale(organization):
@@ -423,15 +444,15 @@ def _unread_pack_ids(payload):
 
 
 def _pack_from_message(message):
+    """The pack id. A sale without a pack is messaged under its order id."""
     resources = message.get("message_resources") if isinstance(message, dict) else None
     if not isinstance(resources, list):
         return ""
+    ids = {}
     for resource in resources:
-        if not isinstance(resource, dict):
-            continue
-        if _ident(resource.get("name")).lower() in {"packs", "pack"}:
-            return _ident(resource.get("id"))
-    return ""
+        if isinstance(resource, dict):
+            ids.setdefault(_ident(resource.get("name")).lower(), _ident(resource.get("id")))
+    return ids.get("packs") or ids.get("pack") or ids.get("orders") or ids.get("order") or ""
 
 
 def _pack_id(resource):

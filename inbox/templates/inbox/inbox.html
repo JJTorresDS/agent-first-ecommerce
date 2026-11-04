@@ -87,10 +87,39 @@
       if (asked && decodeURIComponent(asked[1]) !== open) event.detail.shouldSwap = false;
     }
   });
+  // ⌘+Enter (Mac) or Ctrl+Enter sends; Enter alone is a new line. Swaps replace the
+  // composer, so listen on document instead of the textarea.
+  var inboxRefocusComposer = false;
+  document.addEventListener("keydown", function (event) {
+    var text = event.target;
+    if (!text || text.id !== "composer-text") return;
+    if (event.key !== "Enter" || !(event.metaKey || event.ctrlKey)) return;
+    if (event.isComposing || event.repeat) return;
+    event.preventDefault();
+    var form = text.form;
+    var thread = document.getElementById("thread");
+    var button = form && form.querySelector('button[type="submit"]');
+    if (!form || !button || button.disabled) return;
+    if (thread && thread.hasAttribute("data-sending")) return;
+    if (!text.value.trim()) return;
+    form.requestSubmit(button);
+  });
+  document.addEventListener("submit", function (event) {
+    if (event.target && event.target.id === "composer") {
+      inboxRefocusComposer = document.activeElement && document.activeElement.id === "composer-text";
+    }
+  }, true);
   document.body.addEventListener("htmx:afterSwap", function (event) {
     var target = event.detail && event.detail.target;
     if (!target || !target.id) return;
     if (target.id === "thread") inboxLoading(false);
+    // After a send, keep typing where you were. Phones would pop the keyboard, so not there.
+    var source = event.detail.requestConfig && event.detail.requestConfig.elt;
+    if (target.id === "thread" && source && source.id === "composer" && inboxRefocusComposer) {
+      inboxRefocusComposer = false;
+      var fresh = document.getElementById("composer-text");
+      if (fresh && !window.matchMedia("(hover: none)").matches) fresh.focus();
+    }
     if (target.id === "thread" || target.id === "chat-list") {
       var open = inboxOpen();
       if (open) inboxMarkActive(open, false);

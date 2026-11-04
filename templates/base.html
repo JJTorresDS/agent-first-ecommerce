@@ -6,6 +6,11 @@
   <title>{% block title %}Vimple{% endblock %}</title>
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
   <script>
+    // Shortcut hints show ⌘ on a Mac and Ctrl elsewhere.
+    (function () {
+      var platform = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || "";
+      if (/mac/i.test(platform)) document.documentElement.classList.add("is-mac");
+    })();
     try {
       if (localStorage.getItem("vimple-sidebar") === "collapsed") {
         document.documentElement.classList.add("sidebar-collapsed");
@@ -105,6 +110,13 @@
     .bubble.seller { align-self: flex-end; background: #111; color: #fff; }
     .bubble time { display: block; margin-top: 0.35rem; font-size: 0.75rem; opacity: 0.7; }
     .composer textarea { width: 100%; min-height: 5rem; font: inherit; padding: 0.6rem; }
+    .composer .actions { align-items: center; gap: 0.75rem; }
+    .send-hint { font-size: 0.8rem; color: #777; }
+    .send-hint kbd { font: inherit; font-size: 0.75rem; padding: 0.05rem 0.35rem; border: 1px solid #ddd; border-bottom-width: 2px; border-radius: 4px; background: #fafafa; }
+    .send-hint .key-mac { display: none; }
+    html.is-mac .send-hint .key-mac { display: inline; }
+    html.is-mac .send-hint .key-other { display: none; }
+    @media (hover: none) { .send-hint { display: none; } }
     #thread[data-sending] #composer button[type="submit"] { opacity: 0.5; pointer-events: none; }
     .bubble time.sending { display: flex; align-items: center; gap: 0.35rem; }
     .bubble time.sending .spinner, .sending-note .spinner { width: 0.75rem; height: 0.75rem; }
