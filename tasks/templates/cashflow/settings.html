@@ -40,6 +40,26 @@
   </section>
   <section class="card">
     <h1>Receipt parser</h1>
+    {% if key_message %}<p class="{% if key_error %}error{% else %}muted{% endif %}">{{ key_message }}</p>{% endif %}
+    {% if parser_settings.api_key_unreadable %}
+      <p class="error">The saved key can't be read. Enter it again.</p>
+    {% endif %}
+    {% if can_edit %}
+      <form class="key-form" method="post" action="{% url 'cashflow_parser_key' %}">
+        {% csrf_token %}
+        <label class="muted" for="receipt-key">API key (sent as X-API-Key)</label>
+        <div class="id-row">
+          <input type="password" id="receipt-key" name="api_key" autocomplete="new-password" spellcheck="false" placeholder="{% if parser_settings.has_api_key %}••••••••••••{% else %}Paste the key from n8n{% endif %}">
+          <button type="submit" name="action" value="save">Save key</button>
+          {% if parser_settings.api_key %}
+            <button type="submit" name="action" value="remove" formnovalidate>Remove key</button>
+          {% endif %}
+        </div>
+        <p class="muted">{% if parser_settings.has_api_key %}Key saved. It stays hidden; paste a new one to replace it.{% else %}No key yet.{% endif %}</p>
+      </form>
+    {% else %}
+      <p class="muted">{% if parser_settings.has_api_key %}Key saved.{% else %}No key yet.{% endif %}</p>
+    {% endif %}
     {% if run_error %}<p class="error">{{ run_error }}</p>{% endif %}
     {% if missing %}<p class="muted">Missing: {{ missing|join:", " }}.</p>{% endif %}
     {% include "cashflow/_parser_status.html" %}

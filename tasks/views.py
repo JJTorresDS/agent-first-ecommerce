@@ -155,9 +155,15 @@ def cashflow_csv(request):
 
 
 RUN_ERRORS = {
-    "nokey": "The receipt parser key is not set on the server.",
+    "nokey": "Add the receipt parser key first.",
     "missing": "Choose every folder before running the parser.",
 }
+KEY_MESSAGES = {
+    "saved": "Key saved.",
+    "removed": "Key removed.",
+    "empty": "Enter the key.",
+}
+KEY_LIMIT = 500
 
 
 def _parser_settings(organization):
@@ -200,6 +206,8 @@ def _settings_context(request, membership, parser_settings, errors=None, values=
         "picker_app_id": settings.GOOGLE_CLOUD_PROJECT_NUMBER if picker else "",
         "run_error": RUN_ERRORS.get(request.GET.get("run", ""), ""),
         "missing": parser_settings.missing_slots(),
+        "key_message": KEY_MESSAGES.get(request.GET.get("key", ""), ""),
+        "key_error": request.GET.get("key") == "empty",
         "saved": request.GET.get("saved") == "1",
     }
 
@@ -256,6 +264,28 @@ def cashflow_parser_run(request):
     if error:
         location += "?" + urlencode({"run": error})
     return redirect(location)
+
+
+@require_app(AppAccess.App.CASHFLOW)
+@require_POST
+def cashflow_parser_key(request):
+    membership = membership_for(request.user)
+    if membership is None:
+        return redirect("organization_setup")
+    if not can_manage_members(membership):
+        return HttpResponseForbidden()
+    parser_settings = _parser_settings(membership.organization)
+    if request.POST.get("action") == "remove":
+        parser_settings.api_key = ""
+        result = "removed"
+    else:
+        raw = request.POST.get("api_key", "").strip()[:KEY_LIMIT]
+        if not raw:
+            return redirect(f"{reverse('cashflow_settings')}?key=empty")
+        parser_settings.set_api_key(raw)
+        result = "saved"
+    parser_settings.save(update_fields=["api_key", "updated_at"])
+    return redirect(f"{reverse('cashflow_settings')}?key={result}")
 
 
 @require_app(AppAccess.App.CASHFLOW)

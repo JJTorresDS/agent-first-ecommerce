@@ -32,7 +32,7 @@ Organization is the tenant. Its UUID does not change. The name can.
 ## Cashflow receipt parser
 
 - CashflowParserSettings holds one organization's receipt folders. build_payload must keep the body the n8n trigger sent: organization_id plus files: [{organization_id, organization_name, receipts_folder, cost, profit}]. receipt-parserV2 reads that shape.
-- The parser key comes from RECEIPT_PARSER_API_KEY and is sent as X-API-Key. Never put it in a page, a log, or last_run_error.
+- Each organization's owner or admin enters the parser key in Cashflow settings. It is stored encrypted (meli.tokens encrypt_secret) in CashflowParserSettings.api_key and sent as X-API-Key. Never render it, pre-fill it, log it, or put it in last_run_error.
 - Drive tokens belong to one user, not to the organization. The drive-token view returns only request.user's own token. Sign-in asks only for profile and email; the drive.file scope is added by Connect Google Drive.
 
 ## Tests

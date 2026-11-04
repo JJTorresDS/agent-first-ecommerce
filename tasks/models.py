@@ -217,6 +217,8 @@ class CashflowParserSettings(TenantModel):
         FAILED = "failed", "Failed"
 
     folders = models.JSONField(default=dict, blank=True)
+    # The X-API-Key for the receipt parser, encrypted. Never rendered back to a page.
+    api_key = models.TextField(blank=True)
     last_run_at = models.DateTimeField(null=True, blank=True)
     last_run_status = models.CharField(
         max_length=16, choices=Status.choices, default="", blank=True
@@ -242,6 +244,28 @@ class CashflowParserSettings(TenantModel):
         if not isinstance(entry, dict):
             return {"id": "", "name": ""}
         return {"id": str(entry.get("id") or ""), "name": str(entry.get("name") or "")}
+
+    def set_api_key(self, raw):
+        from meli.tokens import encrypt_secret
+
+        self.api_key = encrypt_secret((raw or "").strip())
+
+    def api_key_value(self):
+        """The plain key, or an empty string when none is saved or it can't be read."""
+        from cryptography.fernet import InvalidToken
+
+        from meli.tokens import decrypt_secret
+
+        try:
+            return decrypt_secret(self.api_key)
+        except InvalidToken:
+            return ""
+
+    def has_api_key(self):
+        return bool(self.api_key_value())
+
+    def api_key_unreadable(self):
+        return bool(self.api_key) and not self.has_api_key()
 
     def missing_slots(self):
         return [label for slot, label in FOLDER_SLOTS if not self.folder(slot)["id"]]

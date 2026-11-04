@@ -1,3 +1,4 @@
+import re
 from datetime import date, timedelta
 from decimal import Decimal
 from unittest.mock import patch
@@ -749,7 +750,6 @@ class _GoogleResponse(_ParserResponse):
 
 
 @override_settings(
-    RECEIPT_PARSER_API_KEY="parser-key",
     GOOGLE_PICKER_API_KEY="picker-key",
     GOOGLE_CLOUD_PROJECT_NUMBER="123456",
     GOOGLE_CLIENT_ID="client-id",
@@ -779,8 +779,10 @@ class CashflowSettingsTests(TestCase):
         AppAccess.objects.create(user=user, app=AppAccess.App.CASHFLOW, organization=organization)
         return user
 
-    def _save_all(self):
-        return self.client.post("/cashflow/settings/", FOLDERS)
+    def _save_all(self, key="parser-key"):
+        response = self.client.post("/cashflow/settings/", FOLDERS)
+        self.client.post("/cashflow/settings/key/", {"action": "save", "api_key": key})
+        return response
 
     def _google_token(self, user, token="live-token", expires_in=3600, refresh="refresh-1"):
         from allauth.socialaccount.models import SocialAccount, SocialToken
@@ -947,13 +949,19 @@ class CashflowSettingsTests(TestCase):
 
         with patch("tasks.parser.urlopen", side_effect=AssertionError("network")):
             response = self.client.post("/cashflow/settings/run/")
+            self.assertRedirects(response, "/cashflow/settings/?run=nokey", fetch_redirect_response=False)
+            page = self.client.get(response["Location"])
+            self.assertContains(page, "Add the receipt parser key first.")
+            self.client.post("/cashflow/settings/key/", {"action": "save", "api_key": "parser-key"})
+            response = self.client.post("/cashflow/settings/run/")
             self.assertRedirects(response, "/cashflow/settings/?run=missing", fetch_redirect_response=False)
             page = self.client.get(response["Location"])
             self.assertContains(page, "Choose every folder before running the parser.")
             self._save_all()
-            with override_settings(RECEIPT_PARSER_API_KEY=""):
-                response = self.client.post("/cashflow/settings/run/")
+            self.client.post("/cashflow/settings/key/", {"action": "remove"})
+            response = self.client.post("/cashflow/settings/run/")
             self.assertRedirects(response, "/cashflow/settings/?run=nokey", fetch_redirect_response=False)
+            self.client.post("/cashflow/settings/key/", {"action": "save", "api_key": "parser-key"})
             CashflowParserSettings.objects.filter(organization=self.organization).update(last_run_status="running")
             self.client.post("/cashflow/settings/run/")
             status = self.client.get("/cashflow/settings/", headers={"HX-Request": "true"})
@@ -1005,3 +1013,99 @@ class CashflowSettingsTests(TestCase):
         self.assertNotContains(page, "Connect Google Drive")
         self.assertNotContains(page, "apis.google.com")
         self.assertContains(page, "Save folders")
+
+
+    def test_key_is_saved_encrypted_and_never_shown(self):
+        from tasks.models import CashflowParserSettings
+
+        secret = "n8n-secret-Abc123"
+        response = self.client.post("/cashflow/settings/key/", {"action": "save", "api_key": f"  {secret}  "})
+        self.assertRedirects(response, "/cashflow/settings/?key=saved")
+        mine = CashflowParserSettings.objects.get(organization=self.organization)
+        self.assertNotIn(secret, mine.api_key)
+        self.assertEqual(mine.api_key_value(), secret)
+        page = self.client.get("/cashflow/settings/?key=saved")
+        html = page.content.decode()
+        self.assertNotIn(secret, html)
+        self.assertNotIn(mine.api_key, html)
+        self.assertIn("••••••••••••", html)
+        self.assertIn("Key saved", html)
+        key_input = re.search(r'<input type="password"[^>]*>', html).group(0)
+        self.assertNotIn("value=", key_input)
+        self.assertIn('autocomplete="new-password"', key_input)
+
+    def test_empty_save_keeps_the_key_and_remove_clears_it(self):
+        from tasks.models import CashflowParserSettings
+
+        self.client.post("/cashflow/settings/key/", {"action": "save", "api_key": "first-key"})
+        response = self.client.post("/cashflow/settings/key/", {"action": "save", "api_key": "   "})
+        self.assertRedirects(response, "/cashflow/settings/?key=empty", fetch_redirect_response=False)
+        self.assertContains(self.client.get(response["Location"]), "Enter the key.")
+        mine = CashflowParserSettings.objects.get(organization=self.organization)
+        self.assertEqual(mine.api_key_value(), "first-key")
+        self.client.post("/cashflow/settings/key/", {"action": "remove"})
+        mine.refresh_from_db()
+        self.assertEqual(mine.api_key, "")
+        self.assertContains(self.client.get("/cashflow/settings/"), "No key yet.")
+
+    def test_each_organization_sends_only_its_own_key(self):
+        from accounts.models import Membership
+        from tasks.models import CashflowParserSettings
+
+        other_admin = self._member("eve", Membership.Role.OWNER, organization=self.other)
+        self._save_all(key="ours-key")
+        self.client.force_login(other_admin)
+        self._save_all(key="theirs-key")
+        self.assertEqual(
+            CashflowParserSettings.objects.get(organization=self.organization).api_key_value(), "ours-key"
+        )
+        sent = []
+
+        def open_parser(request, timeout=30):
+            sent.append(request)
+            return _ParserResponse()
+
+        with patch("tasks.parser.urlopen", side_effect=open_parser):
+            self.client.post("/cashflow/settings/run/")
+            self.client.force_login(self.user)
+            self.client.post("/cashflow/settings/run/")
+        self.assertEqual([r.get_header("X-api-key") for r in sent], ["theirs-key", "ours-key"])
+        self.assertIn(str(self.other.pk), sent[0].data.decode())
+        self.assertNotIn(str(self.organization.pk), sent[0].data.decode())
+        page = self.client.get("/cashflow/settings/")
+        self.assertNotContains(page, "theirs-key")
+        self.assertNotContains(page, "ours-key")
+
+    def test_contributor_cannot_see_or_change_the_key(self):
+        from accounts.models import Membership
+
+        self._save_all(key="hidden-key")
+        contributor = self._member("fay", Membership.Role.CONTRIBUTOR)
+        self.client.force_login(contributor)
+        page = self.client.get("/cashflow/settings/")
+        self.assertContains(page, "Key saved.")
+        self.assertNotContains(page, 'name="api_key"')
+        self.assertNotContains(page, "hidden-key")
+        response = self.client.post("/cashflow/settings/key/", {"action": "remove"})
+        self.assertEqual(response.status_code, 403)
+        from tasks.models import CashflowParserSettings
+
+        self.assertEqual(
+            CashflowParserSettings.objects.get(organization=self.organization).api_key_value(), "hidden-key"
+        )
+
+    def test_key_saved_under_another_secret_key_asks_again(self):
+        from tasks.models import CashflowParserSettings
+
+        self._save_all()
+        mine = CashflowParserSettings.objects.get(organization=self.organization)
+        with override_settings(SECRET_KEY="an-old-secret-key"):
+            mine.set_api_key("old-key")
+        mine.save(update_fields=["api_key"])
+        self.assertTrue(mine.api_key)
+        self.assertFalse(mine.has_api_key())
+        page = self.client.get("/cashflow/settings/")
+        self.assertContains(page, "The saved key can")
+        with patch("tasks.parser.urlopen", side_effect=AssertionError("network")):
+            response = self.client.post("/cashflow/settings/run/")
+        self.assertRedirects(response, "/cashflow/settings/?run=nokey", fetch_redirect_response=False)

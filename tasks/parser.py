@@ -6,7 +6,6 @@ import time
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from django.conf import settings
 from django.db import close_old_connections, transaction
 from django.utils import timezone
 
@@ -41,7 +40,7 @@ def start_parser(parser_settings, user):
 
     Returns an error code (nokey, missing), or an empty string when the run started.
     """
-    if not settings.RECEIPT_PARSER_API_KEY:
+    if not parser_settings.has_api_key():
         return "nokey"
     if parser_settings.missing_slots():
         return "missing"
@@ -86,9 +85,10 @@ def run_parser(settings_pk):
         body = json.dumps(
             build_payload(parser_settings.organization, parser_settings)
         ).encode()
-        error = ""
-        for attempt in range(TRIES):
-            error = _send(body)
+        key = parser_settings.api_key_value()
+        error = "" if key else "The receipt parser key is missing."
+        for attempt in range(TRIES if key else 0):
+            error = _send(body, key)
             if not error:
                 break
             if attempt < TRIES - 1:
@@ -112,7 +112,7 @@ def run_parser(settings_pk):
         close_old_connections()
 
 
-def _send(body):
+def _send(body, key):
     """POST once. Returns an error message, or an empty string on success."""
     request = Request(
         RECEIPT_PARSER_URL,
@@ -120,7 +120,7 @@ def _send(body):
         headers={
             "Content-Type": "application/json",
             "Accept": "application/json",
-            "X-API-Key": settings.RECEIPT_PARSER_API_KEY,
+            "X-API-Key": key,
         },
         method="POST",
     )
