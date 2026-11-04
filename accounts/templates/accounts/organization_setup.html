@@ -1,10 +1,13 @@
 {% extends "base.html" %}
 
-{% block title %}Name your organization{% endblock %}
+{% block title %}{% if has_organization %}New organization{% else %}Name your organization{% endif %}{% endblock %}
 
 {% block content %}
   <section class="card">
-    <h1>Name your organization</h1>
+    <h1>{% if has_organization %}New organization{% else %}Name your organization{% endif %}</h1>
+    {% if has_organization %}
+      <p class="muted">Create another organization. You can switch between them from the profile menu.</p>
+    {% endif %}
     <p class="muted">You can change this name later. The organization id will stay the same.</p>
     {% if error %}
       <p class="error">{{ error }}</p>

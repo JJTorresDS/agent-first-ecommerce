@@ -25,6 +25,9 @@ Organization is the tenant. Its UUID does not change. The name can.
 
 ## Mercado Libre
 
+- An organization connects at most one Mercado Libre seller (OneToOne on MercadoLibreAccount and SellerProfile). One seller may be connected to several organizations.
+- Each organization keeps its own MercadoLibreAccount row. Refresh tokens work only once, so a refresh or a reconnect writes the new tokens to every row with that meli_user_id (fresh_access_token, share_tokens).
+- A webhook for a seller fans out: one MercadoLibreNotification row per connected organization, and each organization gets its own ItemQuestion and Conversation rows. Look up questions and packs by organization plus id, never by id alone.
 - Check the resource format in stored MercadoLibreNotification rows before writing a parser. Questions arrive as /questions/<id>. Post-sale messages arrive as a bare message id with no slash.
 - The webhook stores the row and calls dispatch_notification. It makes no Mercado Libre calls, because Mercado Libre expects an answer in about 500 ms. The worker loads the notification.
 - Fetch post-sale messages with tag=post_sale and mark_as_read=false. Link the post-sale header to /ventas/<id>/detalle, not to the messages page, because opening the messages page marks the buyer's message read.

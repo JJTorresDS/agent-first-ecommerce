@@ -1,6 +1,8 @@
+import logging
 import re
 from datetime import datetime, timedelta, timezone as dt_timezone
 
+from cryptography.fernet import InvalidToken
 from django.utils import timezone
 
 from inbox.models import Channel, Conversation, Message
@@ -15,6 +17,8 @@ from .client import (
     fetch_unread_post_sale,
 )
 from .models import MercadoLibreAccount, MercadoLibreNotification, SellerProfile
+
+logger = logging.getLogger(__name__)
 
 CHANNEL = Channel.MELI_POSTSALES
 WINDOW = timedelta(days=7)
@@ -38,11 +42,9 @@ SITE_DOMAINS = {
 
 
 def project_pack(organization, seller_id, pack_id, thread, order=None):
-    """Write one pack thread. A pack owned by another organization is left alone."""
+    """Write one pack thread into this organization's inbox."""
     pack_id = _ident(pack_id)
     if not pack_id or organization is None:
-        return None
-    if _owned_elsewhere(organization, pack_id):
         return None
     seller_id = _ident(seller_id)
     bubbles = _bubbles(thread.get("messages") or [], seller_id)
@@ -79,7 +81,7 @@ def project_pack(organization, seller_id, pack_id, thread, order=None):
 
 def load_pack(organization, pack_id, order=None):
     pack_id = _ident(pack_id)
-    if not pack_id or _owned_elsewhere(organization, pack_id):
+    if not pack_id:
         return None
     account = _account_for(organization)
     if account is None:
@@ -93,13 +95,23 @@ def load_pack(organization, pack_id, order=None):
 
 
 def load_postsale_from_notification(parsed):
-    from .views import _clip, _organization_for
+    from .views import _clip, _organizations_for
 
     if _clip(parsed.get("topic"), 64) != "messages":
-        return None
-    organization = _organization_for(_clip(parsed.get("user_id"), 64))
-    if organization is None:
-        return None
+        return []
+    loaded = []
+    for organization in _organizations_for(_clip(parsed.get("user_id"), 64)):
+        try:
+            conversation = _load_from_notification(organization, parsed)
+        except (OSError, ValueError, InvalidToken):
+            logger.warning("Post-sale message could not be loaded for %s", organization.pk)
+            continue
+        if conversation is not None:
+            loaded.append(conversation)
+    return loaded
+
+
+def _load_from_notification(organization, parsed):
     account = _account_for(organization)
     if account is None:
         return None
@@ -146,8 +158,6 @@ def refresh_postsale(organization):
             conversation__channel=CHANNEL,
         ).values_list("external_id", flat=True)
     )
-    from cryptography.fernet import InvalidToken
-
     for notification in notifications:
         pack_id = _pack_id(notification.resource)
         message_id = _message_id(notification.resource)
@@ -158,12 +168,9 @@ def refresh_postsale(organization):
         if not pack_id and not message_id:
             continue
         try:
-            loaded = load_postsale_from_notification(
-                {
-                    "topic": "messages",
-                    "resource": notification.resource,
-                    "user_id": notification.user_id,
-                }
+            loaded = _load_from_notification(
+                organization,
+                {"topic": "messages", "resource": notification.resource},
             )
         except (OSError, ValueError, InvalidToken):
             continue
@@ -268,14 +275,6 @@ def _load_quietly(organization, pack_id, order):
         load_pack(organization, pack_id, order)
     except (OSError, ValueError, InvalidToken):
         return None
-
-
-def _owned_elsewhere(organization, pack_id):
-    return (
-        Conversation.objects.filter(channel=CHANNEL, external_id=_ident(pack_id))
-        .exclude(organization=organization)
-        .exists()
-    )
 
 
 def _account_for(organization):

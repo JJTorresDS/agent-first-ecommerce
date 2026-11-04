@@ -66,15 +66,16 @@ def _when(value):
     return parsed
 
 
-def _organization_for(user_id):
+def _organizations_for(user_id):
+    """Every organization connected to this seller, oldest connection first."""
     if not user_id:
-        return None
-    account = (
+        return []
+    accounts = (
         MercadoLibreAccount.objects.filter(meli_user_id=user_id)
         .select_related("organization")
-        .first()
+        .order_by("pk")
     )
-    return account.organization if account else None
+    return [account.organization for account in accounts]
 
 
 def _webhook_secret_matches(secret):
@@ -90,9 +91,11 @@ def _store_object(parsed):
         return
     notification_id = _clip(parsed.get("_id"), 128)
     user_id = _clip(parsed.get("user_id"), 64)
-    organization = _organization_for(user_id)
-    if organization is None:
-        return
+    for organization in _organizations_for(user_id):
+        _store_for(organization, notification_id, application_id, user_id, parsed)
+
+
+def _store_for(organization, notification_id, application_id, user_id, parsed):
     fields = {
         "topic": _clip(parsed.get("topic"), 64),
         "resource": _clip(parsed.get("resource"), 512),
@@ -110,6 +113,7 @@ def _store_object(parsed):
     try:
         with transaction.atomic():
             MercadoLibreNotification.objects.get_or_create(
+                organization=organization,
                 notification_id=notification_id,
                 defaults=fields,
             )
@@ -166,7 +170,6 @@ def _account_for(organization):
 
 _MELI_ERRORS = {
     "denied": "Mercado Libre did not authorize the connection.",
-    "taken": "That Mercado Libre account is already connected to another organization.",
     "failed": "Mercado Libre could not be connected.",
     "profile": "The seller profile could not be loaded.",
 }
@@ -199,6 +202,7 @@ def _upsert_question(organization, payload, item):
         "answered_at": _when(answer.get("date_created")) if answer else None,
     }
     question, _created = ItemQuestion.objects.update_or_create(
+        organization=organization,
         question_id=question_id,
         defaults=defaults,
     )
@@ -230,10 +234,13 @@ def _load_question_from_notification(parsed):
     question_id = _question_id(parsed.get("resource"))
     if not question_id:
         return
-    organization = _organization_for(_clip(parsed.get("user_id"), 64))
-    if organization is None:
-        return
-    _load_question(organization, question_id)
+    for organization in _organizations_for(_clip(parsed.get("user_id"), 64)):
+        try:
+            _load_question(organization, question_id)
+        except (OSError, ValueError, InvalidToken):
+            logger.warning(
+                "Question %s could not be loaded for %s", question_id, organization.pk
+            )
 
 
 def _backfill_questions(organization):
@@ -360,20 +367,13 @@ def mercadolibre_callback(request):
     user_id = str(token.get("user_id") or "")
     if not user_id:
         return _settings_redirect("failed")
-    taken = MercadoLibreAccount.objects.filter(meli_user_id=user_id).exclude(
-        organization=organization
-    )
-    if taken.exists():
-        return _settings_redirect("taken")
     account = MercadoLibreAccount.objects.filter(organization=organization).first()
     if account is None:
         account = MercadoLibreAccount(organization=organization, meli_user_id=user_id)
     account.meli_user_id = user_id
     account.store_token_response(token)
-    try:
-        account.save()
-    except IntegrityError:
-        return _settings_redirect("taken")
+    account.save()
+    account.share_tokens()
     MercadoLibreNotification.objects.filter(
         user_id=user_id,
         organization__isnull=True,
@@ -460,9 +460,10 @@ def _sync_open_questions(organization):
         seller = str(raw.get("seller_id") or "")
         if seller and seller != seller_id:
             continue
-        existing = ItemQuestion.objects.filter(question_id=question_id).first()
-        if existing is not None and existing.organization_id != organization.id:
-            continue
+        existing = ItemQuestion.objects.filter(
+            organization=organization,
+            question_id=question_id,
+        ).first()
         item_id = str(raw.get("item_id") or "")
         item = _item_for_sync(token, item_id, existing, items) if item_id else {}
         _upsert_question(organization, raw, item)

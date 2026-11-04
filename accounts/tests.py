@@ -353,7 +353,7 @@ class MemberTests(TestCase):
         self.assertEqual(Invitation.objects.count(), 0)
         self.client.force_login(bea)
         setup = self.client.get("/organization/setup/")
-        self.assertRedirects(setup, "/organization/")
+        self.assertContains(setup, "Create another organization.")
 
     def test_signup_without_an_invitation_still_creates_an_organization(self):
         bea = User.objects.create_user("bea", email="bea@gmail.com")
@@ -434,6 +434,29 @@ class MemberTests(TestCase):
         home = self.client.get("/organization/members/")
         self.assertContains(home, "secret@gmail.com")
         self.assertContains(home, "SCENT")
+
+    def test_a_member_creates_a_second_organization_and_switches_back(self):
+        Invitation.objects.create(
+            organization=self.organization,
+            email="secret@gmail.com",
+            role=Membership.Role.CONTRIBUTOR,
+        )
+        menu = self.client.get("/profile/menu/")
+        self.assertContains(menu, 'href="/organization/setup/"')
+        page = self.client.get("/organization/setup/")
+        self.assertContains(page, "New organization")
+        created = self.client.post("/organization/setup/", {"name": "Second"})
+        self.assertRedirects(created, "/organization/")
+        second = Organization.objects.get(name="Second")
+        membership = Membership.objects.get(user=self.owner, organization=second)
+        self.assertEqual(membership.role, Membership.Role.OWNER)
+        self.assertEqual(Membership.objects.filter(user=self.owner).count(), 2)
+        members = self.client.get("/organization/members/")
+        self.assertContains(members, "Second")
+        self.assertNotContains(members, "secret@gmail.com")
+        self.client.post("/organization/switch/", {"organization": str(self.organization.id)})
+        home = self.client.get("/organization/members/")
+        self.assertContains(home, "secret@gmail.com")
 
     def test_django_admin_adds_a_member_the_same_way(self):
         admin = User.objects.create_superuser("admin", "admin@example.com", "secret")

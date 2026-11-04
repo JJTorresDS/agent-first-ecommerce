@@ -7,6 +7,7 @@ from urllib.error import URLError
 from urllib.parse import parse_qs, urlparse
 
 from django.contrib.auth import get_user_model
+from django.db import IntegrityError, transaction
 from django.test import Client, TestCase, override_settings
 from django.utils import timezone
 
@@ -19,7 +20,7 @@ from meli.models import (
     SellerProfile,
 )
 from meli.projection import project_question
-from meli.tokens import encrypt_secret
+from meli.tokens import decrypt_secret, encrypt_secret
 
 User = get_user_model()
 
@@ -243,7 +244,7 @@ class MercadoLibreConnectTests(TestCase):
         response = self.client.get("/meli/connect/")
         return parse_qs(urlparse(response["Location"]).query)["state"][0]
 
-    def test_callback_connects_only_this_organization(self):
+    def test_callback_connects_the_same_seller_to_a_second_organization(self):
         state = self._state()
         with patch("meli.client.urlopen", return_value=TokenResponse(TOKEN)):
             response = self.client.get(
@@ -267,17 +268,28 @@ class MercadoLibreConnectTests(TestCase):
         )
         self.client.force_login(other_owner)
         other_state = self._state()
-        with patch("meli.client.urlopen", return_value=TokenResponse(TOKEN)):
-            taken = self.client.get(
+        second_token = {**TOKEN, "access_token": "access-2", "refresh_token": "refresh-2"}
+
+        with patch("meli.client.urlopen", return_value=TokenResponse(second_token)):
+            shared = self.client.get(
                 "/meli/callback/",
                 {"code": "auth-code", "state": other_state},
             )
-        self.assertRedirects(taken, "/meli/?meli=taken")
-        self.assertEqual(MercadoLibreAccount.objects.count(), 1)
-        self.assertEqual(
-            MercadoLibreAccount.objects.get().organization,
-            self.organization,
-        )
+        self.assertRedirects(shared, "/meli/")
+        self.assertEqual(MercadoLibreAccount.objects.count(), 2)
+        mine = MercadoLibreAccount.objects.get(organization=self.organization)
+        theirs = MercadoLibreAccount.objects.get(organization=other)
+        self.assertEqual(theirs.meli_user_id, "468424240")
+        self.assertEqual(mine.fresh_access_token(), "access-2")
+        self.assertEqual(decrypt_secret(mine.refresh_token), "refresh-2")
+        self.assertEqual(theirs.fresh_access_token(), "access-2")
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            MercadoLibreAccount.objects.create(
+                organization=other,
+                meli_user_id="999",
+                access_token="x",
+                expires_at=timezone.now(),
+            )
 
     def test_valid_token_is_shown_without_calling_mercadolibre(self):
         MercadoLibreAccount.objects.create(
@@ -903,7 +915,7 @@ class ItemQuestionTests(TestCase):
         hidden = self.client.get("/meli/questions/", follow=True)
         self.assertNotContains(hidden, "Tienen stock?")
 
-    def test_sync_leaves_another_organizations_question_in_place(self):
+    def test_sync_copies_a_shared_question_without_touching_the_other_organization(self):
         other = Organization.objects.create(name="Other")
         ItemQuestion.objects.create(
             organization=other,
@@ -919,14 +931,23 @@ class ItemQuestionTests(TestCase):
 
         with patch("meli.client.urlopen", side_effect=open_response):
             self.client.post("/meli/questions/sync/")
-        row = ItemQuestion.objects.get(question_id="13683341904")
-        self.assertEqual(row.organization, other)
-        self.assertEqual(row.text, "Theirs")
-        self.assertFalse(Conversation.objects.filter(organization=self.organization).exists())
-        self.assertFalse(Conversation.objects.filter(external_id="13683341904").exists())
+        theirs = ItemQuestion.objects.get(organization=other, question_id="13683341904")
+        self.assertEqual(theirs.text, "Theirs")
+        mine = ItemQuestion.objects.get(
+            organization=self.organization,
+            question_id="13683341904",
+        )
+        self.assertEqual(mine.text, "Tienen stock?")
+        self.assertTrue(
+            Conversation.objects.filter(
+                organization=self.organization,
+                external_id="13683341904",
+            ).exists()
+        )
+        self.assertFalse(Conversation.objects.filter(organization=other).exists())
         page = self.client.get("/meli/questions/", follow=True)
         self.assertNotContains(page, "Theirs")
-        self.assertNotContains(page, "Tienen stock?")
+        self.assertContains(page, "Tienen stock?")
 
     def test_sync_failure_stores_nothing(self):
         with patch("meli.client.urlopen", side_effect=URLError("down")):
@@ -1322,6 +1343,8 @@ class PostSaleTests(TestCase):
             if f"/messages/packs/{PACK}/" in url:
                 self.assertIn("mark_as_read=false", url)
                 return TokenResponse(sale_thread("Necesito medidas?"))
+            if f"/messages/packs/{TAKEN}/" in url:
+                return TokenResponse(sale_thread("Mio tambien", message_id="msg-taken"))
             if f"/messages/packs/{UNREAD}/" in url:
                 self.assertIn("mark_as_read=false", url)
                 return TokenResponse(sale_thread("Mensaje viejo", message_id="msg-old"))
@@ -1340,16 +1363,18 @@ class PostSaleTests(TestCase):
             "/inbox/?sync=ok",
         )
         self.assertFalse(Conversation.objects.filter(external_id=OLD).exists())
-        kept = Conversation.objects.get(external_id=TAKEN)
-        self.assertEqual(kept.organization, other)
+        kept = Conversation.objects.get(organization=other, external_id=TAKEN)
         self.assertEqual(kept.title, "Theirs")
+        self.assertFalse(kept.messages.exists())
+        copy = Conversation.objects.get(organization=self.organization, external_id=TAKEN)
+        self.assertEqual(copy.title, "Other Buyer · Taken")
         loaded = Conversation.objects.get(external_id=PACK)
         self.assertEqual(loaded.organization, self.organization)
         self.assertEqual(loaded.title, "Willian Guido · Remera")
         self.assertEqual(loaded.messages.get().body, "Necesito medidas?")
         unread = Conversation.objects.get(external_id=UNREAD)
         self.assertEqual(unread.messages.get().body, "Mensaje viejo")
-        self.assertFalse(any(TAKEN in url or OLD in url for url in calls if "/messages/packs/" in url))
+        self.assertFalse(any(OLD in url for url in calls if "/messages/packs/" in url))
         shown = self.client.get("/inbox/?sync=ok")
         self.assertContains(shown, "Post-sale messages loaded.")
         self.assertContains(shown, "Necesito medidas?")
@@ -2128,3 +2153,128 @@ class PostSaleTests(TestCase):
         )
         self.assertEqual(Conversation.objects.get().messages.get().body, "Attachment")
         self.assertTrue(Conversation.objects.get().needs_reply)
+
+
+def shared_seller(name, user_id="468424240", expires_in=timedelta(hours=1)):
+    organization = Organization.objects.create(name=name)
+    MercadoLibreAccount.objects.create(
+        organization=organization,
+        meli_user_id=user_id,
+        access_token=encrypt_secret("access-1"),
+        refresh_token=encrypt_secret("refresh-1"),
+        expires_at=timezone.now() + expires_in,
+    )
+    return organization
+
+
+@override_settings(
+    MELI_WEBHOOK_SECRET=WEBHOOK_SECRET,
+    MELI_CLIENT_ID=str(SAMPLE["application_id"]),
+)
+class SharedSellerTests(TestCase):
+    """One Mercado Libre seller connected to two organizations."""
+
+    def setUp(self):
+        self.first = shared_seller("First")
+        self.second = shared_seller("Second")
+        self.stranger = shared_seller("Stranger", user_id="555")
+
+    def _post(self, payload):
+        return self.client.post(
+            WEBHOOK_URL,
+            data=json.dumps({**SAMPLE, **payload}),
+            content_type="application/json",
+        )
+
+    def test_a_refresh_gives_every_organization_the_new_tokens(self):
+        MercadoLibreAccount.objects.filter(meli_user_id="468424240").update(
+            expires_at=timezone.now() - timedelta(minutes=1)
+        )
+        fresh = {**TOKEN, "access_token": "access-2", "refresh_token": "refresh-2"}
+        with patch("meli.client.urlopen", return_value=TokenResponse(fresh)) as urlopen:
+            first = MercadoLibreAccount.objects.get(organization=self.first)
+            self.assertEqual(first.fresh_access_token(), "access-2")
+            second = MercadoLibreAccount.objects.get(organization=self.second)
+            self.assertEqual(second.fresh_access_token(), "access-2")
+        self.assertEqual(urlopen.call_count, 1)
+        self.assertEqual(decrypt_secret(second.refresh_token), "refresh-2")
+        stranger = MercadoLibreAccount.objects.get(organization=self.stranger)
+        self.assertEqual(decrypt_secret(stranger.access_token), "access-1")
+
+    def test_a_question_reaches_every_organization_with_that_seller(self):
+        with patch("meli.client.urlopen", side_effect=question_api):
+            response = self._post(
+                {
+                    "_id": "shared-question",
+                    "topic": "questions",
+                    "resource": "/questions/13683341904",
+                }
+            )
+        self.assertEqual(response.status_code, 200)
+        notes = MercadoLibreNotification.objects.filter(notification_id="shared-question")
+        self.assertEqual(
+            {note.organization_id for note in notes},
+            {self.first.id, self.second.id},
+        )
+        for organization in (self.first, self.second):
+            question = ItemQuestion.objects.get(organization=organization)
+            self.assertEqual(question.text, "Tienen stock?")
+            conversation = Conversation.objects.get(organization=organization)
+            self.assertEqual(conversation.external_id, "13683341904")
+        self.assertFalse(ItemQuestion.objects.filter(organization=self.stranger).exists())
+        self.assertFalse(Conversation.objects.filter(organization=self.stranger).exists())
+        self.assertFalse(
+            MercadoLibreNotification.objects.filter(organization=self.stranger).exists()
+        )
+
+    def test_a_post_sale_message_reaches_every_organization_with_that_seller(self):
+        created = timezone.now().isoformat()
+
+        def open_response(request, timeout=15):
+            url = request.full_url
+            if f"/messages/packs/{PACK}/" in url:
+                return TokenResponse(sale_thread("Necesito medidas?", created=created))
+            if f"/orders/{PACK}" in url:
+                return TokenResponse(
+                    sale_order(PACK, PACK, created, "Willian", "Guido", "Remera")
+                )
+            raise AssertionError(url)
+
+        with patch("meli.client.urlopen", side_effect=open_response):
+            self._post(
+                {
+                    "_id": "shared-message",
+                    "topic": "messages",
+                    "resource": f"/packs/{PACK}",
+                }
+            )
+        for organization in (self.first, self.second):
+            conversation = Conversation.objects.get(
+                organization=organization,
+                external_id=PACK,
+            )
+            self.assertEqual(conversation.messages.get().body, "Necesito medidas?")
+            self.assertEqual(conversation.messages.get().organization, organization)
+        self.assertFalse(Conversation.objects.filter(organization=self.stranger).exists())
+
+    def test_disconnecting_one_organization_keeps_the_other_connected(self):
+        owner = User.objects.create_user("ada", email="ada@example.com")
+        Membership.objects.create(
+            user=owner,
+            organization=self.first,
+            role=Membership.Role.OWNER,
+        )
+        self.client.force_login(owner)
+        self.client.post("/meli/disconnect/")
+        self.assertFalse(MercadoLibreAccount.objects.filter(organization=self.first).exists())
+        self.assertTrue(MercadoLibreAccount.objects.filter(organization=self.second).exists())
+        with patch("meli.client.urlopen", side_effect=question_api):
+            self._post(
+                {
+                    "_id": "after-disconnect",
+                    "topic": "questions",
+                    "resource": "/questions/13683341904",
+                }
+            )
+        self.assertTrue(ItemQuestion.objects.filter(organization=self.second).exists())
+        self.assertFalse(ItemQuestion.objects.filter(organization=self.first).exists())

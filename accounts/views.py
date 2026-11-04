@@ -116,8 +116,7 @@ def _organization_name(raw):
 
 @login_required
 def organization_setup(request):
-    if membership_for(request.user):
-        return redirect("organization")
+    has_organization = membership_for(request.user) is not None
     error = ""
     if request.method == "POST":
         name = _organization_name(request.POST.get("name"))
@@ -126,7 +125,11 @@ def organization_setup(request):
         else:
             create_owned_organization(request.user, name)
             return redirect("organization")
-    return render(request, "accounts/organization_setup.html", {"error": error})
+    return render(
+        request,
+        "accounts/organization_setup.html",
+        {"error": error, "has_organization": has_organization},
+    )
 
 
 def _organization_context(membership, error=""):

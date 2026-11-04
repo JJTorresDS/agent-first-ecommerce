@@ -1,7 +1,7 @@
 from datetime import timedelta
 from zoneinfo import ZoneInfo
 
-from django.db import models
+from django.db import models, transaction
 from django.utils import timezone
 
 BUENOS_AIRES = ZoneInfo("America/Argentina/Buenos_Aires")
@@ -10,14 +10,19 @@ from .tokens import decrypt_secret, encrypt_secret
 
 
 class MercadoLibreAccount(models.Model):
-    """One Mercado Libre seller connected to an organization."""
+    """One Mercado Libre seller connected to an organization.
+
+    A seller may be connected to several organizations. Each keeps its own row,
+    and new tokens are written to every row for that seller, because a refresh
+    token works only once.
+    """
 
     organization = models.OneToOneField(
         "accounts.Organization",
         on_delete=models.CASCADE,
         related_name="mercadolibre_account",
     )
-    meli_user_id = models.CharField(max_length=64, unique=True)
+    meli_user_id = models.CharField(max_length=64, db_index=True)
     access_token = models.TextField()
     refresh_token = models.TextField(blank=True)
     expires_at = models.DateTimeField()
@@ -42,16 +47,43 @@ class MercadoLibreAccount(models.Model):
             self.meli_user_id = str(user_id)
         self.expires_at = expires_at_from(payload.get("expires_in"))
 
+    def _is_fresh(self):
+        return self.expires_at > timezone.now() + timedelta(minutes=5)
+
+    def _siblings(self):
+        return MercadoLibreAccount.objects.filter(meli_user_id=self.meli_user_id)
+
+    def share_tokens(self):
+        """Give every organization connected to this seller this row's tokens."""
+        self._siblings().exclude(pk=self.pk).update(
+            access_token=self.access_token,
+            refresh_token=self.refresh_token,
+            expires_at=self.expires_at,
+            updated_at=timezone.now(),
+        )
+
     def fresh_access_token(self):
-        if self.expires_at > timezone.now() + timedelta(minutes=5):
+        if self._is_fresh():
             return decrypt_secret(self.access_token)
         from .client import refresh_access_token
 
-        payload = refresh_access_token(decrypt_secret(self.refresh_token))
-        self.store_token_response(payload)
-        self.save(
-            update_fields=["access_token", "refresh_token", "expires_at", "updated_at"]
-        )
+        with transaction.atomic():
+            list(self._siblings().select_for_update().order_by("pk"))
+            self.refresh_from_db(
+                fields=["access_token", "refresh_token", "expires_at"]
+            )
+            if not self._is_fresh():
+                payload = refresh_access_token(decrypt_secret(self.refresh_token))
+                self.store_token_response(payload)
+                self.save(
+                    update_fields=[
+                        "access_token",
+                        "refresh_token",
+                        "expires_at",
+                        "updated_at",
+                    ]
+                )
+                self.share_tokens()
         return decrypt_secret(self.access_token)
 
 
@@ -82,9 +114,9 @@ class MercadoLibreNotification(models.Model):
         ordering = ["-created_at"]
         constraints = [
             models.UniqueConstraint(
-                fields=["notification_id"],
+                fields=["organization", "notification_id"],
                 condition=~models.Q(notification_id=""),
-                name="uniq_meli_notification_id",
+                name="uniq_meli_notification_org_id",
             ),
         ]
 
@@ -123,14 +155,6 @@ class SellerProfile(models.Model):
 
     class Meta:
         db_table = "seller_profile"
-        constraints = [
-            models.UniqueConstraint(
-                fields=["meli_user_id"],
-                condition=models.Q(deleted_at__isnull=True)
-                & ~models.Q(meli_user_id=""),
-                name="uniq_seller_profile_live_user",
-            ),
-        ]
 
     def __str__(self):
         return self.nickname or self.meli_user_id
@@ -164,7 +188,7 @@ class ItemQuestion(models.Model):
         on_delete=models.CASCADE,
         related_name="item_questions",
     )
-    question_id = models.CharField(max_length=32, unique=True)
+    question_id = models.CharField(max_length=32)
     item_id = models.CharField(max_length=32, blank=True)
     item_title = models.CharField(max_length=200, blank=True)
     item_permalink = models.CharField(max_length=512, blank=True)
@@ -180,6 +204,12 @@ class ItemQuestion(models.Model):
     class Meta:
         db_table = "item_question"
         ordering = ["-asked_at", "-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "question_id"],
+                name="uniq_item_question_org_id",
+            ),
+        ]
 
     def __str__(self):
         return self.question_id

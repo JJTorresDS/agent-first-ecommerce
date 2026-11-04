@@ -26,6 +26,7 @@
         </form>
       {% endfor %}
     {% endif %}
+    <a class="profile-menu-link" href="{% url 'organization_setup' %}">New organization</a>
     <a class="profile-menu-link" href="{% url 'profile' %}">Profile</a>
     <form method="post" action="{% url 'account_logout' %}">
       {% csrf_token %}
