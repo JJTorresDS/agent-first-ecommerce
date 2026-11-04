@@ -50,6 +50,15 @@ class MercadoLibreError(ValueError):
         self.message = message
 
 
+def describe_failure(error):
+    """A log line for a failed call: the error class and Mercado Libre's reason. Never a token."""
+    if isinstance(error, MercadoLibreError):
+        return f"MercadoLibreError: {error.message}"
+    if error.__class__.__name__ == "InvalidToken":
+        return "InvalidToken: the saved token was encrypted with another SECRET_KEY"
+    return error.__class__.__name__
+
+
 def _error_reason(error):
     try:
         payload = json.loads(error.read().decode() or "null")

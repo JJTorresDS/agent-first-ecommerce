@@ -9,6 +9,7 @@ from .models import ItemQuestion
 
 UNREACHABLE = "Mercado Libre could not be reached. Try again."
 EXPIRED = "The Mercado Libre connection expired. Connect it again."
+UNREADABLE = "The saved Mercado Libre connection can't be read on this server."
 
 
 def _refused(error):
@@ -16,7 +17,7 @@ def _refused(error):
     if isinstance(error, MercadoLibreError):
         return ReplyFailed(error.message)
     if isinstance(error, InvalidToken):
-        return ReplyFailed(EXPIRED)
+        return ReplyFailed(UNREADABLE)
     return ReplyFailed(UNREACHABLE)
 
 

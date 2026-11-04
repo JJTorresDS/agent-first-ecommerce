@@ -9,6 +9,7 @@ from inbox.models import Channel, Conversation, Message
 from inbox.services import upsert_thread
 
 from .client import (
+    describe_failure,
     fetch_message,
     fetch_order,
     fetch_pack,
@@ -103,8 +104,13 @@ def load_postsale_from_notification(parsed):
     for organization in _organizations_for(_clip(parsed.get("user_id"), 64)):
         try:
             conversation = _load_from_notification(organization, parsed)
-        except (OSError, ValueError, InvalidToken):
-            logger.warning("Post-sale message could not be loaded for %s", organization.pk)
+        except (OSError, ValueError, InvalidToken) as error:
+            logger.warning(
+                "Post-sale message %s could not be loaded for %s: %s",
+                parsed.get("resource"),
+                organization.pk,
+                describe_failure(error),
+            )
             continue
         if conversation is not None:
             loaded.append(conversation)

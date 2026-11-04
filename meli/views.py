@@ -22,6 +22,7 @@ from cryptography.fernet import InvalidToken
 
 from .alerts import unanswered_count
 from .client import (
+    describe_failure,
     exchange_code,
     fetch_item,
     fetch_question,
@@ -237,9 +238,12 @@ def _load_question_from_notification(parsed):
     for organization in _organizations_for(_clip(parsed.get("user_id"), 64)):
         try:
             _load_question(organization, question_id)
-        except (OSError, ValueError, InvalidToken):
+        except (OSError, ValueError, InvalidToken) as error:
             logger.warning(
-                "Question %s could not be loaded for %s", question_id, organization.pk
+                "Question %s could not be loaded for %s: %s",
+                question_id,
+                organization.pk,
+                describe_failure(error),
             )
 
 

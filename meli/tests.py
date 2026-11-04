@@ -2418,3 +2418,100 @@ class SharedSellerTests(TestCase):
             )
         self.assertTrue(ItemQuestion.objects.filter(organization=self.second).exists())
         self.assertFalse(ItemQuestion.objects.filter(organization=self.first).exists())
+
+
+def unreadable_token():
+    """A token encrypted under another SECRET_KEY, like one saved by another server."""
+    from cryptography.fernet import Fernet
+
+    return Fernet(Fernet.generate_key()).encrypt(b"access-elsewhere").decode()
+
+
+@override_settings(
+    MELI_WEBHOOK_SECRET=WEBHOOK_SECRET,
+    MELI_CLIENT_ID=str(SAMPLE["application_id"]),
+)
+class SeparateEnvironmentTests(TestCase):
+    """A laptop and Render share Upstash and Neon but not SECRET_KEY."""
+
+    def setUp(self):
+        self.organization = shared_seller("Test Seller")
+        MercadoLibreAccount.objects.filter(organization=self.organization).update(
+            access_token=unreadable_token()
+        )
+        self.user = User.objects.create_user("ada", email="ada@example.com")
+        Membership.objects.create(
+            user=self.user,
+            organization=self.organization,
+            role=Membership.Role.OWNER,
+        )
+        self.client.force_login(self.user)
+
+    def test_every_redis_key_uses_this_environments_prefix(self):
+        from meli import jobs
+
+        self.assertTrue(jobs.REPLY_QUEUE.startswith("vimple:"))
+        with override_settings(REDIS_PREFIX="vimple-dev"):
+            self.assertEqual(jobs._key("reply", "queue"), "vimple-dev:reply:queue")
+            self.assertEqual(jobs.reply_status_key("c1"), "vimple-dev:reply:status:c1")
+            self.assertEqual(jobs.reply_error_key("c1"), "vimple-dev:reply:error:c1")
+            self.assertEqual(jobs.status_key("o1"), "vimple-dev:postsale:status:o1")
+            self.assertEqual(jobs.refresh_status_key("o1"), "vimple-dev:refresh:status:o1")
+
+    def test_a_bad_prefix_stops_startup(self):
+        from django.core.exceptions import ImproperlyConfigured
+
+        from vimple.settings import redis_prefix
+
+        self.assertEqual(redis_prefix(None), "vimple")
+        self.assertEqual(redis_prefix(" vimple-dev "), "vimple-dev")
+        for bad in ("bad prefix!", "Vimple", "x" * 33):
+            with self.assertRaises(ImproperlyConfigured):
+                redis_prefix(bad)
+
+    def test_an_unreadable_token_is_logged_not_dropped(self):
+        with (
+            patch("meli.client.urlopen") as urlopen,
+            self.assertLogs("meli", "WARNING") as logs,
+        ):
+            self.client.post(
+                WEBHOOK_URL,
+                data=json.dumps(
+                    {
+                        **SAMPLE,
+                        "user_id": 468424240,
+                        "_id": "unreadable",
+                        "topic": "messages",
+                        "resource": "01a1a7aa62c078d7a5b7844501f85b47",
+                    }
+                ),
+                content_type="application/json",
+            )
+        self.assertEqual(urlopen.call_count, 0)
+        line = "\n".join(logs.output)
+        self.assertIn(str(self.organization.pk), line)
+        self.assertIn("InvalidToken", line)
+        self.assertNotIn("access-elsewhere", line)
+        self.assertFalse(Conversation.objects.exists())
+        self.assertTrue(
+            MercadoLibreNotification.objects.filter(notification_id="unreadable").exists()
+        )
+
+    def test_a_reply_with_an_unreadable_token_says_so(self):
+        conversation = Conversation.objects.create(
+            organization=self.organization,
+            channel="meli-postsales",
+            external_id=PACK,
+            title="Test Test",
+            needs_reply=True,
+            last_message_at=timezone.now(),
+        )
+        with patch("meli.client.urlopen") as urlopen:
+            self.client.post(f"/inbox/{conversation.pk}/reply/", {"text": "Hola"})
+        self.assertEqual(urlopen.call_count, 0)
+        self.assertFalse(conversation.messages.filter(external_id="pending").exists())
+        page = self.client.get(f"/inbox/?conversation={conversation.pk}")
+        self.assertContains(
+            page,
+            "The saved Mercado Libre connection can&#x27;t be read on this server.",
+        )

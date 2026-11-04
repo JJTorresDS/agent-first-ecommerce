@@ -1,6 +1,7 @@
 """Django settings for the Vimple backend."""
 
 import os
+import re
 import sys
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
@@ -185,6 +186,20 @@ else:
 
 # Upstash connection string. Empty means post-sale sync runs inside the request.
 REDIS_URL = "" if _COMMAND == "test" else os.environ.get("REDIS_URL", "").strip()
+
+
+def redis_prefix(raw):
+    """The start of every Redis key. Local and Render share Upstash, so each needs its own."""
+    prefix = (raw or "vimple").strip()
+    if not re.fullmatch(r"[a-z0-9-]{1,32}", prefix):
+        raise ImproperlyConfigured(
+            "REDIS_PREFIX must be 1-32 lowercase letters, digits or dashes."
+        )
+    return prefix
+
+
+# Render uses vimple. A laptop sharing the same Upstash uses vimple-dev.
+REDIS_PREFIX = redis_prefix(os.environ.get("REDIS_PREFIX"))
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},

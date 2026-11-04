@@ -8,12 +8,21 @@ import time
 from django.conf import settings
 from django.db import close_old_connections
 
+from .client import describe_failure
+
 logger = logging.getLogger(__name__)
 
-QUEUE = "vimple:postsale:queue"
-REPLY_QUEUE = "vimple:reply:queue"
-REFRESH_QUEUE = "vimple:refresh:queue"
-NOTIFICATION_QUEUE = "vimple:notification:queue"
+
+
+def _key(*parts):
+    """A Redis key under this environment's prefix, so local and Render never share jobs."""
+    return ":".join([settings.REDIS_PREFIX, *[str(part) for part in parts]])
+
+
+QUEUE = _key("postsale", "queue")
+REPLY_QUEUE = _key("reply", "queue")
+REFRESH_QUEUE = _key("refresh", "queue")
+NOTIFICATION_QUEUE = _key("notification", "queue")
 NOTIFICATION_TOPICS = {"questions", "messages"}
 ACTIVE_TTL = 30 * 60
 DONE_TTL = 2 * 60
@@ -37,19 +46,19 @@ def postsale_queue_enabled():
 
 
 def status_key(organization_id):
-    return f"vimple:postsale:status:{organization_id}"
+    return _key("postsale", "status", organization_id)
 
 
 def reply_status_key(conversation_id):
-    return f"vimple:reply:status:{conversation_id}"
+    return _key("reply", "status", conversation_id)
 
 
 def reply_error_key(conversation_id):
-    return f"vimple:reply:error:{conversation_id}"
+    return _key("reply", "error", conversation_id)
 
 
 def refresh_status_key(organization_id):
-    return f"vimple:refresh:status:{organization_id}"
+    return _key("refresh", "status", organization_id)
 
 
 def _client():
@@ -404,7 +413,14 @@ def refresh_unanswered(organization_id):
                 from .postsale import load_pack
 
                 load_pack(organization, conversation.external_id)
-        except (OSError, ValueError, InvalidToken):
+        except (OSError, ValueError, InvalidToken) as error:
+            logger.warning(
+                "Could not refresh %s %s for %s: %s",
+                conversation.channel,
+                conversation.external_id,
+                organization.pk,
+                describe_failure(error),
+            )
             continue
         except Exception:
             logger.exception(
@@ -416,8 +432,12 @@ def refresh_unanswered(organization_id):
 
     try:
         refresh_postsale(organization)
-    except (OSError, ValueError, InvalidToken):
-        pass
+    except (OSError, ValueError, InvalidToken) as error:
+        logger.warning(
+            "Post-sale catch-up failed for %s: %s",
+            organization_id,
+            describe_failure(error),
+        )
     except Exception:
         logger.exception("Post-sale catch-up failed for %s", organization_id)
 
@@ -480,8 +500,12 @@ def run_notification_job(job):
             _load_question_from_notification(job)
         elif job.get("topic") == "messages":
             load_postsale_from_notification(job)
-    except (OSError, ValueError, InvalidToken):
-        pass
+    except (OSError, ValueError, InvalidToken) as error:
+        logger.warning(
+            "Notification %s could not be loaded: %s",
+            job.get("resource"),
+            describe_failure(error),
+        )
     except Exception:
         logger.exception("Notification load failed for %s", job.get("resource"))
     finally:
