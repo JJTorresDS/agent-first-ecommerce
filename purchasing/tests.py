@@ -29,8 +29,8 @@ class PurchaseTests(TestCase):
     def setUp(self):
         self.organization = Organization.objects.create(name="Test Seller")
         self.other = Organization.objects.create(name="Other")
-        self.perfume = product(self.organization, sku="CD-100", family="caramel-dream")
-        self.small = product(self.organization, sku="CD-50", family="caramel-dream")
+        self.perfume = product(self.organization, variant="100ML")
+        self.small = product(self.organization, variant="50ML")
         self.importer = Supplier.objects.create(organization=self.organization, name="Importadora Sur")
         self.wholesaler = Supplier.objects.create(organization=self.organization, name="Mayorista Norte")
 
@@ -62,7 +62,7 @@ class PurchaseTests(TestCase):
         self._buy(self.importer, date(2026, 9, 1), (self.perfume, 5, "11000"))
         self._buy(self.importer, date(2026, 10, 15), (self.perfume, 5, "12500"))
         self._buy(self.wholesaler, date(2026, 10, 1), (self.perfume, 2, "13900"), (self.small, 2, "8000"))
-        theirs = product(self.other, sku="CD-100")
+        theirs = product(self.other, variant="100ML")
         stranger = Supplier.objects.create(organization=self.other, name="Importadora Sur")
         self._buy(stranger, date(2026, 11, 1), (theirs, 1, "1"), organization=self.other)
 
@@ -79,7 +79,7 @@ class PurchaseTests(TestCase):
 
     def test_a_line_cannot_use_another_organizations_product(self):
         purchase = self._buy(self.importer, date(2026, 10, 1))
-        theirs = product(self.other, sku="THEIRS")
+        theirs = product(self.other, code="999")
         line = PurchaseItem(purchase=purchase, product=theirs, quantity=1, unit_cost=Decimal("1"))
         with self.assertRaises(ValidationError):
             line.full_clean()
@@ -142,7 +142,7 @@ class AdminPagesTests(TestCase):
         organization = Organization.objects.create(name="Test Seller")
         other = Organization.objects.create(name="Other")
         item = product(organization)
-        theirs = product(other, sku="THEIRS")
+        theirs = product(other, code="999")
         supplier = Supplier.objects.create(organization=organization, name="Importadora Sur")
         admin = get_user_model().objects.create_superuser("root", "root@example.com", "pw")
         self.client.force_login(admin)

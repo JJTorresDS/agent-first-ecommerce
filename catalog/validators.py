@@ -1,4 +1,5 @@
 from django.core.exceptions import ValidationError
+from django.utils.deconstruct import deconstructible
 
 ATTRIBUTE_KEY_LIMIT = 60
 ATTRIBUTE_COUNT_LIMIT = 100
@@ -37,3 +38,40 @@ def validate_gtin(value):
 def validate_currency(value):
     if not (len(value) == 3 and value.isalpha() and value.isupper()):
         raise ValidationError("Currency must be a 3-letter code such as ARS or USD.")
+
+
+def normalize_code(value):
+    """Codes are stored in capitals without surrounding spaces."""
+    return (value or "").strip().upper()
+
+
+@deconstructible
+class CodeValidator:
+    """A SKU segment: capital letters and digits only. The hyphen joins segments."""
+
+    def __init__(self, label, low, high):
+        self.label = label
+        self.low = low
+        self.high = high
+
+    def __call__(self, value):
+        if not (self.low <= len(value) <= self.high) or not all(
+            char.isascii() and char.isalnum() and not char.islower() for char in value
+        ):
+            raise ValidationError(
+                f"{self.label} must be {self.low} to {self.high} capital letters or digits, "
+                "without spaces or hyphens."
+            )
+
+    def __eq__(self, other):
+        return isinstance(other, CodeValidator) and (self.label, self.low, self.high) == (
+            other.label,
+            other.low,
+            other.high,
+        )
+
+
+validate_category_code = CodeValidator("Category code", 2, 6)
+validate_brand_code = CodeValidator("Brand code", 2, 8)
+validate_model_code = CodeValidator("Model code", 1, 10)
+validate_variant = CodeValidator("Variant", 1, 10)

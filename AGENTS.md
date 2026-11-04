@@ -50,7 +50,9 @@ Organization is the tenant. Its UUID does not change. The name can.
 
 ## Catalog and purchasing
 
-- catalog.MasterProduct is one row per sellable SKU, unique per organization; family groups variants (50 ml and 100 ml). Core listing fields are columns. Secondary attributes go in attributes, a flat JSON object checked by catalog.validators.validate_attributes. Media lives outside Vimple: only image_url is stored.
+- SKU = CATEGORY-BRAND-MODEL-VARIANT (PERF-ONLY-885-30ML), built from the codes on a product's first save and never changed, because channels match by SKU. Codes are A-Z and 0-9; the hyphen only separates them. They are capitalized in clean_fields, before the validators run.
+- Category and Brand codes and names are unique per organization; a ProductModel code is unique within its brand. A code, or a product's model and variant, can't change once a SKU uses it: create a new one.
+- ProductModel is the variant family and holds shared data (name, description, condition). MasterProduct is one variant: the variant is its only free part. Secondary attributes go in attributes, a flat JSON object checked by catalog.validators.validate_attributes. Media lives outside Vimple: only image_url is stored.
 - Channel listings (Mercado Libre, Tiendanube) will be their own models pointing at MasterProduct, not keys in its JSON.
 - purchasing has Supplier, Purchase (one invoice: supplier, date, currency, optional tasks.CashflowMovement) and PurchaseItem (product, quantity, unit_cost). Cost history comes from the lines: MasterProduct.costs_by_supplier.
 - A purchase, its supplier, its receipt and its lines' products are in one organization. Purchase and PurchaseItem refuse anything else in clean() and save(); lines take the purchase's organization.

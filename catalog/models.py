@@ -1,24 +1,182 @@
 import uuid
 
+from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator, URLValidator
 from django.db import models
+from django.db.models.functions import Lower
 
 from accounts.models import TenantModel
 
-from .validators import validate_attributes, validate_currency, validate_gtin
+from .validators import (
+    normalize_code,
+    validate_attributes,
+    validate_brand_code,
+    validate_category_code,
+    validate_currency,
+    validate_gtin,
+    validate_model_code,
+    validate_variant,
+)
+
+CODE_IN_USE = "Products already use this code in their SKU. Create a new one instead."
+
+
+class Condition(models.TextChoices):
+    NEW = "new", "New"
+    USED = "used", "Used"
+    REFURBISHED = "refurbished", "Refurbished"
+
+
+def _stored(row, *fields):
+    """The saved values of these fields, or None for a new row."""
+    if row._state.adding or row.pk is None:
+        return None
+    return type(row).objects.filter(pk=row.pk).values_list(*fields).first()
+
+
+def _same_organization(row, *fields):
+    """Refuse a link to another organization's category, brand or model."""
+    if row.organization_id is None:
+        return
+    for field in fields:
+        if getattr(row, f"{field}_id") is None:
+            continue
+        if getattr(row, field).organization_id != row.organization_id:
+            raise ValidationError({field: "This belongs to another organization."})
+
+
+class _CodedName(TenantModel):
+    """A short code that goes in SKUs, and the name people read."""
+
+    name = models.CharField(max_length=120)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        abstract = True
+        ordering = ["name"]
+
+    def __str__(self):
+        return f"{self.code} · {self.name}"
+
+    def _in_use(self):
+        raise NotImplementedError
+
+    def clean_fields(self, exclude=None):
+        # Capitalize before the code validator runs, so "perf" is accepted as PERF.
+        self.code = normalize_code(self.code)
+        super().clean_fields(exclude)
+
+    def _check(self):
+        self.code = normalize_code(self.code)
+        self.name = (self.name or "").strip()
+        stored = _stored(self, "code")
+        if stored and stored[0] != self.code and self._in_use():
+            raise ValidationError({"code": CODE_IN_USE})
+
+    def clean(self):
+        self._check()
+        super().clean()
+
+    def save(self, *args, **kwargs):
+        self._check()
+        super().save(*args, **kwargs)
+
+
+class Category(_CodedName):
+    code = models.CharField(max_length=6, validators=[validate_category_code], help_text="PERF")
+
+    class Meta(_CodedName.Meta):
+        db_table = "catalog_category"
+        verbose_name_plural = "categories"
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "code"], name="uniq_catalog_org_category_code"),
+            models.UniqueConstraint(Lower("name"), "organization", name="uniq_catalog_org_category_name"),
+        ]
+
+    def _in_use(self):
+        return MasterProduct.objects.filter(product_model__category=self).exists()
+
+
+class Brand(_CodedName):
+    code = models.CharField(max_length=8, validators=[validate_brand_code], help_text="ONLY")
+
+    class Meta(_CodedName.Meta):
+        db_table = "catalog_brand"
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "code"], name="uniq_catalog_org_brand_code"),
+            models.UniqueConstraint(Lower("name"), "organization", name="uniq_catalog_org_brand_name"),
+        ]
+
+    def _in_use(self):
+        return MasterProduct.objects.filter(product_model__brand=self).exists()
+
+
+class ProductModel(TenantModel):
+    """One item and the family of its variants: PERF-ONLY-885 for the 30 ml and 100 ml bottles."""
+
+    category = models.ForeignKey(Category, on_delete=models.PROTECT, related_name="product_models")
+    brand = models.ForeignKey(Brand, on_delete=models.PROTECT, related_name="product_models")
+    code = models.CharField(
+        max_length=10,
+        validators=[validate_model_code],
+        help_text="Short model code, unique within the brand: 885",
+    )
+    name = models.CharField(max_length=200, help_text="Only 885 Eau de Parfum")
+    description = models.TextField(blank=True)
+    condition = models.CharField(max_length=16, choices=Condition.choices, default=Condition.NEW)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "catalog_product_model"
+        ordering = ["name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "brand", "code"],
+                name="uniq_catalog_org_brand_model_code",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.family_code()} · {self.name}"
+
+    def family_code(self):
+        if self.category_id is None or self.brand_id is None:
+            return self.code
+        return f"{self.category.code}-{self.brand.code}-{self.code}"
+
+    def clean_fields(self, exclude=None):
+        self.code = normalize_code(self.code)
+        super().clean_fields(exclude)
+
+    def _check(self):
+        self.code = normalize_code(self.code)
+        self.name = (self.name or "").strip()
+        _same_organization(self, "category", "brand")
+        stored = _stored(self, "code", "category_id", "brand_id")
+        if stored and stored != (self.code, self.category_id, self.brand_id) and self.products.exists():
+            raise ValidationError(
+                "Variants already use this model's code, category and brand in their SKU. "
+                "Create a new model instead."
+            )
+
+    def clean(self):
+        self._check()
+        super().clean()
+
+    def save(self, *args, **kwargs):
+        self._check()
+        super().save(*args, **kwargs)
 
 
 class MasterProduct(TenantModel):
-    """One sellable SKU in the organization's own catalog.
+    """One sellable variant. Its SKU is CATEGORY-BRAND-MODEL-VARIANT, made once and never changed.
 
-    Core listing data are columns; secondary attributes go in attributes.
+    Shared data lives on the ProductModel; secondary attributes go in attributes.
     Channel listings (Mercado Libre, Tiendanube) will point here.
     """
 
-    class Condition(models.TextChoices):
-        NEW = "new", "New"
-        USED = "used", "Used"
-        REFURBISHED = "refurbished", "Refurbished"
+    Condition = Condition
 
     class Status(models.TextChoices):
         DRAFT = "draft", "Draft"
@@ -26,15 +184,19 @@ class MasterProduct(TenantModel):
         ARCHIVED = "archived", "Archived"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    sku = models.CharField(max_length=64)
-    title = models.CharField(max_length=200)
-    family = models.CharField(
-        max_length=64,
-        blank=True,
-        help_text="Same value on every variant of one item, like 50 ml and 100 ml.",
+    product_model = models.ForeignKey(
+        ProductModel,
+        on_delete=models.PROTECT,
+        related_name="products",
+        verbose_name="model",
     )
-    brand = models.CharField(max_length=120, blank=True)
-    model = models.CharField(max_length=120, blank=True)
+    variant = models.CharField(
+        max_length=10,
+        validators=[validate_variant],
+        help_text="What sets this variant apart: 30ML, ROJO, XL. Use UNICO when there is one.",
+    )
+    sku = models.CharField("SKU", max_length=64, blank=True, editable=False)
+    title = models.CharField(max_length=200, blank=True, help_text="Defaults to the model name and variant.")
     gtin = models.CharField(
         "GTIN",
         max_length=14,
@@ -42,18 +204,11 @@ class MasterProduct(TenantModel):
         validators=[validate_gtin],
         help_text="EAN/UPC barcode.",
     )
-    category = models.CharField(max_length=200, blank=True)
-    condition = models.CharField(
-        max_length=16,
-        choices=Condition.choices,
-        default=Condition.NEW,
-    )
     status = models.CharField(
         max_length=16,
         choices=Status.choices,
         default=Status.DRAFT,
     )
-    description = models.TextField(blank=True)
     image_url = models.URLField(
         max_length=2048,
         validators=[URLValidator(schemes=["http", "https"])],
@@ -86,7 +241,7 @@ class MasterProduct(TenantModel):
 
     class Meta:
         db_table = "catalog_master_product"
-        ordering = ["title", "sku"]
+        ordering = ["sku"]
         constraints = [
             models.UniqueConstraint(
                 fields=["organization", "sku"],
@@ -97,21 +252,52 @@ class MasterProduct(TenantModel):
                 condition=~models.Q(gtin=""),
                 name="uniq_catalog_org_gtin",
             ),
-        ]
-        indexes = [
-            models.Index(fields=["organization", "family"], name="catalog_org_family"),
+            models.UniqueConstraint(
+                fields=["product_model", "variant"],
+                name="uniq_catalog_model_variant",
+            ),
         ]
 
     def __str__(self):
         return f"{self.sku} · {self.title}"
 
+    def clean_fields(self, exclude=None):
+        self.variant = normalize_code(self.variant)
+        super().clean_fields(exclude)
+
+    def _fill(self):
+        """Fill organization, SKU and title. The SKU never changes after the first save."""
+        self.variant = normalize_code(self.variant)
+        if self.product_model_id is None:
+            return
+        model = self.product_model
+        if self.organization_id is None:
+            self.organization_id = model.organization_id
+        _same_organization(self, "product_model")
+        stored = _stored(self, "product_model_id", "variant")
+        if stored is None:
+            self.sku = f"{model.family_code()}-{self.variant}"
+        elif stored != (self.product_model_id, self.variant):
+            raise ValidationError(
+                "The model and variant make the SKU, so they can't change. "
+                "Archive this product and create a new one."
+            )
+        if not (self.title or "").strip():
+            self.title = f"{model.name} {self.variant}"[:200]
+
+    def clean(self):
+        self._fill()
+        super().clean()
+
+    def save(self, *args, **kwargs):
+        self._fill()
+        super().save(*args, **kwargs)
+
     def variants(self):
-        """The other SKUs of the same item, in this organization only."""
-        if not self.family:
-            return MasterProduct.objects.none()
+        """The other variants of the same model, in this organization only."""
         return MasterProduct.objects.filter(
             organization_id=self.organization_id,
-            family=self.family,
+            product_model_id=self.product_model_id,
         ).exclude(pk=self.pk)
 
     def costs_by_supplier(self):
