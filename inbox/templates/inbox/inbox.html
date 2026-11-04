@@ -79,13 +79,12 @@
       var response = (event.detail.xhr && event.detail.xhr.responseText) || "";
       if (response.indexOf('data-requested="' + open + '"') === -1) event.detail.shouldSwap = false;
     }
-    var from = event.target;
-    if (target.id === "thread" && from && from.id && from.id.indexOf("conversation-") === 0 && from.id !== "conversation-" + open) {
-      event.detail.shouldSwap = false;
-    }
-    // The "Sending…" poll of a thread the user has left.
-    if (target.id === "thread" && from && from.id === "thread" && from.getAttribute("data-conversation") !== open) {
-      event.detail.shouldSwap = false;
+    // beforeSwap fires on the target (#thread, still showing the old chat), not on the clicked row,
+    // so compare the conversation the request asked for. Covers row clicks and the "Sending…" poll.
+    if (target.id === "thread") {
+      var path = (event.detail.requestConfig && event.detail.requestConfig.path) || "";
+      var asked = path.match(/[?&]conversation=([^&#]+)/);
+      if (asked && decodeURIComponent(asked[1]) !== open) event.detail.shouldSwap = false;
     }
   });
   document.body.addEventListener("htmx:afterSwap", function (event) {

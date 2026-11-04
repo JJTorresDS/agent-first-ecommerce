@@ -2450,7 +2450,9 @@ class SeparateEnvironmentTests(TestCase):
     def test_every_redis_key_uses_this_environments_prefix(self):
         from meli import jobs
 
-        self.assertTrue(jobs.REPLY_QUEUE.startswith("vimple:"))
+        from django.conf import settings
+
+        self.assertEqual(jobs.REPLY_QUEUE, f"{settings.REDIS_PREFIX}:reply:queue")
         with override_settings(REDIS_PREFIX="vimple-dev"):
             self.assertEqual(jobs._key("reply", "queue"), "vimple-dev:reply:queue")
             self.assertEqual(jobs.reply_status_key("c1"), "vimple-dev:reply:status:c1")
