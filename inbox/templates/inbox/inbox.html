@@ -166,10 +166,62 @@
     if (!target || !target.id || target.id.indexOf("conversation-body") !== 0) return;
     inboxBubbleBefore = inboxBubbleState();
   });
+  // Show a sent message at once, before the server answers. htmx has already read the
+  // form at beforeRequest, so clearing the box here does not empty what is sent.
+  // The server's #thread replaces this bubble with the real "Sending…" one.
+  var inboxOutgoing = null;
+  function inboxShowOutgoing() {
+    var bubbles = document.getElementById("bubbles");
+    if (!inboxOutgoing || !bubbles || bubbles.contains(inboxOutgoing.bubble)) return;
+    bubbles.appendChild(inboxOutgoing.bubble);
+    inboxToBottom(false);
+  }
+  document.body.addEventListener("htmx:beforeRequest", function (event) {
+    var form = event.detail && event.detail.elt;
+    if (!form || form.id !== "composer") return;
+    var text = document.getElementById("composer-text");
+    var body = text ? text.value.trim() : "";
+    if (!body) return;
+    var bubble = document.createElement("div");
+    bubble.className = "bubble seller outgoing";
+    bubble.textContent = body;
+    var time = document.createElement("time");
+    time.className = "sending";
+    time.innerHTML = '<span class="spinner" aria-hidden="true"></span>Sending…';
+    bubble.appendChild(time);
+    inboxOutgoing = { bubble: bubble, text: body };
+    text.value = "";
+    inboxShowOutgoing();
+  });
+  // The send did not reach the server: take the bubble back and return the text to the box.
+  function inboxSendFailed(event) {
+    var form = event.detail && event.detail.elt;
+    if (!form || form.id !== "composer" || !inboxOutgoing) return;
+    inboxOutgoing.bubble.remove();
+    var text = document.getElementById("composer-text");
+    if (text && !text.value) text.value = inboxOutgoing.text;
+    inboxOutgoing = null;
+    var error = document.getElementById("composer-offline");
+    if (!error && form.parentNode) {
+      error = document.createElement("p");
+      error.id = "composer-offline";
+      error.className = "error";
+      error.textContent = "The message could not be sent. Check the connection and try again.";
+      form.parentNode.insertBefore(error, form);
+    }
+  }
+  document.body.addEventListener("htmx:sendError", inboxSendFailed);
+  document.body.addEventListener("htmx:responseError", inboxSendFailed);
+  document.body.addEventListener("htmx:afterSwap", function (event) {
+    var target = event.detail && event.detail.target;
+    if (target && target.id === "thread") inboxOutgoing = null;
+  });
   document.body.addEventListener("htmx:oobAfterSwap", function (event) {
     var target = event.detail && event.detail.target;
     if (!target || !target.id || target.id.indexOf("conversation-body") !== 0) return;
     inboxPlaceBubbles();
+    // A list poll that lands before the send's answer redraws the chat; keep the bubble.
+    inboxShowOutgoing();
   });
   // A page load opens on the newest message.
   document.addEventListener("DOMContentLoaded", function () { inboxToBottom(false); });
