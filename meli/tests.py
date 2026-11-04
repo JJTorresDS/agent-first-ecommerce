@@ -1041,6 +1041,33 @@ class ItemQuestionTests(TestCase):
         self.assertContains(page, 'aria-keyshortcuts="Meta+Enter Control+Enter"')
         self.assertContains(page, '<kbd class="key-mac">⌘</kbd><kbd class="key-other">Ctrl</kbd>')
 
+    def test_the_thread_marks_its_newest_message(self):
+        ItemQuestion.objects.create(
+            organization=self.organization,
+            question_id="13683341904",
+            text="Tienen stock?",
+            status="UNANSWERED",
+        )
+        project_question(ItemQuestion.objects.get())
+        conversation = Conversation.objects.get()
+        newest = conversation.messages.order_by("sent_at", "created_at").last()
+        thread = self.client.get(
+            f"/inbox/?conversation={conversation.pk}",
+            headers={"HX-Request": "true", "HX-Target": "thread"},
+        )
+        self.assertContains(
+            thread,
+            f'id="bubbles" data-last="{newest.external_id}" data-count="1"',
+        )
+        empty = Conversation.objects.create(
+            organization=self.organization,
+            channel="meli-postsales",
+            external_id="9",
+            title="Empty",
+        )
+        page = self.client.get(f"/inbox/?conversation={empty.pk}")
+        self.assertContains(page, 'id="bubbles" data-last="" data-count="0"')
+
     def test_an_answered_question_has_no_composer(self):
         ItemQuestion.objects.create(
             organization=self.organization,

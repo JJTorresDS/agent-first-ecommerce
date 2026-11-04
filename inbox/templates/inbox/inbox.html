@@ -13,7 +13,34 @@
     if (open) url.searchParams.set("conversation", open);
     return url.pathname + url.search;
   }
-  var inboxBubbleScroll = 0;
+  // The chat scrolls to the newest message only when one arrives (#bubbles data-last changes)
+  // or another conversation opens. Any other swap puts the reader back where they were.
+  var inboxBubbleBefore = null;
+  function inboxBubbleState() {
+    var thread = document.getElementById("thread");
+    var bubbles = document.getElementById("bubbles");
+    return {
+      conversation: thread ? thread.getAttribute("data-conversation") : null,
+      last: bubbles ? bubbles.getAttribute("data-last") : null,
+      top: bubbles ? bubbles.scrollTop : 0,
+    };
+  }
+  function inboxToBottom(smooth) {
+    var bubbles = document.getElementById("bubbles");
+    if (!bubbles) return;
+    bubbles.scrollTo({ top: bubbles.scrollHeight, behavior: smooth ? "smooth" : "auto" });
+  }
+  function inboxPlaceBubbles() {
+    var before = inboxBubbleBefore;
+    inboxBubbleBefore = null;
+    var now = inboxBubbleState();
+    if (!before || before.conversation !== now.conversation) inboxToBottom(false);
+    else if (before.last !== now.last) inboxToBottom(true);
+    else {
+      var bubbles = document.getElementById("bubbles");
+      if (bubbles) bubbles.scrollTop = before.top;
+    }
+  }
   var inboxLoadingTimer = null;
   function inboxLoading(show) {
     clearTimeout(inboxLoadingTimer);
@@ -86,6 +113,7 @@
       var asked = path.match(/[?&]conversation=([^&#]+)/);
       if (asked && decodeURIComponent(asked[1]) !== open) event.detail.shouldSwap = false;
     }
+    if (target.id === "thread" && event.detail.shouldSwap) inboxBubbleBefore = inboxBubbleState();
   });
   // ⌘+Enter (Mac) or Ctrl+Enter sends; Enter alone is a new line. Swaps replace the
   // composer, so listen on document instead of the textarea.
@@ -112,7 +140,10 @@
   document.body.addEventListener("htmx:afterSwap", function (event) {
     var target = event.detail && event.detail.target;
     if (!target || !target.id) return;
-    if (target.id === "thread") inboxLoading(false);
+    if (target.id === "thread") {
+      inboxLoading(false);
+      inboxPlaceBubbles();
+    }
     // After a send, keep typing where you were. Phones would pop the keyboard, so not there.
     var source = event.detail.requestConfig && event.detail.requestConfig.elt;
     if (target.id === "thread" && source && source.id === "composer" && inboxRefocusComposer) {
@@ -133,15 +164,15 @@
   document.body.addEventListener("htmx:oobBeforeSwap", function (event) {
     var target = event.detail && event.detail.target;
     if (!target || !target.id || target.id.indexOf("conversation-body") !== 0) return;
-    var bubbles = document.getElementById("bubbles");
-    inboxBubbleScroll = bubbles ? bubbles.scrollTop : 0;
+    inboxBubbleBefore = inboxBubbleState();
   });
   document.body.addEventListener("htmx:oobAfterSwap", function (event) {
     var target = event.detail && event.detail.target;
     if (!target || !target.id || target.id.indexOf("conversation-body") !== 0) return;
-    var bubbles = document.getElementById("bubbles");
-    if (bubbles) bubbles.scrollTop = inboxBubbleScroll;
+    inboxPlaceBubbles();
   });
+  // A page load opens on the newest message.
+  document.addEventListener("DOMContentLoaded", function () { inboxToBottom(false); });
   document.body.addEventListener("htmx:afterRequest", function (event) {
     var elt = event.detail && event.detail.elt;
     if (event.detail.failed && elt && elt.id && elt.id.indexOf("conversation-") === 0) inboxLoading(false);

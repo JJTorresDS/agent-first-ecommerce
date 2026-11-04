@@ -124,7 +124,8 @@ def _thread_context(organization, conversation, *, reply_error=False):
     status = ""
     refused = None
     if conversation is not None:
-        messages = conversation.messages.filter(organization=organization)
+        # A list, so the template can read the newest message without another query.
+        messages = list(conversation.messages.filter(organization=organization))
         status = reply_status(conversation)
         can_reply = can_send(conversation)
         reply_limit = reply_limit_for(conversation.channel)
@@ -204,7 +205,6 @@ def inbox(request):
             reply_error=request.GET.get("reply") == "failed",
         ),
     }
-    context["messages"] = list(context["messages"])
     context["list_version"] = _list_version(rows, context)
     if list_poll:
         if request.headers.get("X-Inbox-Version") == context["list_version"]:

@@ -8,9 +8,11 @@
     {% endif %}
   </h1>
   <p class="channel">{{ selected.channel }}</p>
-  <div id="bubbles">
+  {% with newest=messages|last %}
+  <div id="bubbles" data-last="{{ newest.external_id|default:'' }}" data-count="{{ messages|length }}">
     {% for message in messages %}
       <div class="bubble {% if message.direction == 'inbound' %}buyer{% else %}seller{% endif %}">{{ message.body }}{% if message.is_pending %}<time class="sending"><span class="spinner" aria-hidden="true"></span>Sending…</time>{% elif message.sent_label %}<time>{{ message.sent_label }}</time>{% endif %}</div>
     {% endfor %}
   </div>
+  {% endwith %}
 </div>
