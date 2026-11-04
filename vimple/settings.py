@@ -106,6 +106,8 @@ INSTALLED_APPS = [
     "notifications",
     "inbox",
     "meli",
+    "catalog",
+    "purchasing",
 ]
 
 MIDDLEWARE = [

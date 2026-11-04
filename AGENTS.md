@@ -48,6 +48,14 @@ Organization is the tenant. Its UUID does not change. The name can.
 - Each organization's owner or admin enters the parser key in Cashflow settings. It is stored encrypted (meli.tokens encrypt_secret) in CashflowParserSettings.api_key and sent as X-API-Key. Never render it, pre-fill it, log it, or put it in last_run_error.
 - Drive tokens belong to one user, not to the organization. The drive-token view returns only request.user's own token. Sign-in asks only for profile and email; the drive.file scope is added by Connect Google Drive.
 
+## Catalog and purchasing
+
+- catalog.MasterProduct is one row per sellable SKU, unique per organization; family groups variants (50 ml and 100 ml). Core listing fields are columns. Secondary attributes go in attributes, a flat JSON object checked by catalog.validators.validate_attributes. Media lives outside Vimple: only image_url is stored.
+- Channel listings (Mercado Libre, Tiendanube) will be their own models pointing at MasterProduct, not keys in its JSON.
+- purchasing has Supplier, Purchase (one invoice: supplier, date, currency, optional tasks.CashflowMovement) and PurchaseItem (product, quantity, unit_cost). Cost history comes from the lines: MasterProduct.costs_by_supplier.
+- A purchase, its supplier, its receipt and its lines' products are in one organization. Purchase and PurchaseItem refuse anything else in clean() and save(); lines take the purchase's organization.
+- A product with purchases can't be deleted (PROTECT). Archive it with status archived.
+
 ## Tests
 
 - With DATABASE_URL set, manage.py test runs on the remote Neon database and is slow. Run DATABASE_URL= uv run python manage.py test --noinput to use in-memory SQLite.
