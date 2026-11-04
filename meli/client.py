@@ -105,10 +105,12 @@ def _user_id(value):
 
 
 def fetch_message(access_token, message_id):
+    """One post-sale message. Does not mark it read."""
     message = quote(str(message_id), safe="")
+    query = urlencode({"tag": "post_sale", "mark_as_read": "false"})
     return _api_request(
         access_token,
-        f"https://api.mercadolibre.com/messages/{message}",
+        f"https://api.mercadolibre.com/messages/{message}?{query}",
     )
 
 

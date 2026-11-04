@@ -129,16 +129,9 @@ def mercadolibre_webhook(request, secret):
         parsed = None
     if isinstance(parsed, dict):
         _store_object(parsed)
-        try:
-            _load_question_from_notification(parsed)
-        except (OSError, ValueError, InvalidToken):
-            pass
-        try:
-            from .postsale import load_postsale_from_notification
+        from .jobs import dispatch_notification
 
-            load_postsale_from_notification(parsed)
-        except (OSError, ValueError, InvalidToken):
-            pass
+        dispatch_notification(parsed)
     return HttpResponse("ok")
 
 

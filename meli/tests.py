@@ -1151,7 +1151,8 @@ class PostSaleTests(TestCase):
 
         def open_response(request, timeout=15):
             url = request.full_url
-            if url.endswith(f"/messages/{message['id']}"):
+            if url.split("?")[0].endswith(f"/messages/{message['id']}"):
+                self.assertIn("mark_as_read=false", url)
                 return TokenResponse(message)
             if "/messages/packs/" in url:
                 self.assertIn("mark_as_read=false", url)
@@ -1234,7 +1235,7 @@ class PostSaleTests(TestCase):
 
         def open_response(request, timeout=15):
             url = request.full_url
-            if url.endswith("/messages/msg-2"):
+            if url.split("?")[0].endswith("/messages/msg-2"):
                 return TokenResponse(seller_message)
             if "/messages/packs/" in url:
                 return TokenResponse(thread)
@@ -1834,6 +1835,195 @@ class PostSaleTests(TestCase):
         self.assertIn(f'data-conversation="{mine.pk}"', foreign)
         members = self.client.get("/organization/members/")
         self.assertContains(members, 'class="table-scroll"')
+
+    def _bare_message_api(self, message_id, calls):
+        created = timezone.now().isoformat()
+        message = {
+            "id": message_id,
+            "from": {"user_id": 99},
+            "to": {"user_id": 468424240},
+            "text": "Llega mañana?",
+            "message_resources": [{"id": PACK, "name": "packs"}],
+            "message_date": {"created": created},
+        }
+        order = sale_order(PACK, PACK, created, "Willian", "Guido", "Remera")
+
+        def open_response(request, timeout=15):
+            url = request.full_url
+            calls.append(url)
+            if url.split("?")[0].endswith(f"/messages/{message_id}"):
+                return TokenResponse(message)
+            if "/messages/packs/" in url:
+                return TokenResponse(sale_thread("Llega mañana?", message_id=message_id, created=created))
+            if f"/orders/{PACK}" in url:
+                return TokenResponse(order)
+            raise AssertionError(url)
+
+        return open_response
+
+    def test_bare_message_id_webhook_shows_the_chat_on_the_next_poll(self):
+        bare = "01a1a4064bb97f29ad2dcde436332268"
+        before = self.client.get(
+            "/inbox/", headers={"HX-Request": "true", "HX-Target": "chat-list"}
+        )
+        version = re.search(r'data-version="([^"]+)"', before.content.decode()).group(1)
+        calls = []
+        body = json.dumps({**SAMPLE, "_id": "bare-note", "topic": "messages", "resource": bare})
+        with patch("meli.client.urlopen", side_effect=self._bare_message_api(bare, calls)):
+            response = self.client.post(WEBHOOK_URL, data=body, content_type="application/json")
+        self.assertEqual(response.status_code, 200)
+        fetched = [url for url in calls if url.split("?")[0].endswith(f"/messages/{bare}")]
+        self.assertEqual(len(fetched), 1)
+        self.assertIn("mark_as_read=false", fetched[0])
+        self.assertIn("tag=post_sale", fetched[0])
+        conversation = Conversation.objects.get(organization=self.organization, external_id=PACK)
+        self.assertEqual(conversation.messages.get().body, "Llega mañana?")
+        polled = self.client.get(
+            "/inbox/",
+            headers={"HX-Request": "true", "HX-Target": "chat-list", "X-Inbox-Version": version},
+        )
+        self.assertEqual(polled.status_code, 200)
+        self.assertContains(polled, f'id="conversation-{conversation.pk}"')
+
+    def test_bare_message_id_for_another_seller_stays_out(self):
+        bare = "02b2b5175cc08f30be3edef547443379"
+        other = connect_seller(user_id="555")
+        MercadoLibreAccount.objects.filter(organization=other).update(
+            access_token=encrypt_secret("access-2"),
+            refresh_token=encrypt_secret("refresh-2"),
+        )
+        calls = []
+        body = json.dumps(
+            {**SAMPLE, "_id": "other-note", "topic": "messages", "resource": bare, "user_id": 555}
+        )
+        with patch("meli.client.urlopen", side_effect=self._bare_message_api(bare, calls)):
+            self.client.post(WEBHOOK_URL, data=body, content_type="application/json")
+        self.assertFalse(Conversation.objects.filter(organization=self.organization).exists())
+        hidden = Conversation.objects.get(organization=other)
+        page = self.client.get("/inbox/")
+        self.assertNotContains(page, str(hidden.pk))
+        self.assertNotContains(page, "Llega mañana?")
+        polled = self.client.get("/inbox/", headers={"HX-Request": "true", "HX-Target": "chat-list"})
+        self.assertNotContains(polled, str(hidden.pk))
+
+    def test_webhook_queues_the_load_and_answers_without_calling_mercadolibre(self):
+        from meli.jobs import NOTIFICATION_QUEUE, run_next_notification_job
+
+        bare = "03c3c6286dd19a41cf4fef0658554480"
+        fake = _FakeRedis()
+        body = json.dumps({**SAMPLE, "_id": "queued-note", "topic": "messages", "resource": bare})
+        with (
+            override_settings(REDIS_URL="redis://queue-test"),
+            patch("meli.jobs._under_test", return_value=False),
+            patch("meli.jobs._client", return_value=fake),
+            patch("meli.client.urlopen", side_effect=AssertionError("network")),
+        ):
+            response = self.client.post(WEBHOOK_URL, data=body, content_type="application/json")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(fake.lists[NOTIFICATION_QUEUE]), 1)
+        job = json.loads(fake.lists[NOTIFICATION_QUEUE][0])
+        self.assertEqual(job["resource"], bare)
+        self.assertFalse(Conversation.objects.exists())
+        calls = []
+        with (
+            patch("meli.jobs._client", return_value=fake),
+            patch("meli.client.urlopen", side_effect=self._bare_message_api(bare, calls)),
+        ):
+            self.assertTrue(run_next_notification_job(block_seconds=0))
+        self.assertTrue(
+            Conversation.objects.filter(organization=self.organization, external_id=PACK).exists()
+        )
+        self.assertEqual(fake.lists[NOTIFICATION_QUEUE], [])
+
+    def test_refresh_loads_a_missed_bare_notification_from_the_last_two_days(self):
+        from meli.jobs import refresh_unanswered
+
+        bare = "04d4d7397ee20b52d05f0f1769665591"
+        old = "05e5e8408ff31c63e16f1f2870776602"
+        MercadoLibreNotification.objects.create(
+            organization=self.organization,
+            notification_id="missed",
+            topic="messages",
+            resource=bare,
+            user_id="468424240",
+            payload={},
+        )
+        stale = MercadoLibreNotification.objects.create(
+            organization=self.organization,
+            notification_id="stale",
+            topic="messages",
+            resource=old,
+            user_id="468424240",
+            payload={},
+        )
+        MercadoLibreNotification.objects.filter(pk=stale.pk).update(
+            created_at=timezone.now() - timedelta(days=3)
+        )
+        calls = []
+        with patch("meli.client.urlopen", side_effect=self._bare_message_api(bare, calls)):
+            refresh_unanswered(self.organization.pk)
+        self.assertTrue(
+            Conversation.objects.filter(organization=self.organization, external_id=PACK).exists()
+        )
+        self.assertFalse(any(old in url for url in calls))
+
+    def test_post_sale_header_links_to_the_sale_page(self):
+        SellerProfile.objects.create(organization=self.organization, meli_user_id="468424240", site_id="MLA")
+        calls = []
+        bare = "06f6f9519aa42d74f1a0a2a3981887713"
+        body = json.dumps({**SAMPLE, "_id": "link-note", "topic": "messages", "resource": bare})
+        with patch("meli.client.urlopen", side_effect=self._bare_message_api(bare, calls)):
+            self.client.post(WEBHOOK_URL, data=body, content_type="application/json")
+        conversation = Conversation.objects.get(organization=self.organization, external_id=PACK)
+        link = f"https://www.mercadolibre.com.ar/ventas/{PACK}/detalle"
+        self.assertEqual(conversation.link_url, link)
+        self.assertNotIn("mensajes", link)
+        page = self.client.get(f"/inbox/?conversation={conversation.pk}")
+        self.assertContains(page, f'<a href="{link}" target="_blank" rel="noopener">')
+
+    def test_post_sale_without_a_seller_profile_has_no_link(self):
+        from meli.postsale import sale_link
+
+        self.assertEqual(sale_link("", PACK), "")
+        self.assertEqual(sale_link("XXX", PACK), "")
+        self.assertEqual(sale_link("MLA", "not-a-number"), "")
+        calls = []
+        bare = "07a7a0620bb53e85a2b1b3b4092998824"
+        body = json.dumps({**SAMPLE, "_id": "nolink-note", "topic": "messages", "resource": bare})
+        with patch("meli.client.urlopen", side_effect=self._bare_message_api(bare, calls)):
+            self.client.post(WEBHOOK_URL, data=body, content_type="application/json")
+        conversation = Conversation.objects.get(organization=self.organization, external_id=PACK)
+        self.assertEqual(conversation.link_url, "")
+
+    def test_sale_link_migration_uses_each_organizations_own_site(self):
+        import importlib
+
+        from django.apps import apps
+
+        migration = importlib.import_module("meli.migrations.0007_postsale_sale_links")
+        SellerProfile.objects.create(organization=self.organization, meli_user_id="468424240", site_id="MLA")
+        mine = Conversation.objects.create(
+            organization=self.organization, channel="meli-postsales", external_id=PACK, title="Mine"
+        )
+        other = Organization.objects.create(name="Other")
+        SellerProfile.objects.create(organization=other, meli_user_id="555", site_id="MLM")
+        theirs = Conversation.objects.create(
+            organization=other, channel="meli-postsales", external_id=TAKEN, title="Theirs"
+        )
+        kept = Conversation.objects.create(
+            organization=other,
+            channel="meli-postsales",
+            external_id=UNREAD,
+            title="Kept",
+            link_url="https://example.com/kept",
+        )
+        migration.link_sales(apps, None)
+        mine.refresh_from_db()
+        theirs.refresh_from_db()
+        kept.refresh_from_db()
+        self.assertEqual(mine.link_url, f"https://www.mercadolibre.com.ar/ventas/{PACK}/detalle")
+        self.assertEqual(theirs.link_url, f"https://www.mercadolibre.com.mx/ventas/{TAKEN}/detalle")
+        self.assertEqual(kept.link_url, "https://example.com/kept")
 
     def test_pack_keeps_every_page_of_the_conversation(self):
         from meli.postsale import load_pack

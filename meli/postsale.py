@@ -14,13 +14,27 @@ from .client import (
     fetch_recent_orders,
     fetch_unread_post_sale,
 )
-from .models import MercadoLibreAccount, MercadoLibreNotification
+from .models import MercadoLibreAccount, MercadoLibreNotification, SellerProfile
 
 CHANNEL = Channel.MELI_POSTSALES
 WINDOW = timedelta(days=7)
 _OLDEST = datetime.min.replace(tzinfo=dt_timezone.utc)
 _PACK_RESOURCE = re.compile(r"/packs/([^/]+)")
 _MESSAGE_RESOURCE = re.compile(r"/messages/([^/]+)")
+# Mercado Libre's messages webhook sends the bare message id as the resource.
+_BARE_MESSAGE = re.compile(r"[A-Za-z0-9_-]{8,128}")
+CATCH_UP_WINDOW = timedelta(days=2)
+CATCH_UP_LIMIT = 20
+# The seller's sale page. The messages page would mark the buyer's message read.
+SITE_DOMAINS = {
+    "MLA": "com.ar",
+    "MLM": "com.mx",
+    "MLB": "com.br",
+    "MLC": "cl",
+    "MCO": "com.co",
+    "MLU": "com.uy",
+    "MPE": "com.pe",
+}
 
 
 def project_pack(organization, seller_id, pack_id, thread, order=None):
@@ -39,7 +53,7 @@ def project_pack(organization, seller_id, pack_id, thread, order=None):
     active = _is_active(thread.get("conversation_status"))
     needs_reply = active and latest["direction"] == Message.Direction.INBOUND
     title = _sale_title(order) or pack_id
-    link = _link(order)
+    link = _link(order) or _sale_link(organization, pack_id)
     existing = Conversation.objects.filter(
         organization=organization,
         channel=CHANNEL,
@@ -108,11 +122,14 @@ def refresh_postsale(organization):
     """Project stored message notifications that never became a chat."""
     if organization is None:
         return
-    notifications = MercadoLibreNotification.objects.filter(
-        organization=organization,
-        topic="messages",
+    notifications = list(
+        MercadoLibreNotification.objects.filter(
+            organization=organization,
+            topic="messages",
+            created_at__gte=timezone.now() - CATCH_UP_WINDOW,
+        ).order_by("-created_at")[:CATCH_UP_LIMIT]
     )
-    if not notifications.exists():
+    if not notifications:
         return
     account = _account_for(organization)
     if account is None:
@@ -336,6 +353,23 @@ def _link(order):
     return ""
 
 
+def sale_link(site_id, sale_id):
+    domain = SITE_DOMAINS.get(_ident(site_id).upper())
+    sale_id = _ident(sale_id)
+    if not domain or not sale_id.isdigit():
+        return ""
+    return f"https://www.mercadolibre.{domain}/ventas/{sale_id}/detalle"
+
+
+def _sale_link(organization, sale_id):
+    site_id = (
+        SellerProfile.objects.filter(organization=organization)
+        .values_list("site_id", flat=True)
+        .first()
+    )
+    return sale_link(site_id, sale_id)
+
+
 def _is_active(status):
     if not isinstance(status, dict):
         return True
@@ -401,8 +435,11 @@ def _pack_id(resource):
 
 
 def _message_id(resource):
-    match = _MESSAGE_RESOURCE.fullmatch(str(resource or ""))
-    return match.group(1) if match else ""
+    resource = str(resource or "")
+    match = _MESSAGE_RESOURCE.fullmatch(resource)
+    if match:
+        return match.group(1)
+    return resource if _BARE_MESSAGE.fullmatch(resource) else ""
 
 
 def _party_id(message, key):

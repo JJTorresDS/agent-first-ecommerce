@@ -13,6 +13,8 @@ logger = logging.getLogger(__name__)
 QUEUE = "vimple:postsale:queue"
 REPLY_QUEUE = "vimple:reply:queue"
 REFRESH_QUEUE = "vimple:refresh:queue"
+NOTIFICATION_QUEUE = "vimple:notification:queue"
+NOTIFICATION_TOPICS = {"questions", "messages"}
 ACTIVE_TTL = 30 * 60
 DONE_TTL = 2 * 60
 REFRESH_COOLDOWN = 60
@@ -375,12 +377,88 @@ def refresh_unanswered(organization_id):
                 conversation.channel,
                 conversation.external_id,
             )
+    from .postsale import refresh_postsale
+
+    try:
+        refresh_postsale(organization)
+    except (OSError, ValueError, InvalidToken):
+        pass
+    except Exception:
+        logger.exception("Post-sale catch-up failed for %s", organization_id)
+
+
+def dispatch_notification(parsed):
+    """Load what a webhook points at without making Mercado Libre wait.
+
+    manage.py test runs it inline. Without Redis a daemon thread runs it.
+    If Redis fails the load runs inline, so the message is not lost.
+    """
+    if not isinstance(parsed, dict) or parsed.get("topic") not in NOTIFICATION_TOPICS:
+        return
+    job = {
+        "topic": parsed.get("topic"),
+        "resource": parsed.get("resource"),
+        "user_id": parsed.get("user_id"),
+    }
+    if _under_test():
+        run_notification_job(job)
+        return
+    if postsale_queue_enabled():
+        try:
+            _client().lpush(NOTIFICATION_QUEUE, json.dumps(job))
+            return
+        except Exception:
+            logger.exception("Could not queue the notification")
+        run_notification_job(job)
+        return
+    threading.Thread(
+        target=run_notification_job,
+        args=(job,),
+        name="meli-notification",
+        daemon=True,
+    ).start()
+
+
+def run_next_notification_job(block_seconds=BLOCK_SECONDS):
+    """Run one queued notification. Returns False when the list is empty."""
+    item = _client().brpop(NOTIFICATION_QUEUE, timeout=block_seconds)
+    if not item:
+        return False
+    _queue_name, payload = item
+    try:
+        job = json.loads(payload)
+    except ValueError:
+        logger.exception("Notification queue item was not JSON")
+        return True
+    run_notification_job(job)
+    return True
+
+
+def run_notification_job(job):
+    from cryptography.fernet import InvalidToken
+
+    from .postsale import load_postsale_from_notification
+    from .views import _load_question_from_notification
+
+    close_old_connections()
+    try:
+        if job.get("topic") == "questions":
+            _load_question_from_notification(job)
+        elif job.get("topic") == "messages":
+            load_postsale_from_notification(job)
+    except (OSError, ValueError, InvalidToken):
+        pass
+    except Exception:
+        logger.exception("Notification load failed for %s", job.get("resource"))
+    finally:
+        close_old_connections()
 
 
 def _worker_loop():
     while True:
         try:
             run_next_postsale_job()
+            run_next_notification_job(block_seconds=0)
             run_next_reply_job(block_seconds=0)
             run_next_refresh_job(block_seconds=0)
         except Exception:
