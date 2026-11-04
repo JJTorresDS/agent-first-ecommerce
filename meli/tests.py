@@ -1783,6 +1783,58 @@ class PostSaleTests(TestCase):
         self.assertEqual(menu.status_code, 200)
         self.assertContains(menu, "ada@example.com")
 
+    def test_phone_layout_shows_one_pane_and_keeps_it_across_polls(self):
+        now = timezone.now()
+        mine = Conversation.objects.create(
+            organization=self.organization,
+            channel="meli-postsales",
+            external_id=PACK,
+            title="Willian sale",
+            needs_reply=True,
+            last_message_at=now,
+        )
+        other = Organization.objects.create(name="Other")
+        hidden = Conversation.objects.create(
+            organization=other,
+            channel="meli-postsales",
+            external_id="hidden-pack",
+            title="Hidden sale",
+            needs_reply=True,
+            last_message_at=now,
+        )
+        listing = self.client.get("/inbox/").content.decode()
+        self.assertIn('data-view="list"', listing)
+        self.assertIn('class="menu-toggle"', listing)
+        self.assertIn('class="nav-backdrop"', listing)
+        self.assertIn("@media (max-width: 768px)", listing)
+        self.assertIn("@media (hover: hover)", listing)
+        opened = self.client.get(f"/inbox/?conversation={mine.pk}").content.decode()
+        self.assertIn('data-view="thread"', opened)
+        self.assertIn('class="thread-back" onclick="inboxShowList()"', opened)
+        self.assertIn('inbox.setAttribute("data-view", "thread")', opened)
+        self.assertIn("htmx:historyRestore", opened)
+        polled = self.client.get(
+            f"/inbox/?conversation={mine.pk}",
+            headers={"HX-Request": "true", "HX-Target": "chat-list"},
+        ).content.decode()
+        self.assertNotIn("data-view", polled)
+        self.assertNotIn('id="inbox"', polled)
+        thread = self.client.get(
+            f"/inbox/?conversation={mine.pk}",
+            headers={"HX-Request": "true", "HX-Target": "thread"},
+        ).content.decode()
+        self.assertNotIn("data-view", thread)
+        self.assertIn("thread-back", thread)
+        foreign = self.client.get(f"/inbox/?conversation={hidden.pk}").content.decode()
+        self.assertNotIn("Hidden sale", foreign)
+        self.assertNotIn(f'id="conversation-{hidden.pk}"', foreign)
+        self.assertNotIn(f'id="conversation-body-{hidden.pk}"', foreign)
+        self.assertNotIn(f'data-open="{hidden.pk}"', foreign)
+        self.assertIn(f'data-open="{mine.pk}"', foreign)
+        self.assertIn(f'data-conversation="{mine.pk}"', foreign)
+        members = self.client.get("/organization/members/")
+        self.assertContains(members, 'class="table-scroll"')
+
     def test_pack_keeps_every_page_of_the_conversation(self):
         from meli.postsale import load_pack
 

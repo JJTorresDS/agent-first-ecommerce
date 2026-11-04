@@ -18,6 +18,7 @@ Organization is the tenant. Its UUID does not change. The name can.
 - Inbox htmx requests return partials: _list.html for the list poll, which also carries the open conversation body out of band, and _thread.html for a thread. They set request.inbox_partial so the nav context processor runs no queries. Do not render inbox.html for a poll.
 - The list poll sends X-Inbox-Version, which is #chat-list data-version, and the view answers 204 when _list_version is unchanged. Add anything new the list or open conversation shows to _list_version, or polls will not pick it up. The poll pauses while the tab is hidden.
 - A #chat-list swap replaces the scrolling aside. Restore its scrollTop after the swap. Only a click moves a row to the top.
+- On phones (max-width 768px) the inbox shows one pane at a time, chosen by #inbox data-view (list or thread). A row click and inboxShowList set it in the browser, so no request may replace #inbox. Check layout changes at 390px as well as on desktop.
 - Every query and Redis call crosses the network to Neon or Upstash. Keep the Postgres pool and the shared Redis client, and count queries when adding to an inbox request.
 - When a UI fix does not hold, find where the wrong value first appears before adding another guard. Log the value read and the value expected side by side.
 - Remove debug logging, such as #region agent log blocks and .cursor/debug-*.log writers, before finishing.

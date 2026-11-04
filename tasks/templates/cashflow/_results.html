@@ -2,7 +2,9 @@
   <p>
     <a href="{% url 'cashflow_csv' %}?{{ filter_query }}">Export CSV</a>
   </p>
+  <div class="table-scroll">
   {% include "cashflow/_table.html" %}
+  </div>
   <nav class="pager" aria-label="Pages">
     {% if page_obj.has_previous %}
       <a

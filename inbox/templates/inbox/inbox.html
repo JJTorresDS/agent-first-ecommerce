@@ -37,10 +37,21 @@
   function inboxSelectRow(row) {
     var open = row.id.replace("conversation-", "");
     var inbox = document.getElementById("inbox");
-    if (inbox) inbox.setAttribute("data-open", open);
+    if (inbox) {
+      inbox.setAttribute("data-open", open);
+      inbox.setAttribute("data-view", "thread");
+    }
     inboxMarkActive(open, true);
     var thread = document.getElementById("thread");
     if (!thread || thread.getAttribute("data-conversation") !== open) inboxLoading(true);
+  }
+  // Phones show one pane at a time. Going back only hides the thread, so the list keeps its scroll.
+  function inboxShowList() {
+    var inbox = document.getElementById("inbox");
+    if (inbox) inbox.setAttribute("data-view", "list");
+    var url = new URL(window.location.href);
+    url.searchParams.delete("conversation");
+    history.replaceState(history.state, "", url.pathname + url.search);
   }
   // outerHTML swaps leave event.detail.target pointing at the removed element,
   // so always read the live #thread and #chat-list.
@@ -104,8 +115,15 @@
     if (event.detail.failed && elt && elt.id && elt.id.indexOf("conversation-") === 0) inboxLoading(false);
   });
   document.body.addEventListener("htmx:sendError", function () { inboxLoading(false); });
+  // Back restores a snapshot taken after the click, so read the pane from the URL.
+  document.body.addEventListener("htmx:historyRestore", function () {
+    var inbox = document.getElementById("inbox");
+    if (!inbox) return;
+    var open = new URL(window.location.href).searchParams.get("conversation");
+    inbox.setAttribute("data-view", open ? "thread" : "list");
+  });
 </script>
-<div id="inbox"{% if selected %} data-open="{{ selected.id }}"{% endif %}>
+<div id="inbox"{% if selected %} data-open="{{ selected.id }}"{% endif %} data-view="{% if request.GET.conversation %}thread{% else %}list{% endif %}">
   <div id="inbox-status"{% if sync_pending %} hx-get="{% querystring sync=None %}" hx-trigger="every 3s" hx-select="#inbox-status" hx-target="#inbox-status" hx-swap="outerHTML"{% endif %}>
     {% if sync_pending %}
       <p class="muted">Post-sale messages are loading.</p>
@@ -123,19 +141,21 @@
       <p class="muted">{% if selected.channel == "meli-postsales" %}Post-sale messages loaded.{% else %}Open questions loaded.{% endif %}</p>
     {% endif %}
   </div>
-  {% for action in list_actions %}
-    <form class="sync" method="post" action="{{ action.url }}">
-      {% csrf_token %}
-      <button class="primary" type="submit">{{ action.label }}</button>
-    </form>
-  {% endfor %}
-  <p class="muted">
-    {% if show_older %}
-      <a href="{% querystring since=None conversation=None reply=None sync=None %}" hx-get="{% querystring since=None conversation=None reply=None sync=None %}" hx-target="#chat-list" hx-select="#chat-list" hx-swap="outerHTML" hx-push-url="true" hx-on:click="var inbox = document.getElementById('inbox'); if (inbox) { inbox.removeAttribute('data-open'); }">Last 7 days</a>
-    {% else %}
-      <a href="{% querystring since="all" conversation=None reply=None sync=None %}" hx-get="{% querystring since="all" conversation=None reply=None sync=None %}" hx-target="#chat-list" hx-select="#chat-list" hx-swap="outerHTML" hx-push-url="true" hx-on:click="var inbox = document.getElementById('inbox'); if (inbox) { inbox.removeAttribute('data-open'); }">Show older</a>
-    {% endif %}
-  </p>
+  <div class="inbox-tools">
+    {% for action in list_actions %}
+      <form class="sync" method="post" action="{{ action.url }}">
+        {% csrf_token %}
+        <button class="primary" type="submit">{{ action.label }}</button>
+      </form>
+    {% endfor %}
+    <p class="muted">
+      {% if show_older %}
+        <a href="{% querystring since=None conversation=None reply=None sync=None %}" hx-get="{% querystring since=None conversation=None reply=None sync=None %}" hx-target="#chat-list" hx-select="#chat-list" hx-swap="outerHTML" hx-push-url="true" hx-on:click="var inbox = document.getElementById('inbox'); if (inbox) { inbox.removeAttribute('data-open'); }">Last 7 days</a>
+      {% else %}
+        <a href="{% querystring since="all" conversation=None reply=None sync=None %}" hx-get="{% querystring since="all" conversation=None reply=None sync=None %}" hx-target="#chat-list" hx-select="#chat-list" hx-swap="outerHTML" hx-push-url="true" hx-on:click="var inbox = document.getElementById('inbox'); if (inbox) { inbox.removeAttribute('data-open'); }">Show older</a>
+      {% endif %}
+    </p>
+  </div>
   <div class="chat">
     {% include "inbox/_list.html" %}
     {% include "inbox/_thread.html" %}
