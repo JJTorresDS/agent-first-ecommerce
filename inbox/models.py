@@ -76,6 +76,9 @@ class Message(TenantModel):
     def __str__(self):
         return self.external_id
 
+    def is_pending(self):
+        return self.external_id == "pending"
+
     def sent_label(self):
         if self.sent_at is None:
             return ""

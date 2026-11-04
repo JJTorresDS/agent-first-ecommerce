@@ -83,6 +83,10 @@
     if (target.id === "thread" && from && from.id && from.id.indexOf("conversation-") === 0 && from.id !== "conversation-" + open) {
       event.detail.shouldSwap = false;
     }
+    // The "Sending…" poll of a thread the user has left.
+    if (target.id === "thread" && from && from.id === "thread" && from.getAttribute("data-conversation") !== open) {
+      event.detail.shouldSwap = false;
+    }
   });
   document.body.addEventListener("htmx:afterSwap", function (event) {
     var target = event.detail && event.detail.target;

@@ -3,7 +3,8 @@ import re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from unittest.mock import patch
-from urllib.error import URLError
+from io import BytesIO
+from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlparse
 
 from django.contrib.auth import get_user_model
@@ -753,7 +754,9 @@ class ItemQuestionTests(TestCase):
             self.assertContains(response, 'hx-trigger="every 2s"')
             self.assertContains(response, 'hx-swap-oob="outerHTML"')
             self.assertNotContains(response, 'id="chat-list"')
-            self.assertNotContains(response, "Write a reply")
+            self.assertContains(response, 'data-sending="true"')
+            self.assertContains(response, "Sending…")
+            self.assertContains(response, "poll=sending")
             self.assertEqual(opened.call_count, 0)
             queued = json.loads(fake.lists[REPLY_QUEUE][0])
             self.assertEqual(queued["organization_id"], str(self.organization.pk))
@@ -997,8 +1000,46 @@ class ItemQuestionTests(TestCase):
         self.assertEqual(question.answer_text, "")
         self.assertFalse(conversation.messages.filter(direction=Message.Direction.OUTBOUND).exists())
         page = self.client.get(response.url)
-        self.assertContains(page, "The answer could not be posted.")
+        self.assertContains(page, "Mercado Libre could not be reached. Try again.")
+        self.assertContains(page, '<blockquote class="unsent">Si hay</blockquote>')
         self.assertContains(page, "Write a reply")
+
+    def test_mercadolibre_refusal_of_an_answer_is_shown(self):
+        ItemQuestion.objects.create(
+            organization=self.organization,
+            question_id="13683341904",
+            text="Tienen stock?",
+            status="UNANSWERED",
+        )
+        project_question(ItemQuestion.objects.get())
+        conversation = Conversation.objects.get()
+
+        def open_response(request, timeout=15):
+            if request.full_url.endswith("/answers"):
+                raise refused(400, "", message="Question already answered")
+            return question_api(request, timeout)
+
+        with patch("meli.client.urlopen", side_effect=open_response):
+            self.client.post(f"/inbox/{conversation.pk}/reply/", {"text": "Si hay"})
+        self.assertEqual(ItemQuestion.objects.get().answer_text, "")
+        page = self.client.get(f"/inbox/?conversation={conversation.pk}")
+        self.assertContains(
+            page,
+            "Mercado Libre did not accept the message: Question already answered",
+        )
+
+    def test_an_answered_question_has_no_composer(self):
+        ItemQuestion.objects.create(
+            organization=self.organization,
+            question_id="13683341904",
+            text="Tienen stock?",
+            status="ANSWERED",
+            answer_text="Si hay",
+        )
+        project_question(ItemQuestion.objects.get())
+        conversation = Conversation.objects.get()
+        page = self.client.get(f"/inbox/?conversation={conversation.pk}")
+        self.assertNotContains(page, "Write a reply")
 
     def test_another_organization_cannot_open_or_reply(self):
         ItemQuestion.objects.create(
@@ -1117,6 +1158,20 @@ def sale_order(order_id, pack_id, created, first, last, title):
     }
 
 
+def refused(code, cause, message="Forbidden"):
+    """An HTTPError carrying a Mercado Libre error body."""
+    body = {"message": message, "error": "forbidden", "status": code, "cause": []}
+    if cause:
+        body["cause"] = [{"code": "x", "message": cause}]
+    return HTTPError(
+        "https://api.mercadolibre.com/",
+        code,
+        "refused",
+        {},
+        BytesIO(json.dumps(body).encode()),
+    )
+
+
 class _FakeRedis:
     def __init__(self):
         self.values = {}
@@ -1128,6 +1183,9 @@ class _FakeRedis:
     def set(self, key, value, ex=None):
         self.values[key] = value
         return True
+
+    def delete(self, key):
+        return int(self.values.pop(key, None) is not None)
 
     def lpush(self, key, value):
         self.lists.setdefault(key, []).insert(0, value)
@@ -1540,7 +1598,15 @@ class PostSaleTests(TestCase):
         self.assertEqual(outbound.body, "Mide 67x60cm")
         page = self.client.get(f"/inbox/?conversation={conversation.pk}")
         self.assertContains(page, "Mide 67x60cm")
-        self.assertNotContains(page, "Write a reply")
+        # A post-sale chat stays open; Mercado Libre decides what it accepts.
+        self.assertContains(page, "Write a reply")
+        with patch("meli.client.urlopen", side_effect=open_response):
+            self.client.post(
+                f"/inbox/{conversation.pk}/reply/",
+                {"text": "Te paso mas fotos"},
+            )
+        posts = [url for url in calls if url.split("?")[0].endswith(f"/sellers/468424240")]
+        self.assertGreaterEqual(len(posts), 2)
 
     def test_failed_reply_leaves_the_thread_unanswered(self):
         now = timezone.now()
@@ -1575,8 +1641,62 @@ class PostSaleTests(TestCase):
             conversation.messages.filter(direction=Message.Direction.OUTBOUND).exists()
         )
         page = self.client.get(response.url)
-        self.assertContains(page, "The answer could not be posted.")
+        self.assertContains(page, "Mercado Libre could not be reached. Try again.")
         self.assertContains(page, "Write a reply")
+
+    def test_mercadolibre_refusal_is_shown_and_the_chat_stays_open(self):
+        now = timezone.now()
+        conversation = Conversation.objects.create(
+            organization=self.organization,
+            channel="meli-postsales",
+            external_id=PACK,
+            title="Willian Guido",
+            needs_reply=True,
+            last_message_at=now,
+        )
+
+        def open_response(request, timeout=15):
+            if getattr(request, "data", None):
+                raise refused(403, "Conversation closed")
+            if "/messages/packs/" in request.full_url:
+                return TokenResponse(sale_thread("Necesito medidas?", created=now.isoformat()))
+            raise AssertionError(request.full_url)
+
+        with patch("meli.client.urlopen", side_effect=open_response):
+            self.client.post(f"/inbox/{conversation.pk}/reply/", {"text": "Mide 67x60cm"})
+        self.assertFalse(conversation.messages.filter(external_id="pending").exists())
+        page = self.client.get(f"/inbox/?conversation={conversation.pk}")
+        self.assertContains(
+            page,
+            "Mercado Libre did not accept the message: Conversation closed",
+        )
+        self.assertContains(page, '<blockquote class="unsent">Mide 67x60cm</blockquote>')
+        self.assertContains(page, "Write a reply")
+        self.assertNotContains(page, 'data-sending="true"')
+        self.assertNotContains(page, "access-1")
+        before = page.context["list_version"]
+
+        stranger = User.objects.create_user("eve", email="eve@example.com")
+        other = Organization.objects.create(name="Other")
+        Membership.objects.create(user=stranger, organization=other, role=Membership.Role.OWNER)
+        self.client.force_login(stranger)
+        hidden = self.client.get(
+            f"/inbox/?conversation={conversation.pk}",
+            HTTP_HX_REQUEST="true",
+            HTTP_HX_TARGET="thread",
+        )
+        self.assertNotContains(hidden, "Conversation closed")
+        self.assertNotContains(hidden, "Mide 67x60cm")
+        blocked = self.client.post(f"/inbox/{conversation.pk}/reply/", {"text": "x"})
+        self.assertEqual(blocked.status_code, 404)
+
+        self.client.force_login(self.user)
+        from meli.jobs import clear_reply_error
+
+        clear_reply_error(conversation)
+        after = self.client.get(f"/inbox/?conversation={conversation.pk}")
+        self.assertNotContains(after, "Conversation closed")
+        self.assertNotEqual(after.context["list_version"], before)
 
     def test_reply_over_350_characters_is_rejected(self):
         conversation = Conversation.objects.create(

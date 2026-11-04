@@ -17,10 +17,12 @@ NOTIFICATION_QUEUE = "vimple:notification:queue"
 NOTIFICATION_TOPICS = {"questions", "messages"}
 ACTIVE_TTL = 30 * 60
 DONE_TTL = 2 * 60
+ERROR_TTL = 10 * 60
 REFRESH_COOLDOWN = 60
 REFRESH_LIMIT = 20
 BLOCK_SECONDS = 5
 _local_reply_status = {}
+_local_reply_error = {}
 _local_refresh = {}
 
 _clients = {}
@@ -40,6 +42,10 @@ def status_key(organization_id):
 
 def reply_status_key(conversation_id):
     return f"vimple:reply:status:{conversation_id}"
+
+
+def reply_error_key(conversation_id):
+    return f"vimple:reply:error:{conversation_id}"
 
 
 def refresh_status_key(organization_id):
@@ -124,6 +130,41 @@ def reply_status(conversation):
             logger.exception("Could not read the reply status")
             return ""
     return _local_reply_status.get(str(conversation.pk), "")
+
+
+def reply_error(conversation):
+    """{"message", "text"} for the last reply the channel refused, or None."""
+    if conversation is None:
+        return None
+    if postsale_queue_enabled():
+        try:
+            raw = _client().get(reply_error_key(conversation.pk))
+        except Exception:
+            logger.exception("Could not read the reply error")
+            return None
+        try:
+            return json.loads(raw) if raw else None
+        except ValueError:
+            return None
+    return _local_reply_error.get(str(conversation.pk))
+
+
+def _set_reply_error(conversation_id, message, text):
+    error = {"message": message or "", "text": text or ""}
+    if postsale_queue_enabled():
+        _client().set(reply_error_key(conversation_id), json.dumps(error), ex=ERROR_TTL)
+        return
+    _local_reply_error[str(conversation_id)] = error
+
+
+def clear_reply_error(conversation):
+    if postsale_queue_enabled():
+        try:
+            _client().delete(reply_error_key(conversation.pk))
+        except Exception:
+            logger.exception("Could not clear the reply error")
+        return
+    _local_reply_error.pop(str(conversation.pk), None)
 
 
 def _set_reply_status(conversation_id, value):
@@ -218,8 +259,9 @@ def run_reply_job(organization_id, conversation_id):
         try:
             if send is not None:
                 send(conversation, pending.body)
-        except ReplyFailed:
+        except ReplyFailed as error:
             _drop_pending(conversation.pk)
+            _set_reply_error(conversation_id, error.message, pending.body)
             _set_reply_status(conversation_id, "failed")
         else:
             if Message.objects.filter(
@@ -227,6 +269,7 @@ def run_reply_job(organization_id, conversation_id):
                 external_id="pending",
             ).exists():
                 _drop_pending(conversation.pk)
+                _set_reply_error(conversation_id, "", pending.body)
                 _set_reply_status(conversation_id, "failed")
             else:
                 _set_reply_status(conversation_id, "ok")

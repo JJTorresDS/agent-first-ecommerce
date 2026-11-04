@@ -13,7 +13,7 @@ from django.views.decorators.http import require_POST
 
 from accounts.models import membership_for
 
-from .channels import list_actions, reply_limit_for, sender_for
+from .channels import can_send, list_actions, reply_limit_for
 from .models import Conversation, Message
 
 
@@ -56,15 +56,15 @@ def _save_pending(conversation, text):
 
 
 def send_and_redirect(request, conversation):
-    from meli.jobs import dispatch_reply, reply_status
+    from meli.jobs import clear_reply_error, dispatch_reply, reply_status
 
     text = (request.POST.get("text") or "").strip()
-    send = sender_for(conversation.channel)
     failed = False
-    if conversation.needs_reply and send is not None:
+    if can_send(conversation):
         if not text or len(text) > reply_limit_for(conversation.channel):
             failed = True
         elif reply_status(conversation) not in {"queued", "running"}:
+            clear_reply_error(conversation)
             _save_pending(conversation, text)
             failed = dispatch_reply(conversation) == "failed"
             conversation.refresh_from_db()
@@ -107,32 +107,37 @@ def _list_version(rows, context):
     parts = [str(selected.pk) if selected else ""]
     parts += [f"{row.pk}:{row.updated_at.isoformat()}:{row.needs_reply}:{row.preview}" for row in rows]
     parts += [f"{message.pk}:{message.updated_at.isoformat()}" for message in context["messages"]]
-    parts += [str(context[key]) for key in ("can_reply", "reply_pending", "reply_error")]
+    parts += [
+        str(context[key])
+        for key in ("can_reply", "reply_pending", "reply_error", "reply_error_message")
+    ]
     return hashlib.sha1("\n".join(parts).encode()).hexdigest()[:16]
 
 
 def _thread_context(organization, conversation, *, reply_error=False):
+    from meli.jobs import reply_error as stored_reply_error
     from meli.jobs import reply_status
 
     messages = []
     can_reply = False
     reply_limit = 2000
     status = ""
+    refused = None
     if conversation is not None:
         messages = conversation.messages.filter(organization=organization)
         status = reply_status(conversation)
-        can_reply = (
-            conversation.needs_reply
-            and sender_for(conversation.channel) is not None
-            and status not in {"queued", "running"}
-        )
+        can_reply = can_send(conversation)
         reply_limit = reply_limit_for(conversation.channel)
+        if status not in {"queued", "running"}:
+            refused = stored_reply_error(conversation)
     return {
         "selected": conversation,
         "messages": messages,
         "can_reply": can_reply,
         "reply_limit": reply_limit,
-        "reply_error": reply_error or status == "failed",
+        "reply_error": reply_error or status == "failed" or refused is not None,
+        "reply_error_message": (refused or {}).get("message", ""),
+        "reply_error_text": (refused or {}).get("text", ""),
         "reply_pending": status in {"queued", "running"},
     }
 
@@ -179,6 +184,8 @@ def inbox(request):
         selected = _selected(conversations, selected_id) or conversations.first()
         context = {
             "oob": True,
+            # The "Sending…" poll keeps a draft typed meanwhile. A row click gets a fresh composer.
+            "preserve_composer": request.GET.get("poll") == "sending",
             **_thread_context(
                 organization,
                 selected,

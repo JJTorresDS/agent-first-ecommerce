@@ -4,8 +4,20 @@ from cryptography.fernet import InvalidToken
 
 from inbox.channels import ReplyFailed
 
-from .client import post_answer
+from .client import MercadoLibreError, post_answer
 from .models import ItemQuestion
+
+UNREACHABLE = "Mercado Libre could not be reached. Try again."
+EXPIRED = "The Mercado Libre connection expired. Connect it again."
+
+
+def _refused(error):
+    """The reason to show for a failed call. Mercado Libre's own words when it gave any."""
+    if isinstance(error, MercadoLibreError):
+        return ReplyFailed(error.message)
+    if isinstance(error, InvalidToken):
+        return ReplyFailed(EXPIRED)
+    return ReplyFailed(UNREACHABLE)
 
 
 def send_post_sale(conversation, text):
@@ -16,18 +28,16 @@ def send_post_sale(conversation, text):
     cleaned = (text or "").strip()
     if not cleaned or len(cleaned) > 350:
         raise ReplyFailed()
-    if not conversation.needs_reply:
-        return
     account = _account_for(conversation.organization)
     if account is None:
-        raise ReplyFailed()
+        raise ReplyFailed(EXPIRED)
     seller_id = str(account.meli_user_id)
     try:
         token = account.fresh_access_token()
         thread = fetch_pack_messages(token, conversation.external_id, seller_id)
         recipient = buyer_id(thread, seller_id)
         if not recipient:
-            raise ReplyFailed()
+            raise ReplyFailed("The buyer of this sale could not be found.")
         post_pack_message(
             token,
             conversation.external_id,
@@ -37,8 +47,8 @@ def send_post_sale(conversation, text):
         )
     except ReplyFailed:
         raise
-    except (OSError, ValueError, InvalidToken):
-        raise ReplyFailed() from None
+    except (OSError, ValueError, InvalidToken) as error:
+        raise _refused(error) from None
     try:
         load_pack(conversation.organization, conversation.external_id)
     except (OSError, ValueError, InvalidToken):
@@ -60,11 +70,11 @@ def send_item_question(conversation, text):
         raise ReplyFailed()
     account = _account_for(question.organization)
     if account is None:
-        raise ReplyFailed()
+        raise ReplyFailed(EXPIRED)
     try:
         post_answer(account.fresh_access_token(), question.question_id, cleaned)
-    except (OSError, ValueError, InvalidToken):
-        raise ReplyFailed() from None
+    except (OSError, ValueError, InvalidToken) as error:
+        raise _refused(error) from None
     question.answer_text = cleaned
     question.status = "ANSWERED"
     question.answered_at = timezone.now()

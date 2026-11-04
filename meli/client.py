@@ -1,5 +1,6 @@
 import json
 from datetime import timedelta, timezone as dt_timezone
+from urllib.error import HTTPError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
@@ -41,6 +42,32 @@ def exchange_code(code, redirect_uri):
     )
 
 
+class MercadoLibreError(ValueError):
+    """Mercado Libre refused the call. message is its own reason, safe to show."""
+
+    def __init__(self, message):
+        super().__init__(message)
+        self.message = message
+
+
+def _error_reason(error):
+    try:
+        payload = json.loads(error.read().decode() or "null")
+    except (OSError, ValueError):
+        payload = None
+    reason = ""
+    if isinstance(payload, dict):
+        causes = payload.get("cause")
+        if isinstance(causes, list):
+            for cause in causes:
+                if isinstance(cause, dict) and cause.get("message"):
+                    reason = str(cause["message"])
+                    break
+        reason = reason or str(payload.get("message") or payload.get("error") or "")
+    reason = " ".join(reason.split())[:300]
+    return reason or f"HTTP {error.code}"
+
+
 def _api_request(access_token, url, payload=None):
     headers = {
         "Accept": "application/json",
@@ -51,8 +78,11 @@ def _api_request(access_token, url, payload=None):
         body = json.dumps(payload).encode()
         headers["Content-Type"] = "application/json"
     request = Request(url, data=body, headers=headers)
-    with urlopen(request, timeout=15) as response:
-        parsed = json.loads(response.read().decode() or "null")
+    try:
+        with urlopen(request, timeout=15) as response:
+            parsed = json.loads(response.read().decode() or "null")
+    except HTTPError as error:
+        raise MercadoLibreError(_error_reason(error)) from None
     if not isinstance(parsed, dict):
         raise ValueError("Mercado Libre response was not an object.")
     return parsed

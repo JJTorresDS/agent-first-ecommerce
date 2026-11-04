@@ -29,7 +29,12 @@ class MeliConfig(AppConfig):
         register(presales_questions)
         register(postsale_messages)
         register_sender(Channel.MELI_ITEM_QUESTIONS, send_item_question)
-        register_sender(Channel.MELI_POSTSALES, send_post_sale, max_length=350)
+        register_sender(
+            Channel.MELI_POSTSALES,
+            send_post_sale,
+            max_length=350,
+            stays_open=True,
+        )
         register_opener(refresh_item_questions)
         register_opener(refresh_postsale)
         register_reconciler(reconcile_item_questions)

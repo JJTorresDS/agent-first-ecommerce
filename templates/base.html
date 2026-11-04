@@ -105,6 +105,12 @@
     .bubble.seller { align-self: flex-end; background: #111; color: #fff; }
     .bubble time { display: block; margin-top: 0.35rem; font-size: 0.75rem; opacity: 0.7; }
     .composer textarea { width: 100%; min-height: 5rem; font: inherit; padding: 0.6rem; }
+    #thread[data-sending] #composer button[type="submit"] { opacity: 0.5; pointer-events: none; }
+    .bubble time.sending { display: flex; align-items: center; gap: 0.35rem; }
+    .bubble time.sending .spinner, .sending-note .spinner { width: 0.75rem; height: 0.75rem; }
+    .sending-note { display: flex; align-items: center; gap: 0.4rem; margin: 0.4rem 0 0; font-size: 0.85rem; }
+    .reply-error p { margin: 0 0 0.35rem; }
+    .reply-error .unsent { margin: 0 0 0.6rem; padding: 0.4rem 0.6rem; border-left: 3px solid #e3b4b4; color: #555; white-space: pre-wrap; overflow-wrap: anywhere; }
     .tabs { display: flex; gap: 0.35rem; margin-bottom: 1rem; }
     .tab { padding: 0.35rem 0.75rem; border-radius: 8px; text-decoration: none; color: #555; cursor: pointer; transition: background-color 0.12s ease, transform 0.12s ease; }
     .tab:not(.active):active { background: #eceae4; }

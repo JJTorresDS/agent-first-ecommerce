@@ -1,4 +1,4 @@
-<section id="thread" class="chat-thread"{% if selected %} data-conversation="{{ selected.id }}"{% endif %}{% if reply_pending %} hx-get="{% url 'inbox' %}?conversation={{ selected.id }}" hx-trigger="every 2s" hx-target="#thread" hx-select="#thread" hx-swap="outerHTML settle:0s swap:0s"{% endif %}>
+<section id="thread" class="chat-thread"{% if selected %} data-conversation="{{ selected.id }}"{% endif %}{% if reply_pending %} data-sending="true" hx-get="{% url 'inbox' %}?conversation={{ selected.id }}&amp;poll=sending" hx-trigger="every 2s" hx-target="#thread" hx-select="#thread" hx-swap="outerHTML settle:0s swap:0s"{% endif %}>
   {% if selected %}
     <div id="conversation" class="conversation">
       {% include "inbox/_conversation_body.html" %}

@@ -8,11 +8,26 @@ _DEFAULT_REPLY_LIMIT = 2000
 
 
 class ReplyFailed(Exception):
-    """The channel rejected the reply, or the text cannot be sent."""
+    """The channel rejected the reply, or the text cannot be sent.
+
+    message is the channel's own reason, shown to the user when set.
+    """
+
+    def __init__(self, message=""):
+        super().__init__(message)
+        self.message = message
 
 
-def register_sender(channel, send, max_length=_DEFAULT_REPLY_LIMIT):
-    _senders[channel] = {"send": send, "max_length": max_length}
+def register_sender(channel, send, max_length=_DEFAULT_REPLY_LIMIT, stays_open=False):
+    """stays_open keeps the composer after a reply; the channel refuses what it must."""
+    _senders[channel] = {"send": send, "max_length": max_length, "stays_open": stays_open}
+
+
+def can_send(conversation):
+    row = _senders.get(conversation.channel)
+    if row is None:
+        return False
+    return row["stays_open"] or conversation.needs_reply
 
 
 def sender_for(channel):

@@ -32,6 +32,9 @@ Organization is the tenant. Its UUID does not change. The name can.
 - The background worker takes jobs with one BRPOP over every queue (run_next_job), replies first. Redis reads a BRPOP timeout of 0 as wait forever, so never pass 0. A new queue goes in WORKER_QUEUES and the handler map.
 - The webhook stores the row and calls dispatch_notification. It makes no Mercado Libre calls, because Mercado Libre expects an answer in about 500 ms. The worker loads the notification.
 - Fetch post-sale messages with tag=post_sale and mark_as_read=false. Link the post-sale header to /ventas/<id>/detalle, not to the messages page, because opening the messages page marks the buyer's message read.
+- Post-sale chats stay open after a reply (register_sender stays_open). The app does not decide whether a message is allowed: Mercado Libre does, and its refusal is shown. Presale questions hide the composer once answered, because Mercado Libre takes one answer per question.
+- _api_request raises MercadoLibreError with Mercado Libre's own reason. Senders turn it into ReplyFailed(message); run_reply_job keeps the reason and the unsent text under reply_error_key for the thread to show.
+- A reply is sent in the background. Its bubble shows "Sending…" while #thread polls with poll=sending, which keeps the composer (hx-preserve) so a draft survives. Nothing blocks the page.
 
 ## Cashflow receipt parser
 
