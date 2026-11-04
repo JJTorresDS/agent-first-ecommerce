@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+
+{% block title %}Models{% endblock %}
+
+{% block content %}
+  {% include "catalog/_tabs.html" %}
+  <div class="page-head">
+    <h1>Models</h1>
+    {% if can_edit %}<a class="accent" href="{% url 'catalog_model_new' %}">New model</a>{% endif %}
+  </div>
+  {% if models %}
+    <div class="card flush table-scroll">
+      <table class="list">
+        <thead><tr><th>Family</th><th>Name</th><th>Brand</th><th>Category</th><th class="num">Variants</th></tr></thead>
+        <tbody>
+          {% for model in models %}
+            <tr>
+              <td><a href="{% url 'catalog_model' model.pk %}"><span class="sku">{{ model.family_code }}</span></a></td>
+              <td><a class="row-link" href="{% url 'catalog_model' model.pk %}">{{ model.name }}</a></td>
+              <td>{{ model.brand.name }}</td>
+              <td>{{ model.category.name }}</td>
+              <td class="num">{{ model.variant_count }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="card empty">
+      <p>No models yet.</p>
+      <p class="muted">A model is one item, like Only 885 Eau de Parfum. Its variants (30ML, 100ML) are the products you sell.</p>
+    </div>
+  {% endif %}
+{% endblock %}

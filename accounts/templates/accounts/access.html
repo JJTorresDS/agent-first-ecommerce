@@ -11,6 +11,8 @@
         <th>User</th>
         <th>Tasks</th>
         <th>Cashflow</th>
+        <th>Catalog</th>
+        <th>Purchasing</th>
       </tr>
     </thead>
     <tbody>
@@ -18,7 +20,7 @@
         {% include "accounts/_access_user.html" %}
       {% empty %}
         <tr>
-          <td colspan="3">No users.</td>
+          <td colspan="5">No users.</td>
         </tr>
       {% endfor %}
     </tbody>

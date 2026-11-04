@@ -1,0 +1,5 @@
+<nav class="tabs" aria-label="Catalog">
+  <a class="tab{% if active_tab == 'products' %} active{% endif %}" href="{% url 'catalog' %}">Products</a>
+  <a class="tab{% if active_tab == 'models' %} active{% endif %}" href="{% url 'catalog_models' %}">Models</a>
+  <a class="tab{% if active_tab == 'codes' %} active{% endif %}" href="{% url 'catalog_codes' %}">Categories &amp; brands</a>
+</nav>

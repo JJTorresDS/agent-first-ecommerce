@@ -1,0 +1,4 @@
+<nav class="tabs" aria-label="Purchases">
+  <a class="tab{% if active_tab == 'purchases' %} active{% endif %}" href="{% url 'purchases' %}">Purchases</a>
+  <a class="tab{% if active_tab == 'suppliers' %} active{% endif %}" href="{% url 'suppliers' %}">Suppliers</a>
+</nav>

@@ -1,0 +1,17 @@
+<form method="post" class="code-form">
+  {% csrf_token %}
+  <input type="hidden" name="kind" value="{{ kind }}">
+  {% if row_id %}<input type="hidden" name="id" value="{{ row_id }}">{% endif %}
+  {% if form %}
+    {% for error in form.non_field_errors %}<p class="error">{{ error }}</p>{% endfor %}
+    <input type="text" name="{{ kind }}-code" value="{{ form.code.value|default:'' }}" placeholder="{{ example_code }}" aria-label="Code" maxlength="{{ form.code.field.max_length }}" class="code-input">
+    <input type="text" name="{{ kind }}-name" value="{{ form.name.value|default:'' }}" placeholder="{{ example_name }}" aria-label="Name">
+    <button type="submit" class="primary">{{ button }}</button>
+    {% for error in form.code.errors %}<p class="error">{{ error }}</p>{% endfor %}
+    {% for error in form.name.errors %}<p class="error">{{ error }}</p>{% endfor %}
+  {% else %}
+    <input type="text" name="{{ kind }}-code" value="{{ row.code }}" aria-label="Code" class="code-input">
+    <input type="text" name="{{ kind }}-name" value="{{ row.name }}" aria-label="Name">
+    <button type="submit" class="primary">{{ button }}</button>
+  {% endif %}
+</form>

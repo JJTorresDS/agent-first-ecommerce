@@ -14,11 +14,11 @@ from tasks.models import CashflowMovement
 from .models import Purchase, PurchaseItem, Supplier
 
 
-def receipt(organization):
+def receipt(organization, day=date(2026, 11, 1)):
     return CashflowMovement.objects.create(
         organization=organization,
         uploader_email="ada@example.com",
-        transaction_date=date(2026, 11, 1),
+        transaction_date=day,
         category="cost",
         amount=Decimal("-150000"),
         currency="ARS",

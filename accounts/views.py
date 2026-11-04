@@ -59,6 +59,8 @@ def _access_row(user):
         "user": user,
         "tasks": AppAccess.App.TASKS in granted,
         "cashflow": AppAccess.App.CASHFLOW in granted,
+        "catalog": AppAccess.App.CATALOG in granted,
+        "purchasing": AppAccess.App.PURCHASING in granted,
     }
 
 

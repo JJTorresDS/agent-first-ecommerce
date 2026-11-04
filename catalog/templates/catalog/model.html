@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+
+{% block title %}{% if model %}{{ model.name }}{% else %}New model{% endif %}{% endblock %}
+
+{% block content %}
+  {% include "catalog/_tabs.html" %}
+  <div class="page-head">
+    <h1>{% if model %}{{ model.name }}{% else %}New model{% endif %}</h1>
+    <span class="sku sku-lg" id="family-preview" data-model="{% if model %}{{ model.code }}{% endif %}">{% if model %}{{ model.family_code }}{% else %}CATEGORY-BRAND-MODEL{% endif %}</span>
+  </div>
+
+  <section class="card">
+    <h2>Model</h2>
+    {% if form.locked %}<p class="muted">Variants use this model's category, brand and code in their SKUs, so those stay as they are.</p>{% endif %}
+    {% for error in form.non_field_errors %}<p class="error">{{ error }}</p>{% endfor %}
+    {% if can_edit %}
+      {{ codes|json_script:"sku-codes" }}
+      <form method="post" id="model-form" class="form-grid">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="model">
+        {% include "_field.html" with field=form.category %}
+        {% include "_field.html" with field=form.brand %}
+        {% include "_field.html" with field=form.code %}
+        {% include "_field.html" with field=form.condition %}
+        {% include "_field.html" with field=form.name wide=True %}
+        {% include "_field.html" with field=form.description wide=True %}
+        <div class="actions wide">
+          {% if not model %}<p class="muted">Missing a category or brand? <a href="{% url 'catalog_codes' %}">Add it first</a>.</p>{% endif %}
+          <button class="primary" type="submit">{% if model %}Save model{% else %}Create model{% endif %}</button>
+        </div>
+      </form>
+    {% elif model %}
+      <dl class="facts">
+        <div><dt>Category</dt><dd>{{ model.category.name }}</dd></div>
+        <div><dt>Brand</dt><dd>{{ model.brand.name }}</dd></div>
+        <div><dt>Condition</dt><dd>{{ model.get_condition_display }}</dd></div>
+        {% if model.description %}<div class="wide"><dt>Description</dt><dd class="prewrap">{{ model.description }}</dd></div>{% endif %}
+      </dl>
+    {% endif %}
+  </section>
+
+  {% if model %}
+    <section class="card">
+      <h2>Variants</h2>
+      {% if variants %}
+        <div class="table-scroll">
+          <table class="list">
+            <thead><tr><th></th><th>SKU</th><th>Title</th><th>Status</th><th class="num">Price</th></tr></thead>
+            <tbody>
+              {% for item in variants %}
+                <tr{% if item.pk|stringformat:"s" == added %} class="just-added"{% endif %}>
+                  <td class="thumb-cell"><img class="thumb" src="{{ item.image_url }}" alt="" loading="lazy"></td>
+                  <td><a href="{% url 'catalog_product' item.pk %}"><span class="sku">{{ item.sku }}</span></a></td>
+                  <td><a class="row-link" href="{% url 'catalog_product' item.pk %}">{{ item.title }}</a></td>
+                  <td><span class="pill {{ item.status }}">{{ item.get_status_display }}</span></td>
+                  <td class="num">{% if item.list_price is not None %}{{ item.currency }} {{ item.list_price }}{% endif %}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="muted">No variants yet. Add the first one below; a single version still gets one, such as UNICO.</p>
+      {% endif %}
+
+      {% if can_edit %}
+        <h3>Add variant</h3>
+        {% for error in variant_form.non_field_errors %}<p class="error">{{ error }}</p>{% endfor %}
+        <form method="post" class="form-grid" id="variant-form">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="variant">
+          {% include "_field.html" with field=variant_form.variant %}
+          <div class="field">
+            <label>SKU</label>
+            <p class="sku-out"><span class="sku" id="sku-preview">{{ model.family_code }}-…</span></p>
+          </div>
+          {% include "_field.html" with field=variant_form.image_url wide=True %}
+          {% include "_field.html" with field=variant_form.title wide=True %}
+          {% include "_field.html" with field=variant_form.gtin %}
+          {% include "_field.html" with field=variant_form.status %}
+          {% include "_field.html" with field=variant_form.list_price %}
+          {% include "_field.html" with field=variant_form.currency %}
+          <div class="actions wide"><button class="primary" type="submit">Add variant</button></div>
+        </form>
+      {% endif %}
+    </section>
+  {% endif %}
+
+  <script>
+    // Live SKU preview: CATEGORY-BRAND-MODEL from the form, plus the variant being typed.
+    (function () {
+      var codes = JSON.parse((document.getElementById("sku-codes") || {}).textContent || "{}");
+      var family = document.getElementById("family-preview");
+      var sku = document.getElementById("sku-preview");
+      function clean(value) { return (value || "").trim().toUpperCase(); }
+      function familyCode() {
+        var form = document.getElementById("model-form");
+        if (!form || !codes.categories) return family.textContent;
+        var category = codes.categories[form.elements.category.value] || "CATEGORY";
+        var brand = codes.brands[form.elements.brand.value] || "BRAND";
+        var model = clean(form.elements.code.value) || "MODEL";
+        return category + "-" + brand + "-" + model;
+      }
+      function update() {
+        if (family) family.textContent = familyCode();
+        var variant = document.getElementById("id_variant-variant");
+        if (sku && variant) sku.textContent = familyCode() + "-" + (clean(variant.value) || "…");
+      }
+      document.addEventListener("input", update);
+      document.addEventListener("change", update);
+      update();
+    })();
+  </script>
+{% endblock %}

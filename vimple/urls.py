@@ -58,6 +58,8 @@ urlpatterns = [
     path("cashflow/settings/run/", cashflow_parser_run, name="cashflow_parser_run"),
     path("cashflow/settings/key/", cashflow_parser_key, name="cashflow_parser_key"),
     path("cashflow/settings/drive-token/", cashflow_drive_token, name="cashflow_drive_token"),
+    path("catalog/", include("catalog.urls")),
+    path("purchases/", include("purchasing.urls")),
     path("access/", access, name="access"),
     path("access/<int:user_id>/", set_app_access, name="set_app_access"),
     path("accounts/", include("allauth.urls")),

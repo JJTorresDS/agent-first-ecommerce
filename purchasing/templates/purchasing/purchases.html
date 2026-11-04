@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block title %}Purchases{% endblock %}
+
+{% block content %}
+  {% include "purchasing/_tabs.html" %}
+  <div class="page-head">
+    <h1>Purchases</h1>
+    {% if can_edit %}<a class="accent" href="{% url 'purchase_new' %}">New purchase</a>{% endif %}
+  </div>
+  <form
+    class="filters"
+    method="get"
+    action="{% url 'purchases' %}"
+    hx-get="{% url 'purchases' %}"
+    hx-target="#purchase-results"
+    hx-swap="outerHTML"
+    hx-push-url="true"
+    hx-trigger="change, submit, input changed delay:300ms from:#q"
+  >
+    <div class="grow">
+      <label for="q">Search</label>
+      <input id="q" type="search" name="q" value="{{ query }}" placeholder="Invoice number or SKU">
+    </div>
+    <div>
+      <label for="supplier">Supplier</label>
+      <select id="supplier" name="supplier">
+        <option value="">All</option>
+        {% for row in suppliers %}<option value="{{ row.pk }}"{% if row.pk|stringformat:"s" == supplier %} selected{% endif %}>{{ row.name }}</option>{% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="date_from">From</label>
+      <input id="date_from" type="date" name="date_from" value="{{ date_from }}">
+    </div>
+    <div>
+      <label for="date_to">To</label>
+      <input id="date_to" type="date" name="date_to" value="{{ date_to }}">
+    </div>
+  </form>
+  {% include "purchasing/_purchases.html" %}
+{% endblock %}

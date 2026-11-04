@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block title %}Catalog{% endblock %}
+
+{% block content %}
+  {% include "catalog/_tabs.html" %}
+  <div class="page-head">
+    <h1>Products</h1>
+    {% if can_edit %}<a class="accent" href="{% url 'catalog_model_new' %}">New model</a>{% endif %}
+  </div>
+  <form
+    class="filters"
+    method="get"
+    action="{% url 'catalog' %}"
+    hx-get="{% url 'catalog' %}"
+    hx-target="#catalog-results"
+    hx-swap="outerHTML"
+    hx-push-url="true"
+    hx-trigger="change, submit, input changed delay:300ms from:#q"
+  >
+    <div class="grow">
+      <label for="q">Search</label>
+      <input id="q" type="search" name="q" value="{{ query }}" placeholder="SKU, title or barcode">
+    </div>
+    <div>
+      <label for="brand">Brand</label>
+      <select id="brand" name="brand">
+        <option value="">All</option>
+        {% for row in brands %}<option value="{{ row.pk }}"{% if row.pk|stringformat:"s" == brand %} selected{% endif %}>{{ row.name }}</option>{% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="category">Category</label>
+      <select id="category" name="category">
+        <option value="">All</option>
+        {% for row in categories %}<option value="{{ row.pk }}"{% if row.pk|stringformat:"s" == category %} selected{% endif %}>{{ row.name }}</option>{% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="status">Status</label>
+      <select id="status" name="status">
+        <option value="">All</option>
+        {% for value, label in statuses %}<option value="{{ value }}"{% if value == status %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+    </div>
+  </form>
+  {% include "catalog/_products.html" %}
+{% endblock %}

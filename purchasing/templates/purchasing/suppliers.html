@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block title %}Suppliers{% endblock %}
+
+{% block content %}
+  {% include "purchasing/_tabs.html" %}
+  <div class="page-head"><h1>Suppliers</h1></div>
+  {% if suppliers %}
+    <div class="card flush table-scroll">
+      <table class="list">
+        <thead><tr><th>Name</th><th>Tax id</th><th>Contact</th><th class="num">Purchases</th><th>Last purchase</th></tr></thead>
+        <tbody>
+          {% for row in suppliers %}
+            <tr>
+              <td><a class="row-link" href="{% url 'supplier' row.pk %}">{{ row.name }}</a></td>
+              <td>{{ row.tax_id|default:"—" }}</td>
+              <td>{{ row.email }}{% if row.email and row.phone %} · {% endif %}{{ row.phone }}</td>
+              <td class="num">{{ row.purchase_count }}</td>
+              <td>{{ row.last_purchase|date:"Y-m-d"|default:"—" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="card empty"><p>No suppliers yet.</p></div>
+  {% endif %}
+  {% if can_edit %}
+    <section class="card">
+      <h2>Add supplier</h2>
+      <form method="post" class="form-grid">
+        {% csrf_token %}
+        {% for error in form.non_field_errors %}<p class="error wide">{{ error }}</p>{% endfor %}
+        {% include "_field.html" with field=form.name %}
+        {% include "_field.html" with field=form.tax_id %}
+        {% include "_field.html" with field=form.email %}
+        {% include "_field.html" with field=form.phone %}
+        {% include "_field.html" with field=form.notes wide=True %}
+        <div class="actions wide"><button class="primary" type="submit">Add supplier</button></div>
+      </form>
+    </section>
+  {% endif %}
+{% endblock %}

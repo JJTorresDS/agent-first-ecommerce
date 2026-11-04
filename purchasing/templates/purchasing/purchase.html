@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+
+{% block title %}{% if purchase %}Purchase {{ purchase.invoice_number|default:purchase.purchased_on }}{% else %}New purchase{% endif %}{% endblock %}
+
+{% block content %}
+  {% include "purchasing/_tabs.html" %}
+  <div class="page-head">
+    <h1>{% if purchase %}{{ purchase.supplier.name }} · {{ purchase.invoice_number|default:purchase.purchased_on }}{% else %}New purchase{% endif %}</h1>
+  </div>
+  {% if saved %}<p class="notice">Purchase saved.</p>{% endif %}
+  <form method="post" id="purchase-form">
+    {% csrf_token %}
+    <section class="card">
+      <h2>Invoice</h2>
+      {% for error in form.non_field_errors %}<p class="error">{{ error }}</p>{% endfor %}
+      <fieldset class="form-grid"{% if not can_edit %} disabled{% endif %}>
+        <div class="field{% if form.supplier.errors %} has-error{% endif %}">
+          <label for="{{ form.supplier.id_for_label }}">Supplier <span class="req" aria-hidden="true">*</span></label>
+          {{ form.supplier }}
+          {% if can_edit %}<p class="help"><a href="{% url 'suppliers' %}">New supplier</a></p>{% endif %}
+          {% for error in form.supplier.errors %}<p class="error">{{ error }}</p>{% endfor %}
+        </div>
+        {% include "_field.html" with field=form.purchased_on %}
+        {% include "_field.html" with field=form.invoice_number %}
+        {% include "_field.html" with field=form.currency %}
+        {% include "_field.html" with field=form.exchange_rate %}
+        {% if can_link_receipts %}{% include "_field.html" with field=form.cashflow_movement %}{% endif %}
+        {% include "_field.html" with field=form.notes wide=True %}
+      </fieldset>
+    </section>
+
+    <section class="card">
+      <h2>Lines</h2>
+      {% for error in line_errors %}<p class="error">{{ error }}</p>{% endfor %}
+      <datalist id="catalog-products">{% for label in products %}<option value="{{ label }}"></option>{% endfor %}</datalist>
+      <fieldset class="lines"{% if not can_edit %} disabled{% endif %}>
+        <div class="line-head" aria-hidden="true"><span>Product (SKU)</span><span>Qty</span><span>Unit cost</span><span>Supplier code</span><span class="num">Total</span><span></span></div>
+        <div id="line-rows">
+          {% for line in lines %}
+            {% include "purchasing/_line.html" %}
+          {% endfor %}
+        </div>
+        <template id="line-template">{% include "purchasing/_line.html" with line=None %}</template>
+      </fieldset>
+      <div class="lines-foot">
+        {% if can_edit %}<button type="button" id="line-add">Add line</button>{% else %}<span></span>{% endif %}
+        <p class="grand-total">Total <strong id="purchase-total">—</strong></p>
+      </div>
+    </section>
+
+    {% if can_edit %}
+      <div class="actions"><button class="primary" type="submit">{% if purchase %}Save purchase{% else %}Record purchase{% endif %}</button></div>
+    {% else %}
+      <p class="muted">Only owners and admins can change purchases.</p>
+    {% endif %}
+  </form>
+
+  <script>
+    (function () {
+      var rows = document.getElementById("line-rows");
+      var template = document.getElementById("line-template");
+      var currency = document.getElementById("id_currency");
+      function number(value) {
+        var parsed = parseFloat(String(value || "").replace(",", "."));
+        return isFinite(parsed) ? parsed : 0;
+      }
+      function format(value) {
+        return (currency ? currency.value + " " : "") + value.toFixed(2);
+      }
+      function update() {
+        var sum = 0;
+        rows.querySelectorAll(".line").forEach(function (line) {
+          var total = number(line.querySelector('[name="line_quantity"]').value) * number(line.querySelector('[name="line_unit_cost"]').value);
+          line.querySelector(".line-total").textContent = format(total);
+          sum += total;
+        });
+        document.getElementById("purchase-total").textContent = format(sum);
+      }
+      var add = document.getElementById("line-add");
+      if (add) add.addEventListener("click", function () {
+        var line = template.content.firstElementChild.cloneNode(true);
+        rows.appendChild(line);
+        line.querySelector('[name="line_product"]').focus();
+        update();
+      });
+      rows.addEventListener("click", function (event) {
+        var remove = event.target.closest(".line-remove");
+        if (!remove) return;
+        remove.closest(".line").remove();
+        update();
+      });
+      document.getElementById("purchase-form").addEventListener("input", update);
+      update();
+    })();
+  </script>
+{% endblock %}

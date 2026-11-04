@@ -11,6 +11,11 @@ Organization is the tenant. Its UUID does not change. The name can.
 - A new read or write includes a test where another organization's row stays invisible.
 - Leave the tasks app label, its database table, /api/tasks, and the AppAccess value tasks as they are.
 
+## Look
+
+- Colors are the :root variables in templates/base.html, taken from the logo: charcoal (--ink) and grays, with neon green (--neon) only for accents: the active menu item, focus rings, the one main action per page (.accent), SKU chips (.sku) and active status pills. Don't hard-code new colors.
+- Check new pages at 390px as well as on desktop; wide tables go in .table-scroll.
+
 ## Inbox and htmx
 
 - After an outerHTML swap, event.detail.target in htmx:afterSwap is the element that was removed. Read the new one with document.getElementById. Events on an element that a swap replaced, such as a row replaced by hx-swap-oob, never reach document.body.
@@ -57,6 +62,10 @@ Organization is the tenant. Its UUID does not change. The name can.
 - purchasing has Supplier, Purchase (one invoice: supplier, date, currency, optional tasks.CashflowMovement) and PurchaseItem (product, quantity, unit_cost). Cost history comes from the lines: MasterProduct.costs_by_supplier.
 - A purchase, its supplier, its receipt and its lines' products are in one organization. Purchase and PurchaseItem refuse anything else in clean() and save(); lines take the purchase's organization.
 - A product with purchases can't be deleted (PROTECT). Archive it with status archived.
+- Pages: Catalog (/catalog/) and Purchases (/purchases/) sit under "Products" in the sidebar, each behind its own AppAccess (catalog, purchasing). Anyone granted reads; owners and admins edit (can_edit_products), and a POST from anyone else is 403.
+- Catalog pages show costs only to users who can also open Purchasing. Purchase forms offer cashflow receipts only to users who can open Cashflow.
+- Forms take the organization from membership_for, never from the request. Use catalog.forms.TenantForm so organization-scoped unique checks are form errors, and limit every select's queryset to the organization.
+- Purchase lines name products by SKU (purchasing.forms.read_lines), resolved inside the organization; a line id from another purchase is never moved.
 
 ## Tests
 

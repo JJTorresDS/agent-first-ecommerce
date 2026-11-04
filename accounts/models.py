@@ -188,6 +188,8 @@ class AppAccess(TenantModel):
     class App(models.TextChoices):
         TASKS = "tasks", "Tasks"
         CASHFLOW = "cashflow", "Cashflow"
+        CATALOG = "catalog", "Catalog"
+        PURCHASING = "purchasing", "Purchasing"
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -242,19 +244,30 @@ def _profile_for(user):
         return None
 
 
-def user_can_open(user, app):
+def apps_for(user, membership=None):
+    """The apps this user can open in the active organization, in one query."""
     if not getattr(user, "is_authenticated", False):
-        return False
+        return set()
     if user.is_superuser:
-        return True
-    membership = membership_for(user)
+        return set(AppAccess.App.values)
+    membership = membership or membership_for(user)
     if membership is None:
-        return False
-    return AppAccess.objects.filter(
-        user=user,
-        app=app,
-        organization=membership.organization,
-    ).exists()
+        return set()
+    return set(
+        AppAccess.objects.filter(
+            user=user,
+            organization=membership.organization,
+        ).values_list("app", flat=True)
+    )
+
+
+def user_can_open(user, app, membership=None):
+    return app in apps_for(user, membership)
+
+
+def can_edit_products(membership):
+    """Catalog and purchasing: everyone with access reads, owners and admins edit."""
+    return can_manage_members(membership)
 
 
 def grant_access_task(user, organization):

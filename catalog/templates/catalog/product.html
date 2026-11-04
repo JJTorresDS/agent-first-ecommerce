@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+
+{% block title %}{{ product.sku }}{% endblock %}
+
+{% block content %}
+  {% include "catalog/_tabs.html" %}
+  <p class="crumb"><a href="{% url 'catalog_model' product.product_model.pk %}">{{ product.product_model.name }}</a></p>
+  <div class="page-head">
+    <h1>{{ product.title }}</h1>
+    <span class="sku sku-lg">{{ product.sku }}</span>
+  </div>
+  {% if saved %}<p class="notice">Product saved.</p>{% endif %}
+
+  <div class="product-layout">
+    <div class="product-media">
+      <img src="{{ product.image_url }}" alt="{{ product.title }}">
+      <dl class="facts">
+        <div><dt>Brand</dt><dd>{{ product.product_model.brand.name }}</dd></div>
+        <div><dt>Category</dt><dd>{{ product.product_model.category.name }}</dd></div>
+        <div><dt>Variant</dt><dd>{{ product.variant }}</dd></div>
+        <div><dt>Condition</dt><dd>{{ product.product_model.get_condition_display }}</dd></div>
+      </dl>
+      {% if variants %}
+        <h3>Other variants</h3>
+        <ul class="plain">
+          {% for item in variants %}<li><a href="{% url 'catalog_product' item.pk %}"><span class="sku">{{ item.sku }}</span></a></li>{% endfor %}
+        </ul>
+      {% endif %}
+    </div>
+
+    <div class="product-main">
+      <form method="post" class="card">
+        {% csrf_token %}
+        <h2>Listing</h2>
+        {% for error in form.non_field_errors %}<p class="error">{{ error }}</p>{% endfor %}
+        <fieldset class="form-grid"{% if not can_edit %} disabled{% endif %}>
+          {% include "_field.html" with field=form.title wide=True %}
+          {% include "_field.html" with field=form.image_url wide=True %}
+          {% include "_field.html" with field=form.status %}
+          {% include "_field.html" with field=form.gtin %}
+          {% include "_field.html" with field=form.list_price %}
+          {% include "_field.html" with field=form.currency %}
+        </fieldset>
+
+        <h2>Package</h2>
+        <fieldset class="form-grid four"{% if not can_edit %} disabled{% endif %}>
+          {% include "_field.html" with field=form.weight_g %}
+          {% include "_field.html" with field=form.length_cm %}
+          {% include "_field.html" with field=form.width_cm %}
+          {% include "_field.html" with field=form.height_cm %}
+        </fieldset>
+
+        <h2>Attributes</h2>
+        <p class="muted">Secondary details such as COLOR, VOLUME_ML or FRAGRANCE_NOTES. Numbers stay numbers; separate several values with <kbd>;</kbd> (vainilla; caramelo).</p>
+        {% if attributes_error %}<p class="error">{{ attributes_error }}</p>{% endif %}
+        <fieldset id="attributes"{% if not can_edit %} disabled{% endif %}>
+          {% for key, value in attributes %}
+            <div class="attr-row">
+              <input type="text" name="attr_key" value="{{ key }}" aria-label="Attribute">
+              <input type="text" name="attr_value" value="{{ value }}" aria-label="Value">
+              {% if can_edit %}<button type="button" class="attr-remove" aria-label="Remove attribute">×</button>{% endif %}
+            </div>
+          {% endfor %}
+          <template id="attr-template">
+            <div class="attr-row">
+              <input type="text" name="attr_key" placeholder="COLOR" aria-label="Attribute">
+              <input type="text" name="attr_value" placeholder="Rojo" aria-label="Value">
+              <button type="button" class="attr-remove" aria-label="Remove attribute">×</button>
+            </div>
+          </template>
+        </fieldset>
+        {% if can_edit %}
+          <button type="button" id="attr-add">Add attribute</button>
+          <div class="actions"><button class="primary" type="submit">Save product</button></div>
+        {% else %}
+          {% if not attributes %}<p class="muted">No attributes.</p>{% endif %}
+          <p class="muted">Only owners and admins can change the catalog.</p>
+        {% endif %}
+      </form>
+
+      {% if can_see_costs %}
+        <section class="card">
+          <h2>Cost by supplier</h2>
+          {% if costs %}
+            <div class="table-scroll">
+              <table class="list">
+                <thead><tr><th>Supplier</th><th class="num">Latest cost</th><th>Bought</th></tr></thead>
+                <tbody>
+                  {% for row in costs %}
+                    <tr>
+                      <td>{{ row.supplier.name }}</td>
+                      <td class="num">{{ row.currency }} {{ row.unit_cost }}</td>
+                      <td><a href="{% url 'purchase' row.purchase_id %}">{{ row.purchased_on|date:"Y-m-d" }}</a></td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            <h3>Recent purchases</h3>
+            <ul class="plain lines">
+              {% for line in lines %}
+                <li><a href="{% url 'purchase' line.purchase_id %}">{{ line.purchase.purchased_on|date:"Y-m-d" }}</a> · {{ line.purchase.supplier.name }} · {{ line.quantity }} × {{ line.purchase.currency }} {{ line.unit_cost }}</li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <p class="muted">Not bought yet.</p>
+          {% endif %}
+        </section>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if can_edit %}
+    <script>
+      (function () {
+        var box = document.getElementById("attributes");
+        var template = document.getElementById("attr-template");
+        document.getElementById("attr-add").addEventListener("click", function () {
+          var row = template.content.firstElementChild.cloneNode(true);
+          box.appendChild(row);
+          row.querySelector("input").focus();
+        });
+        box.addEventListener("click", function (event) {
+          var remove = event.target.closest(".attr-remove");
+          if (remove) remove.closest(".attr-row").remove();
+        });
+      })();
+    </script>
+  {% endif %}
+{% endblock %}

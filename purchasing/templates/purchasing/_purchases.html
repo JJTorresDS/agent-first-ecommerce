@@ -1,0 +1,38 @@
+<div id="purchase-results">
+  {% if purchases %}
+    <div class="card flush table-scroll">
+      <table class="list">
+        <thead><tr><th>Date</th><th>Supplier</th><th>Invoice</th><th class="num">Lines</th><th class="num">Total</th><th></th></tr></thead>
+        <tbody>
+          {% for row in purchases %}
+            <tr>
+              <td><a class="row-link" href="{% url 'purchase' row.pk %}">{{ row.purchased_on|date:"Y-m-d" }}</a></td>
+              <td>{{ row.supplier.name }}</td>
+              <td>{{ row.invoice_number|default:"—" }}</td>
+              <td class="num">{{ row.line_count }}</td>
+              <td class="num">{{ row.currency }} {{ row.total|default:"0.00"|floatformat:2 }}</td>
+              <td>{% if row.cashflow_movement_id %}<span class="pill active" title="Linked to a cashflow receipt">Receipt</span>{% endif %}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if page_obj.paginator.num_pages > 1 %}
+      <nav class="pager" aria-label="Pages">
+        {% if page_obj.has_previous %}<a href="{% querystring page=page_obj.previous_page_number %}" hx-get="{% querystring page=page_obj.previous_page_number %}" hx-target="#purchase-results" hx-swap="outerHTML" hx-push-url="true">Previous</a>{% endif %}
+        <span>Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+        {% if page_obj.has_next %}<a href="{% querystring page=page_obj.next_page_number %}" hx-get="{% querystring page=page_obj.next_page_number %}" hx-target="#purchase-results" hx-swap="outerHTML" hx-push-url="true">Next</a>{% endif %}
+      </nav>
+    {% endif %}
+  {% else %}
+    <div class="card empty">
+      {% if query or supplier or date_from or date_to %}
+        <p>No purchases match these filters.</p>
+      {% else %}
+        <p>No purchases yet.</p>
+        <p class="muted">Record what you bought, from whom and at what cost. Each product then shows its cost by supplier.</p>
+        {% if can_edit %}<p><a class="accent" href="{% url 'purchase_new' %}">New purchase</a></p>{% endif %}
+      {% endif %}
+    </div>
+  {% endif %}
+</div>

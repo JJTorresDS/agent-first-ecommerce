@@ -2,4 +2,6 @@
   <td>{{ row.user.email|default:row.user.get_username }}</td>
   <td>{% include "accounts/_access_check.html" with app="tasks" checked=row.tasks %}</td>
   <td>{% include "accounts/_access_check.html" with app="cashflow" checked=row.cashflow %}</td>
+  <td>{% include "accounts/_access_check.html" with app="catalog" checked=row.catalog %}</td>
+  <td>{% include "accounts/_access_check.html" with app="purchasing" checked=row.purchasing %}</td>
 </tr>

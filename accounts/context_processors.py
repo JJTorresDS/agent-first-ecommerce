@@ -7,7 +7,7 @@ from .models import (
     Profile,
     can_manage_members,
     membership_for,
-    user_can_open,
+    apps_for,
 )
 
 
@@ -31,8 +31,11 @@ def nav(request):
         if request.session.get(IMPERSONATOR_SESSION_KEY):
             impersonating = True
             impersonated_label = user.email or user.get_username()
+    apps = apps_for(user, membership)
     return {
-        "can_open_cashflow": user_can_open(user, AppAccess.App.CASHFLOW),
+        "can_open_cashflow": AppAccess.App.CASHFLOW in apps,
+        "can_open_catalog": AppAccess.App.CATALOG in apps,
+        "can_open_purchasing": AppAccess.App.PURCHASING in apps,
         "can_grant_access": bool(getattr(user, "is_superuser", False)),
         "can_manage_members": can_manage_members(membership),
         "impersonating": impersonating,

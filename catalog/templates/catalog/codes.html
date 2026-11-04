@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block title %}Categories &amp; brands{% endblock %}
+
+{% block content %}
+  {% include "catalog/_tabs.html" %}
+  <div class="page-head"><h1>Categories &amp; brands</h1></div>
+  <p class="muted">Codes go into every SKU: <span class="sku">CATEGORY-BRAND-MODEL-VARIANT</span>. Use capital letters and digits. A code can't change once a SKU uses it; the name can.</p>
+  <div class="two-cards">
+    {% for kind, title, example_name, example_code, rows, form, editing in sections %}
+      <section class="card">
+        <h2>{{ title }}</h2>
+        {% if rows %}
+          <table class="list">
+            <thead><tr><th>Code</th><th>Name</th><th class="num">Models</th>{% if can_edit %}<th></th>{% endif %}</tr></thead>
+            <tbody>
+              {% for row in rows %}
+                {% if editing and editing.0 == row.pk %}
+                  <tr><td colspan="4">{% include "catalog/_code_form.html" with form=editing.1 row_id=row.pk button="Save" %}</td></tr>
+                {% else %}
+                  <tr>
+                    <td><span class="sku">{{ row.code }}</span></td>
+                    <td>{{ row.name }}</td>
+                    <td class="num">{{ row.model_count }}</td>
+                    {% if can_edit %}
+                      <td class="num">
+                        <details class="inline-edit">
+                          <summary>Edit</summary>
+                          {% include "catalog/_code_form.html" with form=None row=row row_id=row.pk button="Save" %}
+                        </details>
+                      </td>
+                    {% endif %}
+                  </tr>
+                {% endif %}
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <p class="muted">None yet.</p>
+        {% endif %}
+        {% if can_edit %}
+          <h3>Add {{ kind }}</h3>
+          {% include "catalog/_code_form.html" with form=form row_id="" button="Add" %}
+        {% endif %}
+      </section>
+    {% endfor %}
+  </div>
+{% endblock %}

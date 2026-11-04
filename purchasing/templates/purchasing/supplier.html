@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block title %}{{ supplier.name }}{% endblock %}
+
+{% block content %}
+  {% include "purchasing/_tabs.html" %}
+  <div class="page-head"><h1>{{ supplier.name }}</h1></div>
+  {% if saved %}<p class="notice">Supplier saved.</p>{% endif %}
+  <section class="card">
+    <h2>Details</h2>
+    <form method="post" class="form-grid">
+      {% csrf_token %}
+      {% for error in form.non_field_errors %}<p class="error wide">{{ error }}</p>{% endfor %}
+      <fieldset class="form-grid wide"{% if not can_edit %} disabled{% endif %}>
+        {% include "_field.html" with field=form.name %}
+        {% include "_field.html" with field=form.tax_id %}
+        {% include "_field.html" with field=form.email %}
+        {% include "_field.html" with field=form.phone %}
+        {% include "_field.html" with field=form.notes wide=True %}
+      </fieldset>
+      {% if can_edit %}<div class="actions wide"><button class="primary" type="submit">Save supplier</button></div>{% endif %}
+    </form>
+  </section>
+  <section class="card">
+    <h2>Purchases</h2>
+    {% if history %}
+      <div class="table-scroll">
+        <table class="list">
+          <thead><tr><th>Date</th><th>Invoice</th><th class="num">Lines</th><th class="num">Total</th></tr></thead>
+          <tbody>
+            {% for row in history %}
+              <tr>
+                <td><a class="row-link" href="{% url 'purchase' row.pk %}">{{ row.purchased_on|date:"Y-m-d" }}</a></td>
+                <td>{{ row.invoice_number|default:"—" }}</td>
+                <td class="num">{{ row.line_count }}</td>
+                <td class="num">{{ row.currency }} {{ row.total|default:"0.00"|floatformat:2 }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted">No purchases from this supplier yet.</p>
+    {% endif %}
+  </section>
+{% endblock %}

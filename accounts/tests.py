@@ -206,6 +206,58 @@ class AccessPageTests(TestCase):
         self.assertContains(opened, "-58000.50")
 
 
+class ProductsAccessTests(TestCase):
+    def test_the_access_page_grants_and_removes_catalog_and_purchasing(self):
+        admin = User.objects.create_superuser("admin", "admin@example.com", "secret")
+        user = User.objects.create_user("ada", email="ada@example.com")
+        assign_default_organization(admin)
+        assign_default_organization(user)
+        self.client.force_login(admin)
+        page = self.client.get("/access/")
+        self.assertContains(page, 'aria-label="catalog"')
+        self.assertContains(page, 'aria-label="purchasing"')
+        for app in ("catalog", "purchasing"):
+            self.client.post(f"/access/{user.pk}/", {"app": app, "enabled": "on"})
+        self.client.force_login(user)
+        self.assertEqual(self.client.get("/catalog/").status_code, 200)
+        self.assertEqual(self.client.get("/purchases/").status_code, 200)
+        self.client.force_login(admin)
+        self.client.post(f"/access/{user.pk}/", {"app": "purchasing", "enabled": "off"})
+        self.client.force_login(user)
+        self.assertEqual(self.client.get("/purchases/").status_code, 403)
+        self.assertEqual(self.client.get("/catalog/").status_code, 200)
+
+    def test_the_menu_reads_app_access_in_one_query(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        user = User.objects.create_user("ada", email="ada@example.com")
+        organization = assign_default_organization(user)
+        for app in (AppAccess.App.CASHFLOW, AppAccess.App.CATALOG):
+            AppAccess.objects.create(user=user, organization=organization, app=app)
+        self.client.force_login(user)
+        with CaptureQueriesContext(connection) as queries:
+            page = self.client.get("/profile/")
+        access_queries = [query for query in queries if "accounts_appaccess" in query["sql"]]
+        self.assertEqual(len(access_queries), 1)
+        self.assertContains(page, 'href="/cashflow/"')
+        self.assertContains(page, 'href="/catalog/"')
+        self.assertNotContains(page, 'href="/purchases/"')
+
+
+class ThemeTests(TestCase):
+    def test_the_theme_uses_the_logo_colors_and_no_purple(self):
+        user = User.objects.create_user("ada", email="ada@example.com")
+        assign_default_organization(user)
+        self.client.force_login(user)
+        page = self.client.get("/profile/").content.decode()
+        self.assertIn("--neon: #5fd68a;", page)
+        self.assertIn("--ink: #151b22;", page)
+        self.assertIn('class="brand-name">Vimple<', page)
+        for purple in ("#7c3aed", "#d8b4fe", "#f3e8ff"):
+            self.assertNotIn(purple, page)
+
+
 class OrganizationTests(TestCase):
     def test_setup_names_the_organization_and_makes_the_user_owner(self):
         user = User.objects.create_user("ada", email="ada@example.com")

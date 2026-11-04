@@ -1,0 +1,10 @@
+<div class="line{% if line.errors %} has-error{% endif %}">
+  <input type="hidden" name="line_id" value="{{ line.id|default:'' }}">
+  <input type="text" name="line_product" list="catalog-products" value="{{ line.product_text|default:'' }}" placeholder="PERF-ONLY-885-30ML" aria-label="Product SKU" autocomplete="off" class="mono">
+  <input type="text" name="line_quantity" value="{{ line.quantity_text|default:'1' }}" inputmode="numeric" aria-label="Quantity">
+  <input type="text" name="line_unit_cost" value="{{ line.unit_cost_text|default:'' }}" inputmode="decimal" placeholder="0.00" aria-label="Unit cost">
+  <input type="text" name="line_supplier_sku" value="{{ line.supplier_sku|default:'' }}" aria-label="Supplier code" maxlength="64">
+  <span class="line-total num"></span>
+  <button type="button" class="line-remove" aria-label="Remove line">×</button>
+  {% for error in line.errors %}<p class="error line-error">{{ error }}</p>{% endfor %}
+</div>
