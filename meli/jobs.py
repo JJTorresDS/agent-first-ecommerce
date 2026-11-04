@@ -89,12 +89,7 @@ def enqueue_postsale_sync(organization):
 
 def run_next_postsale_job(block_seconds=BLOCK_SECONDS):
     """Run one queued sync. Returns False when the list is empty."""
-    item = _client().brpop(QUEUE, timeout=block_seconds)
-    if not item:
-        return False
-    _queue_name, organization_id = item
-    _run_job(organization_id)
-    return True
+    return run_next_job(block_seconds, queues=(QUEUE,))
 
 
 def _run_job(organization_id):
@@ -187,17 +182,16 @@ def dispatch_reply(conversation):
 
 def run_next_reply_job(block_seconds=BLOCK_SECONDS):
     """Run one queued reply. Returns False when the list is empty."""
-    item = _client().brpop(REPLY_QUEUE, timeout=block_seconds)
-    if not item:
-        return False
-    _queue_name, payload = item
+    return run_next_job(block_seconds, queues=(REPLY_QUEUE,))
+
+
+def _run_reply_payload(payload):
     try:
         job = json.loads(payload)
     except ValueError:
         logger.exception("Reply queue item was not JSON")
-        return True
+        return
     run_reply_job(job.get("organization_id"), job.get("conversation_id"))
-    return True
 
 
 def run_reply_job(organization_id, conversation_id):
@@ -321,17 +315,15 @@ def _refresh_in_thread(organization_id):
 
 def run_next_refresh_job(block_seconds=BLOCK_SECONDS):
     """Run one queued refresh. Returns False when the list is empty."""
-    item = _client().brpop(REFRESH_QUEUE, timeout=block_seconds)
-    if not item:
-        return False
-    _queue_name, organization_id = item
-    _run_refresh(organization_id)
-    return True
+    return run_next_job(block_seconds, queues=(REFRESH_QUEUE,))
 
 
 def _run_refresh(organization_id):
     key = refresh_status_key(organization_id)
     client = _client()
+    if client.get(key) in {"ok", "failed"}:
+        # A duplicate queued before the last refresh finished.
+        return
     client.set(key, "running", ex=ACTIVE_TTL)
     close_old_connections()
     try:
@@ -421,17 +413,16 @@ def dispatch_notification(parsed):
 
 def run_next_notification_job(block_seconds=BLOCK_SECONDS):
     """Run one queued notification. Returns False when the list is empty."""
-    item = _client().brpop(NOTIFICATION_QUEUE, timeout=block_seconds)
-    if not item:
-        return False
-    _queue_name, payload = item
+    return run_next_job(block_seconds, queues=(NOTIFICATION_QUEUE,))
+
+
+def _run_notification_payload(payload):
     try:
         job = json.loads(payload)
     except ValueError:
         logger.exception("Notification queue item was not JSON")
-        return True
+        return
     run_notification_job(job)
-    return True
 
 
 def run_notification_job(job):
@@ -454,13 +445,34 @@ def run_notification_job(job):
         close_old_connections()
 
 
+# Replies first: a person is waiting on them. BRPOP takes the first non-empty list.
+WORKER_QUEUES = (REPLY_QUEUE, NOTIFICATION_QUEUE, QUEUE, REFRESH_QUEUE)
+
+
+def run_next_job(block_seconds=BLOCK_SECONDS, queues=WORKER_QUEUES):
+    """Run one job from the first of these queues that has one.
+
+    Waits up to block_seconds. Redis reads a timeout of 0 as wait forever, so
+    the wait is always at least one second. Returns False when nothing came.
+    """
+    item = _client().brpop(list(queues), timeout=max(1, int(block_seconds)))
+    if not item:
+        return False
+    queue, value = item
+    handlers = {
+        REPLY_QUEUE: _run_reply_payload,
+        NOTIFICATION_QUEUE: _run_notification_payload,
+        QUEUE: _run_job,
+        REFRESH_QUEUE: _run_refresh,
+    }
+    handlers[queue](value)
+    return True
+
+
 def _worker_loop():
     while True:
         try:
-            run_next_postsale_job()
-            run_next_notification_job(block_seconds=0)
-            run_next_reply_job(block_seconds=0)
-            run_next_refresh_job(block_seconds=0)
+            run_next_job()
         except Exception:
             logger.exception("Post-sale worker lost the Redis connection")
             close_old_connections()

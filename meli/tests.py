@@ -710,7 +710,14 @@ class ItemQuestionTests(TestCase):
     def test_reply_is_queued_until_the_worker_runs(self):
         import json
 
-        from meli.jobs import REPLY_QUEUE, reply_status_key, run_next_reply_job, run_reply_job
+        from meli.jobs import (
+            REFRESH_QUEUE,
+            REPLY_QUEUE,
+            refresh_status_key,
+            reply_status_key,
+            run_next_job,
+            run_reply_job,
+        )
 
         project_question(
             ItemQuestion.objects.create(
@@ -765,7 +772,17 @@ class ItemQuestionTests(TestCase):
             run_reply_job(other.pk, conversation.pk)
             self.assertEqual(opened.call_count, 0)
             self.assertEqual(ItemQuestion.objects.get().answer_text, "")
-            self.assertTrue(run_next_reply_job(block_seconds=0))
+            # The worker waits on every queue at once and takes the reply first.
+            fake.lpush(REFRESH_QUEUE, str(self.organization.pk))
+            self.assertTrue(run_next_job())
+            self.assertEqual(fake.lists[REFRESH_QUEUE], [str(self.organization.pk)])
+            calls = opened.call_count
+            # A refresh queued before the last one finished is skipped.
+            fake.set(refresh_status_key(self.organization.pk), "ok")
+            self.assertTrue(run_next_job())
+            self.assertEqual(fake.lists[REFRESH_QUEUE], [])
+            self.assertEqual(opened.call_count, calls)
+            self.assertFalse(run_next_job())
         self.assertEqual(fake.values[reply_status_key(conversation.pk)], "ok")
         self.assertEqual(ItemQuestion.objects.get().answer_text, "Si hay")
         self.assertFalse(
@@ -1116,11 +1133,14 @@ class _FakeRedis:
         self.lists.setdefault(key, []).insert(0, value)
         return len(self.lists[key])
 
-    def brpop(self, key, timeout=0):
-        items = self.lists.get(key) or []
-        if not items:
-            return None
-        return (key, items.pop())
+    def brpop(self, keys, timeout=0):
+        if timeout <= 0:
+            raise AssertionError("Redis reads a timeout of 0 as wait forever.")
+        for key in [keys] if isinstance(keys, str) else keys:
+            items = self.lists.get(key) or []
+            if items:
+                return (key, items.pop())
+        return None
 
 
 def sale_thread(text, message_id="msg-1", sender=99, created=None):
