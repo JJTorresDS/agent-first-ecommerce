@@ -1,0 +1,4 @@
+<nav class="tabs" aria-label="Cashflow">
+  <a class="tab{% if active_tab == 'movements' %} active{% endif %}" href="{% url 'cashflow' %}">Movements</a>
+  <a class="tab{% if active_tab == 'settings' %} active{% endif %}" href="{% url 'cashflow_settings' %}">Settings</a>
+</nav>

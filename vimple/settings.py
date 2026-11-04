@@ -50,6 +50,11 @@ MELI_AUTH_URL = os.environ.get(
 )
 MELI_TOKEN_URL = "https://api.mercadolibre.com/oauth/token"
 MELI_WEBHOOK_SECRET = os.environ.get("MELI_WEBHOOK_SECRET", "")
+# Sent as X-API-Key to the n8n receipt parser webhook.
+RECEIPT_PARSER_API_KEY = os.environ.get("RECEIPT_PARSER_API_KEY", "")
+# Google Picker for choosing receipt folders. Empty hides the Drive buttons.
+GOOGLE_PICKER_API_KEY = os.environ.get("GOOGLE_PICKER_API_KEY", "")
+GOOGLE_CLOUD_PROJECT_NUMBER = os.environ.get("GOOGLE_CLOUD_PROJECT_NUMBER", "")
 
 SITE_ID = 1
 
@@ -62,6 +67,8 @@ AUTHENTICATION_BACKENDS = [
 ACCOUNT_EMAIL_VERIFICATION = "none"
 SOCIALACCOUNT_EMAIL_VERIFICATION = "none"
 SOCIALACCOUNT_ONLY = True
+# Keeps Google tokens so an admin who connects Drive can pick receipt folders.
+SOCIALACCOUNT_STORE_TOKENS = True
 ACCOUNT_LOGIN_METHODS = {"email"}
 ACCOUNT_SIGNUP_FIELDS = ["email*"]
 LOGIN_URL = "google_login"
@@ -78,7 +85,7 @@ SOCIALACCOUNT_PROVIDERS = {
             }
         ],
         "SCOPE": ["profile", "email"],
-        "AUTH_PARAMS": {"access_type": "online"},
+        "AUTH_PARAMS": {"access_type": "online", "include_granted_scopes": "true"},
         "EMAIL_AUTHENTICATION": True,
     }
 }

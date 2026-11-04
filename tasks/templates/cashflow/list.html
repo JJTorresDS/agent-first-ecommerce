@@ -3,6 +3,7 @@
 {% block title %}Cashflow{% endblock %}
 
 {% block content %}
+  {% with active_tab="movements" %}{% include "cashflow/_tabs.html" %}{% endwith %}
   <h1>Cashflow</h1>
   <form
     class="filters"

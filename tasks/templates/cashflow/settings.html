@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+
+{% block title %}Cashflow settings{% endblock %}
+
+{% block content %}
+  {% with active_tab="settings" %}{% include "cashflow/_tabs.html" %}{% endwith %}
+  <section class="card">
+    <h1>Receipt folders</h1>
+    <p class="muted">The receipt parser reads these Google Drive folders for {{ organization.name }}. Paste a folder ID or a Drive link{% if picker %}, or choose it in Drive{% endif %}.</p>
+    {% if saved %}<p class="muted">Folders saved.</p>{% endif %}
+    {% if picker %}
+      {% if drive_connected %}
+        <p class="muted">Google Drive is connected.</p>
+      {% else %}
+        <p><a class="primary" href="{{ drive_connect_url }}">Connect Google Drive</a></p>
+      {% endif %}
+    {% endif %}
+    <form id="folders-form" method="post" action="{% url 'cashflow_settings' %}"{% if picker %} data-token-url="{% url 'cashflow_drive_token' %}" data-key="{{ picker_api_key }}" data-app="{{ picker_app_id }}"{% endif %}>
+      {% csrf_token %}
+      {% for row in rows %}
+        <div class="folder-row">
+          <label for="folder-{{ forloop.counter }}">{{ row.label }}</label>
+          <div>
+            <input type="text" id="folder-{{ forloop.counter }}" name="{{ row.slot }}" value="{{ row.id }}" placeholder="Folder ID or Drive link"{% if not can_edit %} readonly{% endif %}>
+            <input type="hidden" name="{{ row.slot }}__name" value="{{ row.name }}">
+            <span class="folder-name muted">{% if row.name %}{{ row.name }}{% endif %}</span>
+            {% if row.error %}<p class="error">{{ row.error }}</p>{% endif %}
+          </div>
+          {% if picker and drive_connected %}
+            <button type="button" class="choose-folder" data-slot="{{ row.slot }}">Choose in Drive</button>
+          {% endif %}
+        </div>
+      {% endfor %}
+      {% if can_edit %}
+        <div class="actions">
+          <button class="primary" type="submit">Save folders</button>
+        </div>
+      {% endif %}
+    </form>
+  </section>
+  <section class="card">
+    <h1>Receipt parser</h1>
+    {% if run_error %}<p class="error">{{ run_error }}</p>{% endif %}
+    {% if missing %}<p class="muted">Missing: {{ missing|join:", " }}.</p>{% endif %}
+    {% include "cashflow/_parser_status.html" %}
+    {% if can_edit %}
+      <form method="post" action="{% url 'cashflow_parser_run' %}">
+        {% csrf_token %}
+        <div class="actions">
+          <button class="primary" type="submit"{% if parser_settings.last_run_status == "running" %} disabled{% endif %}>Run receipt parser</button>
+        </div>
+      </form>
+    {% else %}
+      <p class="muted">Only owners and admins can change the folders or run the parser.</p>
+    {% endif %}
+  </section>
+  {% if picker and drive_connected %}
+    <script>
+      (function () {
+        var form = document.getElementById("folders-form");
+        var ready = false;
+        window.cashflowPickerLoaded = function () {
+          gapi.load("picker", function () { ready = true; });
+        };
+        function fill(slot, doc) {
+          var input = form.querySelector('input[name="' + slot + '"]');
+          var name = form.querySelector('input[name="' + slot + '__name"]');
+          input.value = doc.id;
+          name.value = doc.name || "";
+          input.parentElement.querySelector(".folder-name").textContent = doc.name || "";
+        }
+        form.addEventListener("click", function (event) {
+          var button = event.target.closest(".choose-folder");
+          if (!button || !ready) return;
+          var csrf = form.querySelector('input[name="csrfmiddlewaretoken"]').value;
+          fetch(form.getAttribute("data-token-url"), { method: "POST", headers: { "X-CSRFToken": csrf }, credentials: "same-origin" })
+            .then(function (response) { return response.ok ? response.json() : Promise.reject(response); })
+            .then(function (data) {
+              var view = new google.picker.DocsView(google.picker.ViewId.FOLDERS)
+                .setSelectFolderEnabled(true)
+                .setIncludeFolders(true)
+                .setMimeTypes("application/vnd.google-apps.folder");
+              new google.picker.PickerBuilder()
+                .addView(view)
+                .setOAuthToken(data.access_token)
+                .setDeveloperKey(form.getAttribute("data-key"))
+                .setAppId(form.getAttribute("data-app"))
+                .setCallback(function (result) {
+                  if (result.action === google.picker.Action.PICKED && result.docs && result.docs[0]) {
+                    fill(button.getAttribute("data-slot"), result.docs[0]);
+                  }
+                })
+                .build()
+                .setVisible(true);
+            })
+            .catch(function () { alert("Google Drive could not be opened. Connect Google Drive again."); });
+        });
+      })();
+    </script>
+    <script async defer src="https://apis.google.com/js/api.js" onload="cashflowPickerLoaded()"></script>
+  {% endif %}
+{% endblock %}

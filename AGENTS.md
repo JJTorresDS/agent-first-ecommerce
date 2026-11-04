@@ -29,6 +29,12 @@ Organization is the tenant. Its UUID does not change. The name can.
 - The webhook stores the row and calls dispatch_notification. It makes no Mercado Libre calls, because Mercado Libre expects an answer in about 500 ms. The worker loads the notification.
 - Fetch post-sale messages with tag=post_sale and mark_as_read=false. Link the post-sale header to /ventas/<id>/detalle, not to the messages page, because opening the messages page marks the buyer's message read.
 
+## Cashflow receipt parser
+
+- CashflowParserSettings holds one organization's receipt folders. build_payload must keep the body the n8n trigger sent: organization_id plus files: [{organization_id, organization_name, receipts_folder, cost, profit}]. receipt-parserV2 reads that shape.
+- The parser key comes from RECEIPT_PARSER_API_KEY and is sent as X-API-Key. Never put it in a page, a log, or last_run_error.
+- Drive tokens belong to one user, not to the organization. The drive-token view returns only request.user's own token. Sign-in asks only for profile and email; the drive.file scope is added by Connect Google Drive.
+
 ## Tests
 
 - With DATABASE_URL set, manage.py test runs on the remote Neon database and is slow. Run DATABASE_URL= uv run python manage.py test --noinput to use in-memory SQLite.

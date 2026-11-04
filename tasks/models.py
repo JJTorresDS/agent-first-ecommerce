@@ -183,3 +183,65 @@ class CashflowMovement(TenantModel):
         if self.parsing_observations is None:
             return ""
         return json.dumps(self.parsing_observations, ensure_ascii=False)
+
+
+# Receipt folders the n8n parser reads, in the order the settings page shows them.
+FOLDER_SLOTS = [
+    ("receipts_folder", "Receipts inbox"),
+    ("cost.sueldos", "Cost · Salaries"),
+    ("cost.servicios", "Cost · Services"),
+    ("cost.insumos", "Cost · Supplies"),
+    ("cost.productos", "Cost · Products"),
+    ("profit.productos", "Income · Products"),
+    ("profit.servicios", "Income · Services"),
+]
+
+
+def folder_id(value):
+    """A Drive folder id from an id or a Drive link. Empty when it is neither."""
+    value = (value or "").strip()
+    if not value:
+        return ""
+    if _FILE_ID.fullmatch(value):
+        return value
+    return drive_file_id(value)
+
+
+class CashflowParserSettings(TenantModel):
+    """The receipt folders one organization sends to the receipt parser."""
+
+    class Status(models.TextChoices):
+        NONE = "", "Never run"
+        RUNNING = "running", "Running"
+        OK = "ok", "Started"
+        FAILED = "failed", "Failed"
+
+    folders = models.JSONField(default=dict, blank=True)
+    last_run_at = models.DateTimeField(null=True, blank=True)
+    last_run_status = models.CharField(
+        max_length=16, choices=Status.choices, default="", blank=True
+    )
+    last_run_error = models.CharField(max_length=200, blank=True)
+    last_run_by = models.EmailField(blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "cashflow_parser_settings"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization"],
+                name="uniq_cashflow_parser_settings_org",
+            ),
+        ]
+
+    def __str__(self):
+        return f"Parser settings for {self.organization_id}"
+
+    def folder(self, slot):
+        entry = self.folders.get(slot) if isinstance(self.folders, dict) else None
+        if not isinstance(entry, dict):
+            return {"id": "", "name": ""}
+        return {"id": str(entry.get("id") or ""), "name": str(entry.get("name") or "")}
+
+    def missing_slots(self):
+        return [label for slot, label in FOLDER_SLOTS if not self.folder(slot)["id"]]

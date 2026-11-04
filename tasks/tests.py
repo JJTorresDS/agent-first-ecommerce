@@ -1,5 +1,6 @@
 from datetime import date, timedelta
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
@@ -713,3 +714,294 @@ class HealthTests(SimpleTestCase):
         response = self.client.get("/health/")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.content, b"ok")
+
+
+FOLDERS = {
+    "receipts_folder": "1owUI7-o1n3MHrTJ8WHQjsG8NtnQOs4i1",
+    "cost.sueldos": "1FSYa6chwZych7vTx45dWy3jQDlHQwzjX",
+    "cost.servicios": "1A8SuBUHRLkCgW4LbdVu1Qezc7uKLwep5",
+    "cost.insumos": "1Z3YK0DRe1dtPI1O_wkhATzVGN1DtfDF4",
+    "cost.productos": "1uOkXMAOK74vwJCIRHAaH2Iy7K4GnFnBK",
+    "profit.productos": "1Qwsej_CQ1vP-Ncuk_-MpWsNPGWAqZ5Be",
+    "profit.servicios": "1WoyEqvI5HPKxcUcIsXXtsvKMXyZERW2y",
+}
+
+
+class _ParserResponse:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def read(self):
+        return b'{"ok": true}'
+
+
+class _GoogleResponse(_ParserResponse):
+    def __init__(self, payload):
+        self.payload = payload
+
+    def read(self):
+        import json
+
+        return json.dumps(self.payload).encode()
+
+
+@override_settings(
+    RECEIPT_PARSER_API_KEY="parser-key",
+    GOOGLE_PICKER_API_KEY="picker-key",
+    GOOGLE_CLOUD_PROJECT_NUMBER="123456",
+    GOOGLE_CLIENT_ID="client-id",
+    GOOGLE_CLIENT_SECRET="client-secret",
+)
+class CashflowSettingsTests(TestCase):
+    def setUp(self):
+        from accounts.models import Membership
+
+        self.organization = Organization.objects.create(name="Moli TLA")
+        self.user = User.objects.create_user("ada", email="ada@example.com")
+        Membership.objects.create(
+            user=self.user, organization=self.organization, role=Membership.Role.OWNER
+        )
+        AppAccess.objects.create(
+            user=self.user, app=AppAccess.App.CASHFLOW, organization=self.organization
+        )
+        self.other = Organization.objects.create(name="Other org")
+        self.client.force_login(self.user)
+
+    def _member(self, username, role, organization=None):
+        from accounts.models import Membership
+
+        organization = organization or self.organization
+        user = User.objects.create_user(username, email=f"{username}@example.com")
+        Membership.objects.create(user=user, organization=organization, role=role)
+        AppAccess.objects.create(user=user, app=AppAccess.App.CASHFLOW, organization=organization)
+        return user
+
+    def _save_all(self):
+        return self.client.post("/cashflow/settings/", FOLDERS)
+
+    def _google_token(self, user, token="live-token", expires_in=3600, refresh="refresh-1"):
+        from allauth.socialaccount.models import SocialAccount, SocialToken
+        from django.utils import timezone
+
+        account = SocialAccount.objects.create(user=user, provider="google", uid=f"uid-{user.pk}")
+        return SocialToken.objects.create(
+            account=account,
+            token=token,
+            token_secret=refresh,
+            expires_at=timezone.now() + timedelta(seconds=expires_in),
+        )
+
+    def test_settings_tab_saves_ids_and_drive_links_for_our_organization_only(self):
+        from tasks.models import CashflowParserSettings
+
+        CashflowParserSettings.objects.create(
+            organization=self.other,
+            folders={"receipts_folder": {"id": "OtherOrgFolder123", "name": "Other secret folder"}},
+        )
+        listing = self.client.get("/cashflow/")
+        self.assertContains(listing, 'href="/cashflow/settings/"')
+        values = dict(FOLDERS)
+        values["receipts_folder"] = (
+            "https://drive.google.com/drive/folders/1owUI7-o1n3MHrTJ8WHQjsG8NtnQOs4i1?usp=sharing"
+        )
+        values["receipts_folder__name"] = "Recibos"
+        response = self.client.post("/cashflow/settings/", values)
+        self.assertRedirects(response, "/cashflow/settings/?saved=1")
+        mine = CashflowParserSettings.objects.get(organization=self.organization)
+        self.assertEqual(mine.folder("receipts_folder"), {"id": FOLDERS["receipts_folder"], "name": "Recibos"})
+        self.assertEqual(mine.folder("profit.servicios")["id"], FOLDERS["profit.servicios"])
+        theirs = CashflowParserSettings.objects.get(organization=self.other)
+        self.assertEqual(theirs.folder("receipts_folder")["id"], "OtherOrgFolder123")
+        page = self.client.get("/cashflow/settings/")
+        self.assertContains(page, FOLDERS["cost.insumos"])
+        self.assertContains(page, "Recibos")
+        self.assertNotContains(page, "OtherOrgFolder123")
+        self.assertNotContains(page, "Other secret folder")
+
+    def test_bad_folder_values_are_rejected(self):
+        from tasks.models import CashflowParserSettings, folder_id
+
+        self.assertEqual(folder_id("https://evil.example.com/folders/abc"), "")
+        self.assertEqual(folder_id("not a folder!"), "")
+        self.assertEqual(folder_id(" abc_DEF-123 "), "abc_DEF-123")
+        response = self.client.post(
+            "/cashflow/settings/", {**FOLDERS, "cost.sueldos": "https://evil.example.com/folders/abc"}
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertContains(response, "Not a Drive folder ID or link.", status_code=400)
+        self.assertFalse(
+            CashflowParserSettings.objects.filter(organization=self.organization).exclude(folders={}).exists()
+        )
+
+    def test_contributor_sees_settings_but_cannot_change_or_run(self):
+        from accounts.models import Membership
+
+        contributor = self._member("bea", Membership.Role.CONTRIBUTOR)
+        self._save_all()
+        self.client.force_login(contributor)
+        page = self.client.get("/cashflow/settings/")
+        self.assertContains(page, FOLDERS["cost.sueldos"])
+        self.assertContains(page, "readonly")
+        self.assertNotContains(page, "Run receipt parser")
+        self.assertNotContains(page, "Connect Google Drive")
+        with patch("tasks.parser.urlopen", side_effect=AssertionError("network")):
+            self.assertEqual(self.client.post("/cashflow/settings/", FOLDERS).status_code, 403)
+            self.assertEqual(self.client.post("/cashflow/settings/run/").status_code, 403)
+            self.assertEqual(self.client.post("/cashflow/settings/drive-token/").status_code, 403)
+
+    def test_user_without_cashflow_access_gets_the_pending_page(self):
+        from accounts.models import Membership
+
+        outsider = User.objects.create_user("cid", email="cid@example.com")
+        Membership.objects.create(user=outsider, organization=self.organization, role=Membership.Role.ADMIN)
+        self.client.force_login(outsider)
+        self.assertEqual(self.client.get("/cashflow/settings/").status_code, 403)
+        self.assertEqual(self.client.post("/cashflow/settings/run/").status_code, 403)
+
+    def test_run_sends_the_n8n_body_with_the_key_for_our_organization(self):
+        import json
+
+        from tasks.models import CashflowParserSettings
+        from tasks.parser import RECEIPT_PARSER_URL
+
+        CashflowParserSettings.objects.create(
+            organization=self.other,
+            folders={slot: {"id": "OtherOrgFolder123", "name": ""} for slot in FOLDERS},
+        )
+        self._save_all()
+        sent = []
+
+        def open_parser(request, timeout=30):
+            sent.append(request)
+            return _ParserResponse()
+
+        with patch("tasks.parser.urlopen", side_effect=open_parser):
+            response = self.client.post("/cashflow/settings/run/")
+        self.assertRedirects(response, "/cashflow/settings/")
+        self.assertEqual(len(sent), 1)
+        request = sent[0]
+        self.assertEqual(request.full_url, RECEIPT_PARSER_URL)
+        self.assertEqual(request.get_method(), "POST")
+        self.assertEqual(request.get_header("X-api-key"), "parser-key")
+        org = str(self.organization.pk)
+        self.assertEqual(
+            json.loads(request.data),
+            {
+                "organization_id": org,
+                "files": [
+                    {
+                        "organization_id": org,
+                        "organization_name": "Moli TLA",
+                        "receipts_folder": FOLDERS["receipts_folder"],
+                        "cost": {
+                            "sueldos": FOLDERS["cost.sueldos"],
+                            "servicios": FOLDERS["cost.servicios"],
+                            "insumos": FOLDERS["cost.insumos"],
+                            "productos": FOLDERS["cost.productos"],
+                        },
+                        "profit": {
+                            "productos": FOLDERS["profit.productos"],
+                            "servicios": FOLDERS["profit.servicios"],
+                        },
+                    }
+                ],
+            },
+        )
+        self.assertNotIn("OtherOrgFolder123", request.data.decode())
+        mine = CashflowParserSettings.objects.get(organization=self.organization)
+        self.assertEqual(mine.last_run_status, "ok")
+        self.assertEqual(mine.last_run_by, "ada@example.com")
+        self.assertEqual(CashflowParserSettings.objects.get(organization=self.other).last_run_status, "")
+        page = self.client.get("/cashflow/settings/")
+        self.assertContains(page, "The receipt parser started")
+        self.assertNotContains(page, "parser-key")
+
+    def test_failed_run_retries_three_times_and_hides_the_key(self):
+        from urllib.error import HTTPError
+
+        from tasks.models import CashflowParserSettings
+
+        self._save_all()
+        tries = []
+
+        def refuse(request, timeout=30):
+            tries.append(request)
+            raise HTTPError(request.full_url, 500, "parser-key broke", {}, None)
+
+        with patch("tasks.parser.urlopen", side_effect=refuse), patch("tasks.parser.time.sleep") as slept:
+            self.client.post("/cashflow/settings/run/")
+        self.assertEqual(len(tries), 3)
+        self.assertEqual(slept.call_count, 2)
+        mine = CashflowParserSettings.objects.get(organization=self.organization)
+        self.assertEqual(mine.last_run_status, "failed")
+        self.assertNotIn("parser-key", mine.last_run_error)
+        page = self.client.get("/cashflow/settings/")
+        self.assertContains(page, "did not start")
+        self.assertNotContains(page, "parser-key")
+
+    def test_run_refuses_missing_folders_missing_key_or_a_run_in_progress(self):
+        from tasks.models import CashflowParserSettings
+
+        with patch("tasks.parser.urlopen", side_effect=AssertionError("network")):
+            response = self.client.post("/cashflow/settings/run/")
+            self.assertRedirects(response, "/cashflow/settings/?run=missing", fetch_redirect_response=False)
+            page = self.client.get(response["Location"])
+            self.assertContains(page, "Choose every folder before running the parser.")
+            self._save_all()
+            with override_settings(RECEIPT_PARSER_API_KEY=""):
+                response = self.client.post("/cashflow/settings/run/")
+            self.assertRedirects(response, "/cashflow/settings/?run=nokey", fetch_redirect_response=False)
+            CashflowParserSettings.objects.filter(organization=self.organization).update(last_run_status="running")
+            self.client.post("/cashflow/settings/run/")
+            status = self.client.get("/cashflow/settings/", headers={"HX-Request": "true"})
+        self.assertContains(status, 'hx-trigger="every 3s"')
+        self.assertNotContains(status, "<html")
+
+    def test_drive_token_is_only_the_signed_in_admins_own(self):
+        from accounts.models import Membership
+
+        admin = self._member("dee", Membership.Role.ADMIN)
+        self._google_token(admin, token="dee-token")
+        page = self.client.get("/cashflow/settings/")
+        self.assertContains(page, "Connect Google Drive")
+        self.assertContains(page, "process=connect")
+        self.assertContains(page, "drive.file")
+        self.assertNotContains(page, "Choose in Drive")
+        response = self.client.post("/cashflow/settings/drive-token/")
+        self.assertEqual(response.status_code, 409)
+        self.assertNotIn(b"dee-token", response.content)
+        self._google_token(self.user, token="ada-token")
+        response = self.client.post("/cashflow/settings/drive-token/")
+        self.assertEqual(response.json(), {"access_token": "ada-token"})
+        self.assertEqual(response["Cache-Control"], "no-store")
+        page = self.client.get("/cashflow/settings/")
+        self.assertContains(page, "Choose in Drive")
+        self.assertContains(page, 'data-key="picker-key"')
+        self.assertEqual(self.client.get("/cashflow/settings/drive-token/").status_code, 405)
+
+    def test_expired_drive_token_is_refreshed(self):
+        stored = self._google_token(self.user, token="old-token", expires_in=-10)
+        calls = []
+
+        def google(request, timeout=15):
+            calls.append(request)
+            return _GoogleResponse({"access_token": "new-token", "expires_in": 3599})
+
+        with patch("tasks.drive.urlopen", side_effect=google):
+            response = self.client.post("/cashflow/settings/drive-token/")
+        self.assertEqual(response.json(), {"access_token": "new-token"})
+        self.assertIn(b"refresh_token=refresh-1", calls[0].data)
+        stored.refresh_from_db()
+        self.assertEqual(stored.token, "new-token")
+
+    @override_settings(GOOGLE_PICKER_API_KEY="", GOOGLE_CLOUD_PROJECT_NUMBER="")
+    def test_without_picker_settings_there_are_no_drive_buttons(self):
+        self._google_token(self.user)
+        page = self.client.get("/cashflow/settings/")
+        self.assertNotContains(page, "Choose in Drive")
+        self.assertNotContains(page, "Connect Google Drive")
+        self.assertNotContains(page, "apis.google.com")
+        self.assertContains(page, "Save folders")

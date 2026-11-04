@@ -1,0 +1,11 @@
+<div id="parser-status"{% if parser_settings.last_run_status == "running" %} hx-get="{% url 'cashflow_settings' %}" hx-trigger="every 3s" hx-target="#parser-status" hx-swap="outerHTML"{% endif %}>
+  {% if parser_settings.last_run_status == "running" %}
+    <p class="muted"><span class="spinner" aria-hidden="true" style="display:inline-block;vertical-align:middle;margin-right:0.4rem;"></span>Sending the folders to the receipt parser…</p>
+  {% elif parser_settings.last_run_status == "ok" %}
+    <p class="muted">The receipt parser started{% if parser_settings.last_run_at %} {{ parser_settings.last_run_at|date:"Y-m-d H:i" }}{% endif %}{% if parser_settings.last_run_by %} by {{ parser_settings.last_run_by }}{% endif %}. New movements appear in the table when it finishes.</p>
+  {% elif parser_settings.last_run_status == "failed" %}
+    <p class="error">The receipt parser did not start{% if parser_settings.last_run_error %}: {{ parser_settings.last_run_error }}{% endif %}</p>
+  {% else %}
+    <p class="muted">The receipt parser has not been started from here yet.</p>
+  {% endif %}
+</div>

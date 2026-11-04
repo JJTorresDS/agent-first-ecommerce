@@ -119,6 +119,9 @@
     .topbar-brand, button.menu-toggle, .nav-backdrop, .thread-back { display: none; }
     .topbar.mobile-only { display: none; }
     .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .folder-row { display: grid; grid-template-columns: 12rem 1fr auto; gap: 0.5rem 0.75rem; align-items: start; margin-bottom: 0.75rem; }
+    .folder-row label { padding-top: 0.45rem; }
+    .folder-name { display: block; margin: 0.25rem 0 0; }
     .alerts-wrap { position: relative; }
     button.alerts { border: 0; background: transparent; padding: 0; cursor: pointer; }
     .alerts { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; color: #111; border-radius: 8px; }
@@ -316,6 +319,8 @@
       .filters > div { flex: 1 1 calc(50% - 0.75rem); min-width: 0; }
       .filters input, .filters select { width: 100%; }
       .tabs { overflow-x: auto; }
+      .folder-row { grid-template-columns: 1fr; gap: 0.35rem; }
+      .folder-row label { padding-top: 0; }
       .alerts-panel { width: min(18rem, calc(100vw - 2rem)); }
       .chat { height: calc(100vh - 9rem); height: calc(100dvh - 9rem); min-height: 18rem; }
       .chat-list { width: 100%; flex: 1; }

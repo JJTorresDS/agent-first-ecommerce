@@ -3,14 +3,19 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlencode
 
+from django.conf import settings
 from django.core.paginator import Paginator
-from django.http import HttpResponse
-from django.shortcuts import render
+from django.http import HttpResponse, HttpResponseForbidden, JsonResponse
+from django.shortcuts import redirect, render
+from django.urls import reverse
+from django.views.decorators.http import require_POST
 
 from accounts.access import require_app
-from accounts.models import AppAccess, membership_for
+from accounts.models import AppAccess, can_manage_members, membership_for
 
-from .models import CashflowMovement
+from . import drive
+from .models import FOLDER_SLOTS, CashflowMovement, CashflowParserSettings, folder_id
+from .parser import start_parser
 
 PAGE_SIZE = 25
 
@@ -146,4 +151,124 @@ def cashflow_csv(request):
                 movement.source_file_url(),
             ]
         )
+    return response
+
+
+RUN_ERRORS = {
+    "nokey": "The receipt parser key is not set on the server.",
+    "missing": "Choose every folder before running the parser.",
+}
+
+
+def _parser_settings(organization):
+    parser_settings, _created = CashflowParserSettings.objects.get_or_create(
+        organization=organization
+    )
+    return parser_settings
+
+
+def _settings_context(request, membership, parser_settings, errors=None, values=None):
+    errors = errors or {}
+    values = values or {}
+    can_edit = can_manage_members(membership)
+    rows = []
+    for slot, label in FOLDER_SLOTS:
+        saved = parser_settings.folder(slot)
+        rows.append(
+            {
+                "slot": slot,
+                "label": label,
+                "id": values.get(slot, saved["id"]),
+                "name": saved["name"],
+                "error": errors.get(slot, ""),
+            }
+        )
+    picker = can_edit and drive.picker_enabled()
+    connected = picker and drive.drive_connected(request.user)
+    return {
+        "rows": rows,
+        "parser_settings": parser_settings,
+        "can_edit": can_edit,
+        "picker": picker,
+        "drive_connected": connected,
+        "drive_connect_url": (
+            drive.connect_url(request.user, reverse("cashflow_settings"))
+            if picker and not connected
+            else ""
+        ),
+        "picker_api_key": settings.GOOGLE_PICKER_API_KEY if picker else "",
+        "picker_app_id": settings.GOOGLE_CLOUD_PROJECT_NUMBER if picker else "",
+        "run_error": RUN_ERRORS.get(request.GET.get("run", ""), ""),
+        "missing": parser_settings.missing_slots(),
+        "saved": request.GET.get("saved") == "1",
+    }
+
+
+@require_app(AppAccess.App.CASHFLOW)
+def cashflow_settings(request):
+    membership = membership_for(request.user)
+    if membership is None:
+        return redirect("organization_setup")
+    parser_settings = _parser_settings(membership.organization)
+    if request.headers.get("HX-Request") and request.method == "GET":
+        context = _settings_context(request, membership, parser_settings)
+        return render(request, "cashflow/_parser_status.html", context)
+    if request.method == "POST":
+        if not can_manage_members(membership):
+            return HttpResponseForbidden()
+        folders = {}
+        errors = {}
+        values = {}
+        for slot, _label in FOLDER_SLOTS:
+            raw = request.POST.get(slot, "").strip()
+            values[slot] = raw
+            chosen = folder_id(raw)
+            if raw and not chosen:
+                errors[slot] = "Not a Drive folder ID or link."
+                continue
+            if not chosen:
+                continue
+            saved = parser_settings.folder(slot)
+            name = request.POST.get(f"{slot}__name", "").strip()[:200]
+            if chosen == saved["id"] and not name:
+                name = saved["name"]
+            folders[slot] = {"id": chosen, "name": name}
+        if errors:
+            context = _settings_context(request, membership, parser_settings, errors, values)
+            return render(request, "cashflow/settings.html", context, status=400)
+        parser_settings.folders = folders
+        parser_settings.save(update_fields=["folders", "updated_at"])
+        return redirect(f"{reverse('cashflow_settings')}?saved=1")
+    context = _settings_context(request, membership, parser_settings)
+    return render(request, "cashflow/settings.html", context)
+
+
+@require_app(AppAccess.App.CASHFLOW)
+@require_POST
+def cashflow_parser_run(request):
+    membership = membership_for(request.user)
+    if membership is None:
+        return redirect("organization_setup")
+    if not can_manage_members(membership):
+        return HttpResponseForbidden()
+    error = start_parser(_parser_settings(membership.organization), request.user)
+    location = reverse("cashflow_settings")
+    if error:
+        location += "?" + urlencode({"run": error})
+    return redirect(location)
+
+
+@require_app(AppAccess.App.CASHFLOW)
+@require_POST
+def cashflow_drive_token(request):
+    """The signed-in admin's own Drive token for the Google Picker."""
+    membership = membership_for(request.user)
+    if membership is None or not can_manage_members(membership):
+        return HttpResponseForbidden()
+    try:
+        token = drive.access_token(request.user)
+    except (OSError, ValueError):
+        token = ""
+    response = JsonResponse({"access_token": token}, status=200 if token else 409)
+    response["Cache-Control"] = "no-store"
     return response

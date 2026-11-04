@@ -35,3 +35,9 @@ services:
         sync: false
       - key: REDIS_URL
         sync: false
+      - key: RECEIPT_PARSER_API_KEY
+        sync: false
+      - key: GOOGLE_PICKER_API_KEY
+        sync: false
+      - key: GOOGLE_CLOUD_PROJECT_NUMBER
+        sync: false
