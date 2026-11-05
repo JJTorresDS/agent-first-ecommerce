@@ -16,6 +16,7 @@ Organization is the tenant. Its UUID does not change. The name can.
 - Colors are the :root variables in templates/base.html, taken from the logo: charcoal (--ink) and grays, with neon green (--neon) only for accents: the active menu item, focus rings, the one main action per page (.accent), SKU chips (.sku) and active status pills. Don't hard-code new colors.
 - Check new pages at 390px as well as on desktop; wide tables go in .table-scroll.
 - The profile menu sits inside the dark sidebar but sets its own colors (.profile-panel); nothing in it may inherit from .sidebar.
+- Each organization row in the menu has two buttons in one switch form: the name (go=home, the organization page) and the message icon with its count (go=inbox). organization_switch only follows those two names, never a URL from the request.
 - Chats waiting per organization come from one grouped query over the user's own memberships (inbox.unread.unread_by_organization). The avatar badge counts only other organizations. /profile/unread/ is polled every 20 s, also while the tab is hidden (the chime matters most when you're in another tab), at once after an inbox list poll brings changes, and answers 204 when X-Unread-Version matches. latest is epoch milliseconds, compared as numbers; a newer incoming message (latest, from inbox.unread.latest_incoming) plays a Web Audio chime, even when the waiting total is unchanged (on by default, switch in the menu; tabs share the last chimed message in localStorage, so one tab chimes per message).
 
 ## Inbox and htmx

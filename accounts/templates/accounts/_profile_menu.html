@@ -30,11 +30,16 @@
             <form method="post" action="{% url 'organization_switch' %}" class="org-row-form" data-name="{{ item.organization.name|lower }}">
               {% csrf_token %}
               <input type="hidden" name="organization" value="{{ item.organization_id }}">
-              <button class="org-row{% if item.active %} current{% endif %}" type="submit"{% if item.active %} aria-current="true"{% endif %}>
-                <span class="org-check" aria-hidden="true">{% if item.active %}✓{% endif %}</span>
-                <span class="org-name">{{ item.organization.name }}</span>
-                <span class="count-pill{% if not item.unread %} empty{% endif %}" data-org="{{ item.organization_id }}" title="Chats waiting for a reply">{% if item.unread %}{{ item.unread }}{% endif %}</span>
-              </button>
+              <div class="org-row{% if item.active %} current{% endif %}">
+                <button class="org-open" type="submit" name="go" value="home" aria-label="Open {{ item.organization.name }}"{% if item.active %} aria-current="true"{% endif %}>
+                  <span class="org-check" aria-hidden="true">{% if item.active %}✓{% endif %}</span>
+                  <span class="org-name">{{ item.organization.name }}</span>
+                </button>
+                <button class="org-inbox{% if item.unread %} has-unread{% endif %}" type="submit" name="go" value="inbox" data-org="{{ item.organization_id }}" data-name="{{ item.organization.name }}" aria-label="Open the {{ item.organization.name }} inbox{% if item.unread %}: {{ item.unread }} chat{{ item.unread|pluralize }} waiting{% endif %}" title="Inbox">
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 3.5h10v7.2H6.2L3 13.2z"/></svg>
+                  <span class="org-count">{% if item.unread %}{{ item.unread }}{% endif %}</span>
+                </button>
+              </div>
             </form>
           {% endfor %}
         </div>

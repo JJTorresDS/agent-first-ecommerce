@@ -360,6 +360,9 @@ def impersonate_exit(request):
     return redirect(_RETURN_PLACES.get(back, "admin:index"))
 
 
+_SWITCH_DESTINATIONS = {"home": "organization", "inbox": "inbox"}
+
+
 @login_required
 @require_POST
 def organization_switch(request):
@@ -370,4 +373,5 @@ def organization_switch(request):
     if chosen is None:
         return HttpResponseForbidden("That organization is not yours.")
     ensure_profile(request.user, chosen.organization)
-    return redirect(request.POST.get("next") or "organization")
+    # Only these two places, never a URL from the request: no redirect to another site.
+    return redirect(_SWITCH_DESTINATIONS.get(request.POST.get("go"), "organization"))

@@ -694,8 +694,9 @@ class UnreadAcrossOrganizationsTests(TestCase):
         self.assertContains(page, "2 chats waiting in other organizations")
         menu = self.client.get("/profile/menu/").content.decode()
         self.assertIn('<span class="org-group-current">Molihaus</span>', menu)
-        self.assertLess(menu.index("Molihaus</span>\n                <span class=\"count-pill"), menu.index("Scent</span>"))
-        self.assertIn(f'data-org="{self.scent.id}" title="Chats waiting for a reply">2</span>', menu)
+        self.assertLess(menu.index('aria-label="Open Molihaus"'), menu.index('aria-label="Open Scent"'))
+        self.assertIn('aria-label="Open the Scent inbox: 2 chats waiting"', menu)
+        self.assertIn('class="org-inbox has-unread" type="submit" name="go" value="inbox"', menu)
         self.assertIn('title="2 waiting in other organizations">2</span>', menu)
         self.assertNotIn("Not mine", menu)
         self.assertNotIn('class="org-filter"', menu)
@@ -759,3 +760,25 @@ class UnreadAcrossOrganizationsTests(TestCase):
         )
         third = self.client.get("/profile/unread/", HTTP_X_UNREAD_VERSION=second["version"])
         self.assertEqual(third.status_code, 204)
+
+
+    def test_the_name_opens_the_organization_and_the_icon_its_inbox(self):
+        home = self.client.post("/organization/switch/", {"organization": str(self.scent.id), "go": "home"})
+        self.assertRedirects(home, "/organization/")
+        self.assertContains(self.client.get("/organization/"), "Scent")
+        inbox = self.client.post("/organization/switch/", {"organization": str(self.home.id), "go": "inbox"})
+        self.assertRedirects(inbox, "/inbox/", fetch_redirect_response=False)
+        self.assertEqual(self.user.profile.__class__.objects.get(user=self.user).organization_id, self.home.id)
+        for sneaky in ({"go": "https://evil.example.com/"}, {"next": "https://evil.example.com/"}, {"go": "/admin/"}):
+            response = self.client.post("/organization/switch/", {"organization": str(self.scent.id), **sneaky})
+            self.assertRedirects(response, "/organization/")
+        stranger = self.client.post("/organization/switch/", {"organization": str(self.theirs.id), "go": "inbox"})
+        self.assertEqual(stranger.status_code, 403)
+
+    def test_an_organization_without_waiting_chats_shows_a_plain_icon(self):
+        from inbox.models import Conversation
+
+        Conversation.objects.filter(organization=self.home).update(needs_reply=False)
+        menu = self.client.get("/profile/menu/").content.decode()
+        self.assertIn('aria-label="Open the Molihaus inbox" title="Inbox"', menu)
+        self.assertIn('class="org-inbox" type="submit" name="go" value="inbox"', menu)

@@ -513,6 +513,7 @@
       .line input[name="line_product"] { grid-column: 1 / -1; }
       .line .line-total { grid-column: 1 / 3; text-align: left; font-weight: 600; }
       .code-form { grid-template-columns: 5.5rem minmax(0, 1fr); }
+      button.org-inbox { min-width: 2.75rem; }
       .code-form button { grid-column: 1 / -1; }
       details.inline-edit[open] .code-form { width: min(20rem, 80vw); }
     }
@@ -537,12 +538,17 @@
     .org-list { max-height: 13.5rem; overflow-y: auto; overscroll-behavior: contain; }
     .org-row-form { margin: 0; }
     .org-row-form[hidden] { display: none; }
-    button.org-row { display: grid; grid-template-columns: 1.1rem minmax(0, 1fr) auto; align-items: center; gap: 0.45rem; width: 100%; padding: 0.42rem 0.6rem; border: 0; border-radius: 8px; background: transparent; color: var(--text); text-align: left; font: inherit; cursor: pointer; }
-    button.org-row.current { background: var(--neon-faint); font-weight: 600; }
+    .org-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: stretch; gap: 0.25rem; border-radius: 8px; }
+    .org-row.current { background: var(--neon-faint); font-weight: 600; }
+    .org-row button { border: 0; border-radius: 8px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+    button.org-open { display: grid; grid-template-columns: 1.1rem minmax(0, 1fr); align-items: center; gap: 0.45rem; min-width: 0; padding: 0.42rem 0.6rem; text-align: left; font-weight: inherit; }
+    button.org-inbox { display: inline-flex; align-items: center; justify-content: flex-end; gap: 0.3rem; min-width: 3.25rem; padding: 0.42rem 0.55rem; color: #9aa1a8; }
+    button.org-inbox svg { width: 1.05rem; height: 1.05rem; flex: none; }
+    button.org-inbox .org-count { min-width: 1.1rem; font-size: 0.75rem; font-weight: 700; text-align: center; }
+    button.org-inbox.has-unread { color: var(--danger); }
+    button.org-inbox.has-unread .org-count { padding: 0.05rem 0.35rem; border-radius: 999px; background: var(--danger); color: #fff; }
     .org-check { color: var(--neon-strong); font-weight: 700; }
     .org-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .count-pill { min-width: 1.35rem; padding: 0.05rem 0.4rem; border-radius: 999px; background: var(--danger); color: #fff; font-size: 0.72rem; font-weight: 700; text-align: center; }
-    .count-pill.empty { display: none; }
     .count-badge { padding: 0.05rem 0.4rem; border-radius: 999px; background: var(--danger); color: #fff; font-size: 0.72rem; font-weight: 700; }
     .org-links { padding-top: 0.2rem; }
     .org-links .profile-menu-link { font-size: 0.9rem; color: var(--muted); }
@@ -561,8 +567,10 @@
     .toggle-dot { position: absolute; top: 0.3rem; right: 0.3rem; width: 0.55rem; height: 0.55rem; border-radius: 50%; background: var(--danger); box-shadow: 0 0 0 2px var(--bg); }
     .toggle-dot[hidden] { display: none; }
     @media (hover: hover) {
-      .org-group summary:hover, button.org-row:hover { background: var(--gray-1); }
-      button.org-row.current:hover { background: var(--neon-soft); }
+      .org-group summary:hover, button.org-open:hover { background: var(--gray-1); }
+      .org-row.current button.org-open:hover { background: var(--neon-soft); }
+      button.org-inbox:hover { background: var(--gray-1); color: var(--text); }
+      button.org-inbox.has-unread:hover { background: #fde4e1; color: var(--danger); }
     }
   </style>
 </head>
@@ -843,11 +851,12 @@
       var latest = null;
       var counts = {};
       function paintMenu() {
-        document.querySelectorAll(".count-pill[data-org]").forEach(function (pill) {
-          var count = counts[pill.getAttribute("data-org")];
-          if (count === undefined) return;
-          pill.textContent = count ? String(count) : "";
-          pill.classList.toggle("empty", !count);
+        document.querySelectorAll(".org-inbox[data-org]").forEach(function (button) {
+          var count = counts[button.getAttribute("data-org")] || 0;
+          var name = button.getAttribute("data-name");
+          button.querySelector(".org-count").textContent = count ? String(count) : "";
+          button.classList.toggle("has-unread", !!count);
+          button.setAttribute("aria-label", "Open the " + name + " inbox" + (count ? ": " + count + (count === 1 ? " chat" : " chats") + " waiting" : ""));
         });
       }
       function paint(data) {
