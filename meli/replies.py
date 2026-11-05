@@ -22,8 +22,14 @@ def _refused(error):
 
 
 def send_post_sale(conversation, text):
+    """Post one message to the sale's chat.
+
+    One Mercado Libre call when the buyer is already known. The reply is stored from
+    Mercado Libre's answer at once; the full chat is re-read in the background.
+    """
     from .client import fetch_pack_messages, post_pack_message
-    from .postsale import buyer_id, load_pack, remember_reply
+    from .jobs import dispatch_notification
+    from .postsale import _message_when, buyer_id, remember_reply
     from .views import _account_for
 
     cleaned = (text or "").strip()
@@ -35,11 +41,13 @@ def send_post_sale(conversation, text):
     seller_id = str(account.meli_user_id)
     try:
         token = account.fresh_access_token()
-        thread = fetch_pack_messages(token, conversation.external_id, seller_id)
-        recipient = buyer_id(thread, seller_id)
+        recipient = conversation.counterpart_id
+        if not recipient:
+            thread = fetch_pack_messages(token, conversation.external_id, seller_id)
+            recipient = buyer_id(thread, seller_id)
         if not recipient:
             raise ReplyFailed("The buyer of this sale could not be found.")
-        post_pack_message(
+        sent = post_pack_message(
             token,
             conversation.external_id,
             seller_id,
@@ -50,10 +58,13 @@ def send_post_sale(conversation, text):
         raise
     except (OSError, ValueError, InvalidToken) as error:
         raise _refused(error) from None
-    try:
-        load_pack(conversation.organization, conversation.external_id)
-    except (OSError, ValueError, InvalidToken):
-        remember_reply(conversation, cleaned, timezone.now())
+    message = sent.get("message") if isinstance(sent.get("message"), dict) else sent
+    message_id = str(message.get("id") or "")[:80]
+    remember_reply(conversation, cleaned, _message_when(message) or timezone.now(), message_id)
+    # The whole chat, for every organization with this seller, without making the sender wait.
+    dispatch_notification(
+        {"topic": "messages", "resource": f"/packs/{conversation.external_id}", "user_id": seller_id}
+    )
 
 
 def send_item_question(conversation, text):

@@ -34,12 +34,15 @@
     var before = inboxBubbleBefore;
     inboxBubbleBefore = null;
     var now = inboxBubbleState();
-    if (!before || before.conversation !== now.conversation) inboxToBottom(false);
-    else if (before.last !== now.last) inboxToBottom(true);
-    else {
-      var bubbles = document.getElementById("bubbles");
-      if (bubbles) bubbles.scrollTop = before.top;
+    var bubbles = document.getElementById("bubbles");
+    if (!before || before.conversation !== now.conversation) {
+      inboxToBottom(false);
+      return;
     }
+    // The swap built a new list that starts at the top: put the reader back first, so a new
+    // message only scrolls the short way down instead of through the whole history.
+    if (bubbles) bubbles.scrollTop = before.top;
+    if (before.last !== now.last) inboxToBottom(true);
   }
   var inboxLoadingTimer = null;
   function inboxLoading(show) {

@@ -24,6 +24,11 @@ class Conversation(TenantModel):
     link_url = models.CharField(max_length=512, blank=True)
     needs_reply = models.BooleanField(default=False)
     last_message_at = models.DateTimeField(null=True, blank=True)
+    counterpart_id = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text="Who the replies go to on the channel, such as the Mercado Libre buyer.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

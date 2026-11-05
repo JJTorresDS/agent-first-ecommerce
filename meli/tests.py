@@ -751,7 +751,7 @@ class ItemQuestionTests(TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertContains(response, 'id="thread"')
             self.assertContains(response, "Si hay")
-            self.assertContains(response, 'hx-trigger="every 2s"')
+            self.assertContains(response, 'hx-trigger="every 1s"')
             self.assertContains(response, 'hx-swap-oob="outerHTML"')
             self.assertNotContains(response, 'id="chat-list"')
             self.assertContains(response, 'data-sending="true"')
@@ -1648,6 +1648,52 @@ class PostSaleTests(TestCase):
             )
         posts = [url for url in calls if url.split("?")[0].endswith(f"/sellers/468424240")]
         self.assertGreaterEqual(len(posts), 2)
+
+    def test_a_reply_to_a_known_buyer_is_one_call_and_shows_at_once(self):
+        now = timezone.now()
+        conversation = Conversation.objects.create(
+            organization=self.organization,
+            channel="meli-postsales",
+            external_id=PACK,
+            title="Willian Guido · Remera",
+            link_url=f"https://www.mercadolibre.com.ar/ventas/{PACK}/detalle",
+            needs_reply=True,
+            last_message_at=now,
+            counterpart_id="99",
+        )
+        Message.objects.create(
+            organization=self.organization, conversation=conversation, direction=Message.Direction.INBOUND,
+            body="Necesito medidas?", external_id="msg-1", sent_at=now,
+        )
+        calls = []
+
+        def open_response(request, timeout=15):
+            calls.append((request.get_method(), request.full_url))
+            if getattr(request, "data", None):
+                self.assertEqual(json.loads(request.data)["to"]["user_id"], 99)
+                return TokenResponse({"id": "msg-2", "text": "Mide 67x60cm", "message_date": {"created": timezone.now().isoformat()}})
+            if "/messages/packs/" in request.full_url:
+                return TokenResponse({
+                    "conversation_status": {"status": "active"},
+                    "paging": {"total": 2},
+                    "messages": [
+                        sale_thread("Necesito medidas?", created=now.isoformat())["messages"][0],
+                        {"id": "msg-2", "from": {"user_id": 468424240}, "to": {"user_id": 99}, "text": "Mide 67x60cm",
+                         "message_date": {"created": timezone.now().isoformat()}},
+                    ],
+                })
+            raise AssertionError(request.full_url)
+
+        with patch("meli.client.urlopen", side_effect=open_response):
+            self.client.post(f"/inbox/{conversation.pk}/reply/", {"text": "Mide 67x60cm"})
+        # The post comes first: no reading the chat to find the buyer, and no order fetch afterwards.
+        self.assertEqual(calls[0][0], "POST")
+        self.assertFalse(any("/orders/" in url for _method, url in calls))
+        outbound = conversation.messages.get(direction=Message.Direction.OUTBOUND)
+        self.assertEqual((outbound.external_id, outbound.body), ("msg-2", "Mide 67x60cm"))
+        self.assertFalse(conversation.messages.filter(external_id="pending").exists())
+        conversation.refresh_from_db()
+        self.assertFalse(conversation.needs_reply)
 
     def test_failed_reply_leaves_the_thread_unanswered(self):
         now = timezone.now()

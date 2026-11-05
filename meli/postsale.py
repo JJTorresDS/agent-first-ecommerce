@@ -77,6 +77,7 @@ def project_pack(organization, seller_id, pack_id, thread, order=None):
         needs_reply=needs_reply,
         last_message_at=latest["sent_at"],
         messages=bubbles,
+        counterpart_id=buyer_id(thread, seller_id),
     )
 
 
@@ -90,9 +91,20 @@ def load_pack(organization, pack_id, order=None):
     token = account.fresh_access_token()
     seller_id = _ident(account.meli_user_id)
     thread = fetch_pack_messages(token, pack_id, seller_id)
-    if order is None:
+    if order is None and not _titled(organization, pack_id):
         order = _order_for_pack(token, pack_id)
     return project_pack(organization, seller_id, pack_id, thread, order)
+
+
+def _titled(organization, pack_id):
+    """The chat already has its sale title and link, so the order needn't be fetched again."""
+    return (
+        Conversation.objects.filter(organization=organization, channel=CHANNEL, external_id=pack_id)
+        .exclude(title=pack_id)
+        .exclude(title="")
+        .exclude(link_url="")
+        .exists()
+    )
 
 
 def load_postsale_from_notification(parsed):
@@ -233,7 +245,7 @@ def sync_recent_postsale(organization):
         _load_quietly(organization, pack_id, None)
 
 
-def remember_reply(conversation, text, sent_at):
+def remember_reply(conversation, text, sent_at, message_id=""):
     messages = [
         {
             "external_id": message.external_id,
@@ -245,7 +257,7 @@ def remember_reply(conversation, text, sent_at):
     ]
     messages.append(
         {
-            "external_id": f"local:{conversation.external_id}:{int(sent_at.timestamp())}",
+            "external_id": message_id or f"local:{conversation.external_id}:{int(sent_at.timestamp())}",
             "direction": Message.Direction.OUTBOUND,
             "body": text,
             "sent_at": sent_at,

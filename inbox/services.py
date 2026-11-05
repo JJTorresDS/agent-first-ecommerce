@@ -21,6 +21,7 @@ def upsert_thread(
     needs_reply,
     last_message_at,
     messages,
+    counterpart_id="",
 ):
     """Create or update one conversation and replace its bubbles.
 
@@ -37,6 +38,7 @@ def upsert_thread(
             "link_url": _clip(link_url, 512),
             "needs_reply": needs_reply,
             "last_message_at": last_message_at,
+            **({"counterpart_id": _clip(counterpart_id, 64)} if counterpart_id else {}),
         },
     )
     keep = []
