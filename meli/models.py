@@ -277,6 +277,13 @@ class MeliListing(models.Model):
     catalog_listing = models.BooleanField(default=False)
     permalink = models.CharField(max_length=512, blank=True)
     thumbnail = models.CharField(max_length=512, blank=True)
+    units_per_sale = models.PositiveSmallIntegerField(
+        default=1,
+        help_text="Catalog units one sale takes: 2 for a Kit x2. Set in Vimple; the sync never changes it.",
+    )
+    logistic_type = models.CharField(max_length=32, blank=True, help_text="fulfillment means Mercado Libre Full.")
+    inventory_id = models.CharField(max_length=32, blank=True)
+    full_available = models.IntegerField(null=True, blank=True, help_text="Mercado Libre's Full stock.")
     meli_created_at = models.DateTimeField(null=True, blank=True)
     meli_updated_at = models.DateTimeField(null=True, blank=True)
     synced_at = models.DateTimeField()
@@ -308,6 +315,9 @@ class MeliListing(models.Model):
         if self.thumbnail.startswith("https://"):
             return self.thumbnail
         return ""
+
+    def is_full(self):
+        return self.logistic_type == "fulfillment"
 
     def link_state(self):
         if self.product_id:
@@ -345,5 +355,81 @@ class MeliListingSync(models.Model):
     def busy(self):
         """Queued or running, unless it has been stuck for longer than a sync can take."""
         if self.state not in {self.State.QUEUED, self.State.RUNNING}:
+            return False
+        return self.updated_at > timezone.now() - timedelta(minutes=30)
+
+
+class MeliSale(models.Model):
+    """One line of a Mercado Libre order. The inventory app turns it into stock movements."""
+
+    COUNTED = {"paid", "partially_refunded"}
+    CANCELLED = {"cancelled", "pending_cancel"}
+
+    organization = models.ForeignKey(
+        "accounts.Organization",
+        on_delete=models.CASCADE,
+        related_name="meli_sales",
+    )
+    order_id = models.CharField(max_length=32)
+    item_id = models.CharField(max_length=32)
+    variation_id = models.CharField(max_length=32, blank=True)
+    listing = models.ForeignKey(
+        MeliListing,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="sales",
+    )
+    title = models.CharField(max_length=255, blank=True)
+    seller_sku = models.CharField(max_length=120, blank=True)
+    quantity = models.PositiveIntegerField()
+    status = models.CharField(max_length=32, blank=True)
+    from_full = models.BooleanField(default=False)
+    sold_at = models.DateTimeField()
+    applied = models.BooleanField(default=False)
+    payload = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "meli_sale"
+        ordering = ["-sold_at", "-pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "order_id", "item_id", "variation_id"],
+                name="uniq_meli_sale_org_order_item",
+            ),
+        ]
+        indexes = [models.Index(fields=["organization", "applied"], name="meli_sale_org_applied")]
+
+    def __str__(self):
+        return f"{self.order_id} {self.item_id}"
+
+    def counts(self):
+        return self.status in self.COUNTED
+
+    def cancelled(self):
+        return self.status in self.CANCELLED
+
+
+class MeliSalesSync(models.Model):
+    """The last sales catch-up of one organization."""
+
+    organization = models.OneToOneField(
+        "accounts.Organization",
+        on_delete=models.CASCADE,
+        related_name="meli_sales_sync",
+    )
+    state = models.CharField(max_length=16, choices=MeliListingSync.State.choices, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    orders = models.PositiveIntegerField(default=0)
+    error = models.CharField(max_length=300, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "meli_sales_sync"
+
+    def busy(self):
+        if self.state not in {MeliListingSync.State.QUEUED, MeliListingSync.State.RUNNING}:
             return False
         return self.updated_at > timezone.now() - timedelta(minutes=30)

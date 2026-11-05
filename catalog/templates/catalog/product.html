@@ -78,6 +78,10 @@
         {% endif %}
       </form>
 
+      <div hx-get="{% url 'inventory_product' product.pk %}" hx-trigger="load" hx-swap="outerHTML">
+        <section class="card" id="stock-card"><h2 id="stock">Stock</h2><p class="muted"><span class="spinner" aria-hidden="true"></span> Loading…</p></section>
+      </div>
+
       <section class="card">
         <h2>Mercado Libre listings</h2>
         {% if listings %}

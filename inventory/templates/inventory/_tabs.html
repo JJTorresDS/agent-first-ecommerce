@@ -1,0 +1,6 @@
+<nav class="tabs" aria-label="Inventory">
+  <a class="tab{% if active_tab == 'stock' %} active{% endif %}" href="{% url 'inventory_stock' %}">Stock</a>
+  <a class="tab{% if active_tab == 'count' %} active{% endif %}" href="{% url 'inventory_count' %}">Count</a>
+  <a class="tab{% if active_tab == 'movements' %} active{% endif %}" href="{% url 'inventory_movements' %}">Movements</a>
+  <a class="tab{% if active_tab == 'sales' %} active{% endif %}" href="{% url 'inventory_sales' %}">Mercado Libre sales</a>
+</nav>

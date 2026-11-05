@@ -62,6 +62,7 @@ urlpatterns = [
     path("catalog/meli/", meli_listings, name="meli_listings"),
     path("catalog/", include("catalog.urls")),
     path("purchases/", include("purchasing.urls")),
+    path("inventory/", include("inventory.urls")),
     path("access/", access, name="access"),
     path("access/<int:user_id>/", set_app_access, name="set_app_access"),
     path("accounts/", include("allauth.urls")),

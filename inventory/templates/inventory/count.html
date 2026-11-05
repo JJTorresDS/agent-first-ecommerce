@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block title %}Count stock{% endblock %}
+
+{% block content %}
+  {% include "inventory/_tabs.html" %}
+  <div class="page-head"><h1>Count stock</h1></div>
+  {% if started_at %}
+    <p class="muted">Enter what you counted. Only products whose number changed get a count movement.</p>
+  {% else %}
+    <div class="card">
+      <p><strong>This is the first count.</strong> Saving it starts inventory: Mercado Libre sales from this moment on are taken out of stock automatically. Leave a box as it is for products you didn't count.</p>
+    </div>
+  {% endif %}
+  {% for error in errors %}<p class="error">{{ error }}</p>{% endfor %}
+  <form method="post">
+    {% csrf_token %}
+    <div class="card flush table-scroll">
+      <table class="list">
+        <thead><tr><th>SKU</th><th>Title</th><th class="num">Depósito</th><th class="num">Mercado Libre Full</th></tr></thead>
+        <tbody>
+          {% for product, units in rows %}
+            <tr>
+              <td><span class="sku">{{ product.sku }}</span></td>
+              <td>{{ product.title }}</td>
+              <td class="num"><input class="qty" type="number" min="0" name="own_{{ product.pk }}" value="{{ units.own }}" aria-label="{{ product.sku }} in the Depósito"{% if not can_edit %} disabled{% endif %}></td>
+              <td class="num"><input class="qty" type="number" min="0" name="meli_full_{{ product.pk }}" value="{{ units.meli_full }}" aria-label="{{ product.sku }} in Mercado Libre Full"{% if not can_edit %} disabled{% endif %}></td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="4" class="muted">No products to count.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if can_edit and rows %}
+      <div class="actions"><button class="accent" type="submit">{% if started_at %}Save count{% else %}Save the first count{% endif %}</button></div>
+    {% elif not can_edit %}
+      <p class="muted">Only owners and admins can change stock.</p>
+    {% endif %}
+  </form>
+{% endblock %}

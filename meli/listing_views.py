@@ -1,7 +1,9 @@
 from django.core.paginator import Paginator
 from django.db.models import Q
 from django.http import HttpResponseForbidden
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
+from django.utils.http import url_has_allowed_host_and_scheme
 
 from accounts.access import require_app
 from accounts.models import AppAccess, can_edit_products, membership_for
@@ -27,6 +29,20 @@ def meli_listings(request):
     if request.method == "POST":
         if not can_edit:
             return HttpResponseForbidden("Only owners and admins can sync the listings.")
+        if request.POST.get("action") == "units":
+            # Units one sale takes: 2 for a Kit x2. Past sales keep what they took.
+            listing = get_object_or_404(MeliListing, organization=organization, pk=request.POST.get("listing"))
+            try:
+                units = int(request.POST.get("units_per_sale") or "")
+            except ValueError:
+                units = 0
+            if 1 <= units <= 100:
+                listing.units_per_sale = units
+                listing.save(update_fields=["units_per_sale"])
+            back = request.POST.get("next") or ""
+            if not url_has_allowed_host_and_scheme(back, allowed_hosts={request.get_host()}, require_https=request.is_secure()):
+                back = reverse("meli_listings")
+            return redirect(back)
         from .jobs import dispatch_listing_sync
 
         if MercadoLibreAccount.objects.filter(organization=organization).exists():

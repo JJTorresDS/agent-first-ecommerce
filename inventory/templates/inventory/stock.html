@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+
+{% block title %}Stock{% endblock %}
+
+{% block content %}
+  {% include "inventory/_tabs.html" %}
+  <div class="page-head">
+    <h1>Stock</h1>
+    {% if can_edit %}<a class="accent" href="{% url 'inventory_count' %}">{% if started_at %}Count stock{% else %}Start with a count{% endif %}</a>{% endif %}
+  </div>
+  {% if request.GET.counted %}<p class="notice">Count saved: {{ request.GET.counted }} change{{ request.GET.counted|pluralize }}.</p>{% endif %}
+  {% if not started_at %}
+    <div class="card">
+      <p><strong>Inventory hasn't started.</strong> Count what you have once; from that moment purchases add stock when received and Mercado Libre sales take it out.</p>
+    </div>
+  {% else %}
+    <p class="muted">Counting since {{ started_at|date:"Y-m-d H:i" }}. Mercado Libre's numbers are read, never changed.</p>
+  {% endif %}
+  <form class="filters" method="get" action="{% url 'inventory_stock' %}" hx-get="{% url 'inventory_stock' %}" hx-target="#stock-results" hx-swap="outerHTML" hx-push-url="true" hx-trigger="change, submit, input changed delay:300ms from:#q">
+    <div class="grow">
+      <label for="q">Search</label>
+      <input id="q" type="search" name="q" value="{{ query }}" placeholder="SKU or title">
+    </div>
+    <div>
+      <label for="show">Show</label>
+      <select id="show" name="show">
+        <option value="">All products</option>
+        <option value="differences"{% if show == "differences" %} selected{% endif %}>Only differences with Mercado Libre</option>
+        <option value="out"{% if show == "out" %} selected{% endif %}>Out of stock</option>
+      </select>
+    </div>
+  </form>
+  {% include "inventory/_stock.html" %}
+{% endblock %}

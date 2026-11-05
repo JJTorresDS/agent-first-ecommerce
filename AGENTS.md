@@ -71,6 +71,19 @@ Organization is the tenant. Its UUID does not change. The name can.
 - Forms take the organization from membership_for, never from the request. Use catalog.forms.TenantForm so organization-scoped unique checks are form errors, and limit every select's queryset to the organization.
 - Purchase lines name products by SKU (purchasing.forms.read_lines), resolved inside the organization; a line id from another purchase is never moved.
 
+## Inventory
+
+- Stock is only ever written as an inventory.StockMovement, through inventory/ledger.py. On-hand is the sum of movements per product and location; never store or edit a stock number.
+- Locations: the organization's Depósito (own) and Mercado Libre Full (meli_full), created on first use.
+- Every automatic movement has a source_key (receipt, sale, cancel), unique per organization, so a webhook or click that repeats changes nothing.
+- A purchase adds stock only when received (ledger.receive), into the Depósito, never more than ordered. A received line can't be removed, lowered below what arrived, or change product.
+- Mercado Libre sales (meli.MeliSale, one per order line) come off stock only after InventorySettings.started_at (the first count), on a listing linked to a product, as quantity x MeliListing.units_per_sale. A Full listing (logistic_type fulfillment) sells out of Full. A cancelled order puts the units back once. Unlinked sales wait and apply when the listing links.
+- orders_v2 webhooks are fetched only for organizations whose inventory has started. Nothing is pushed to Mercado Libre; the stock page compares Vimple with Mercado Libre's numbers.
+
+## Access and impersonation
+
+- Only a superuser can view Vimple as another user, never as a superuser, themselves or an inactive user. A GET shows a confirmation; only a POST switches. The session keeps the superuser id and where to return (Access page or Django admin), written after login(), which empties the session.
+
 ## Tests
 
 - With DATABASE_URL set, manage.py test runs on the remote Neon database and is slow. Run DATABASE_URL= uv run python manage.py test --noinput to use in-memory SQLite.

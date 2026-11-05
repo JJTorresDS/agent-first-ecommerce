@@ -24,7 +24,8 @@ REPLY_QUEUE = _key("reply", "queue")
 REFRESH_QUEUE = _key("refresh", "queue")
 NOTIFICATION_QUEUE = _key("notification", "queue")
 LISTINGS_QUEUE = _key("listings", "queue")
-NOTIFICATION_TOPICS = {"questions", "messages", "items"}
+SALES_QUEUE = _key("sales", "queue")
+NOTIFICATION_TOPICS = {"questions", "messages", "items", "orders_v2"}
 ACTIVE_TTL = 30 * 60
 DONE_TTL = 2 * 60
 ERROR_TTL = 10 * 60
@@ -503,6 +504,10 @@ def run_notification_job(job):
             load_postsale_from_notification(job)
         elif job.get("topic") == "items":
             _refresh_listing_from_notification(job)
+        elif job.get("topic") == "orders_v2":
+            from .sales import load_order_from_notification
+
+            load_order_from_notification(job)
     except (OSError, ValueError, InvalidToken) as error:
         logger.warning(
             "Notification %s could not be loaded: %s",
@@ -586,8 +591,50 @@ def _run_listing_sync(organization_id):
         close_old_connections()
 
 
+def dispatch_sales_sync(organization):
+    """Queue the sales catch-up. One already queued or running is left as it is."""
+    from .models import MeliListingSync, MeliSalesSync
+
+    record, _ = MeliSalesSync.objects.get_or_create(organization=organization)
+    if record.busy():
+        return record
+    record.state = MeliListingSync.State.QUEUED
+    record.error = ""
+    record.save(update_fields=["state", "error", "updated_at"])
+    if _under_test():
+        _run_sales_sync(str(organization.pk))
+    elif postsale_queue_enabled():
+        try:
+            _client().lpush(SALES_QUEUE, str(organization.pk))
+        except Exception:
+            logger.exception("Could not queue the sales sync")
+            record.state = MeliListingSync.State.FAILED
+            record.error = "The sync could not be queued. Try again."
+            record.save(update_fields=["state", "error", "updated_at"])
+    else:
+        threading.Thread(target=_run_sales_sync, args=(str(organization.pk),), name="meli-sales", daemon=True).start()
+    record.refresh_from_db()
+    return record
+
+
+def _run_sales_sync(organization_id):
+    from accounts.models import Organization
+
+    from .sales import sync_sales
+
+    close_old_connections()
+    try:
+        organization = Organization.objects.filter(pk=organization_id).first()
+        if organization is not None:
+            sync_sales(organization)
+    except Exception:
+        logger.exception("Sales sync failed for %s", organization_id)
+    finally:
+        close_old_connections()
+
+
 # Replies first: a person is waiting on them. BRPOP takes the first non-empty list.
-WORKER_QUEUES = (REPLY_QUEUE, NOTIFICATION_QUEUE, QUEUE, LISTINGS_QUEUE, REFRESH_QUEUE)
+WORKER_QUEUES = (REPLY_QUEUE, NOTIFICATION_QUEUE, QUEUE, LISTINGS_QUEUE, SALES_QUEUE, REFRESH_QUEUE)
 
 
 def run_next_job(block_seconds=BLOCK_SECONDS, queues=WORKER_QUEUES):
@@ -605,6 +652,7 @@ def run_next_job(block_seconds=BLOCK_SECONDS, queues=WORKER_QUEUES):
         NOTIFICATION_QUEUE: _run_notification_payload,
         QUEUE: _run_job,
         LISTINGS_QUEUE: _run_listing_sync,
+        SALES_QUEUE: _run_sales_sync,
         REFRESH_QUEUE: _run_refresh,
     }
     handlers[queue](value)

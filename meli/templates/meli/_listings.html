@@ -2,7 +2,7 @@
   {% if listings %}
     <div class="card flush table-scroll">
       <table class="list wide">
-        <thead><tr><th></th><th>Listing</th><th>Title</th><th>SKU</th><th>Status</th><th class="num">Price</th><th class="num">Available</th><th class="num">Sold</th></tr></thead>
+        <thead><tr><th></th><th>Listing</th><th>Title</th><th>SKU</th><th>Status</th><th class="num">Price</th><th class="num">Available</th><th class="num">Sold</th><th class="num" title="Catalog units one sale takes">Units per sale</th></tr></thead>
         <tbody>
           {% for row in listings %}
             <tr>
@@ -18,6 +18,17 @@
               <td class="num">{% if row.price is not None %}{{ row.currency }} {{ row.price }}{% endif %}</td>
               <td class="num">{{ row.available_quantity|default_if_none:"" }}</td>
               <td class="num">{{ row.sold_quantity|default_if_none:"" }}</td>
+              <td class="num">
+                {% if can_edit and row.product_id %}
+                  <form method="post" action="{% url 'meli_listings' %}" class="inline units-form">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="units">
+                    <input type="hidden" name="listing" value="{{ row.pk }}">
+                    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                    <input class="qty" type="number" min="1" max="100" name="units_per_sale" value="{{ row.units_per_sale }}" aria-label="Units per sale for {{ row.item_id }}" onchange="this.form.requestSubmit()">
+                  </form>
+                {% else %}{{ row.units_per_sale }}{% endif %}
+              </td>
             </tr>
           {% endfor %}
         </tbody>

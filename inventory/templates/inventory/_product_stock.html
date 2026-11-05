@@ -1,0 +1,53 @@
+<section class="card" id="stock-card">
+  <h2 id="stock">Stock</h2>
+  {% if saved %}<p class="notice">Stock updated.</p>{% endif %}
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <div class="stock-figures">
+    <div><span class="muted">Depósito</span><strong>{{ own }}</strong></div>
+    <div><span class="muted">Mercado Libre Full</span><strong>{{ full }}</strong></div>
+    <div><span class="muted">Total</span><strong>{{ own|add:full }}</strong></div>
+  </div>
+  {% if can_edit %}
+    <details class="stock-action">
+      <summary>Adjust</summary>
+      <form hx-post="{% url 'inventory_product' product.pk %}" hx-target="#stock-card" hx-swap="outerHTML" class="stock-form">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="adjust">
+        <select name="kind" aria-label="Kind">{% for value, label in manual_kinds %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select>
+        <input class="qty" type="number" name="units" placeholder="Units" aria-label="Units" required>
+        <input type="text" name="note" placeholder="Note" aria-label="Note" maxlength="300">
+        <button class="primary" type="submit">Save</button>
+      </form>
+      <p class="muted">Returns add, damage takes away, an adjustment takes the sign you type.</p>
+    </details>
+    <details class="stock-action">
+      <summary>Count</summary>
+      <form hx-post="{% url 'inventory_product' product.pk %}" hx-target="#stock-card" hx-swap="outerHTML" class="stock-form">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="count">
+        <select name="location" aria-label="Where"><option value="own">Depósito</option><option value="meli_full">Mercado Libre Full</option></select>
+        <input class="qty" type="number" min="0" name="units" placeholder="Counted" aria-label="Units counted" required>
+        <button class="primary" type="submit">Save count</button>
+      </form>
+    </details>
+    <details class="stock-action">
+      <summary>Send to Full</summary>
+      <form hx-post="{% url 'inventory_product' product.pk %}" hx-target="#stock-card" hx-swap="outerHTML" class="stock-form">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="full">
+        <input class="qty" type="number" min="1" name="units" placeholder="Units" aria-label="Units sent to Full" required>
+        <input type="text" name="note" placeholder="Shipment or note" aria-label="Note" maxlength="300">
+        <button class="primary" type="submit">Send</button>
+      </form>
+    </details>
+  {% endif %}
+  <h3>Recent movements</h3>
+  {% if recent %}
+    <ul class="plain lines">
+      {% for row in recent %}<li>{{ row.occurred_at|date:"Y-m-d" }} · {{ row.get_kind_display }} · {{ row.location.name }} · <strong class="{% if row.quantity > 0 %}gain{% else %}loss{% endif %}">{% if row.quantity > 0 %}+{% endif %}{{ row.quantity }}</strong>{% if row.note %} · {{ row.note }}{% endif %}</li>{% endfor %}
+    </ul>
+    <p><a href="{% url 'inventory_movements' %}?q={{ product.sku }}">All movements</a></p>
+  {% else %}
+    <p class="muted">No movements yet.</p>
+  {% endif %}
+</section>

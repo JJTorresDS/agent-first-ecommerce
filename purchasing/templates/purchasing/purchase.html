@@ -6,8 +6,48 @@
   {% include "purchasing/_tabs.html" %}
   <div class="page-head">
     <h1>{% if purchase %}{{ purchase.supplier.name }} · {{ purchase.invoice_number|default:purchase.purchased_on }}{% else %}New purchase{% endif %}</h1>
+    {% if purchase %}{% include "purchasing/_status.html" %}{% endif %}
   </div>
   {% if saved %}<p class="notice">Purchase saved.</p>{% endif %}
+  {% if received_notice %}<p class="notice">Received into the Depósito.</p>{% endif %}
+
+  {% if purchase and receiving %}
+    <section class="card" id="receive">
+      <h2>Receive</h2>
+      <p class="muted">Units are added to the Depósito when they arrive. Receive part of a line now and the rest later.</p>
+      {% for error in receive_errors %}<p class="error">{{ error }}</p>{% endfor %}
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="receive">
+        <div class="table-scroll">
+          <table class="list">
+            <thead><tr><th>Product</th><th class="num">Ordered</th><th class="num">Received</th><th class="num">Receive now</th></tr></thead>
+            <tbody>
+              {% for row in receiving %}
+                <tr>
+                  <td><span class="sku">{{ row.item.product.sku }}</span> {{ row.item.product.title }}</td>
+                  <td class="num">{{ row.item.quantity }}</td>
+                  <td class="num">{{ row.received }}</td>
+                  <td class="num">
+                    {% if row.remaining > 0 and can_edit %}
+                      <input class="qty" type="number" min="0" max="{{ row.remaining }}" name="receive_{{ row.item.pk }}" value="" placeholder="{{ row.remaining }}" data-remaining="{{ row.remaining }}" aria-label="Units of {{ row.item.product.sku }} received now">
+                    {% elif row.remaining <= 0 %}<span class="pill active">Complete</span>{% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% if can_edit and status != "received" %}
+          <div class="actions receive-actions">
+            <label>Arrived on <input type="date" name="received_on" value="{{ today|date:'Y-m-d' }}"></label>
+            <button type="button" id="receive-all">Fill all remaining</button>
+            <button class="accent" type="submit">Receive</button>
+          </div>
+        {% endif %}
+      </form>
+    </section>
+  {% endif %}
   <form method="post" id="purchase-form">
     {% csrf_token %}
     <section class="card">
@@ -56,6 +96,14 @@
   </form>
 
   <script>
+    (function () {
+      var fill = document.getElementById("receive-all");
+      if (fill) fill.addEventListener("click", function () {
+        document.querySelectorAll('#receive input[data-remaining]').forEach(function (input) {
+          input.value = input.getAttribute("data-remaining");
+        });
+      });
+    })();
     (function () {
       var rows = document.getElementById("line-rows");
       var template = document.getElementById("line-template");

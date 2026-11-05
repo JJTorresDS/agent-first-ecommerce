@@ -9,10 +9,12 @@
     <thead>
       <tr>
         <th>User</th>
+        <th>Organization</th>
         <th>Tasks</th>
         <th>Cashflow</th>
         <th>Catalog</th>
         <th>Purchasing</th>
+        <th></th>
       </tr>
     </thead>
     <tbody>
@@ -20,7 +22,7 @@
         {% include "accounts/_access_user.html" %}
       {% empty %}
         <tr>
-          <td colspan="5">No users.</td>
+          <td colspan="7">No users.</td>
         </tr>
       {% endfor %}
     </tbody>

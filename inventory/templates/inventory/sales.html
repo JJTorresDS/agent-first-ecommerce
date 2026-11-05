@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}Mercado Libre sales{% endblock %}
+
+{% block content %}
+  {% include "inventory/_tabs.html" %}
+  <div class="page-head"><h1>Mercado Libre sales</h1></div>
+  <section class="card sync-card">
+    <div>
+      {% if not started_at %}
+        <p class="sync-line">Sales come off stock after the first count.</p>
+        <p class="muted"><a href="{% url 'inventory_count' %}">Count your stock</a> to start.</p>
+      {% elif record and record.busy %}
+        <p class="sync-line"><span class="spinner" aria-hidden="true"></span>Reading orders from Mercado Libre…</p>
+      {% elif record and record.finished_at %}
+        <p class="sync-line">{% if record.state == "failed" %}<span class="error">Last sync failed: {{ record.error }}</span>{% else %}Last sync {{ record.finished_at|date:"Y-m-d H:i" }} · {{ record.orders }} order{{ record.orders|pluralize }} read{% endif %}</p>
+        <p class="muted">New orders arrive on their own; the sync picks up any a notification missed.</p>
+      {% else %}
+        <p class="sync-line">Orders arrive as Mercado Libre notifies them.</p>
+        <p class="muted">Sync to read every order since the first count.</p>
+      {% endif %}
+    </div>
+    {% if can_edit and started_at and connected %}
+      <form method="post">{% csrf_token %}<button class="accent" type="submit"{% if record and record.busy %} disabled{% endif %}>Sync sales</button></form>
+    {% endif %}
+  </section>
+  <nav class="tabs" aria-label="Sales">
+    <a class="tab{% if not state %} active{% endif %}" href="{% url 'inventory_sales' %}">All</a>
+    <a class="tab{% if state == 'unlinked' %} active{% endif %}" href="?state=unlinked">Without a catalog product</a>
+    <a class="tab{% if state == 'taken' %} active{% endif %}" href="?state=taken">Taken from stock</a>
+  </nav>
+  {% if sales %}
+    <div class="card flush table-scroll">
+      <table class="list wide">
+        <thead><tr><th>Sold</th><th>Order</th><th>Listing</th><th>Catalog</th><th class="num">Units</th><th>From</th><th>Stock</th></tr></thead>
+        <tbody>
+          {% for sale in sales %}
+            <tr>
+              <td>{{ sale.sold_at|date:"Y-m-d H:i" }}</td>
+              <td class="mono">{{ sale.order_id }}</td>
+              <td>{{ sale.title|default:sale.item_id }}</td>
+              <td>{% if sale.listing.product %}<a href="{% url 'catalog_product' sale.listing.product_id %}#stock"><span class="sku">{{ sale.listing.product.sku }}</span></a>{% else %}<span class="pill">Not linked</span>{% endif %}</td>
+              <td class="num">{{ sale.quantity }}{% if sale.listing and sale.listing.units_per_sale > 1 %} × {{ sale.listing.units_per_sale }}{% endif %}</td>
+              <td>{% if sale.from_full %}Full{% else %}Depósito{% endif %}</td>
+              <td><span class="pill{% if sale.state == 'taken' %} active{% elif sale.state == 'unlinked' %} warn{% endif %}">{{ sale.state_label }}</span></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="card empty"><p>No sales{% if state %} here{% else %} yet{% endif %}.</p></div>
+  {% endif %}
+{% endblock %}

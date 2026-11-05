@@ -1,0 +1,37 @@
+<div id="stock-results">
+  {% if rows %}
+    <div class="card flush table-scroll">
+      <table class="list wide">
+        <thead>
+          <tr>
+            <th>SKU</th><th>Title</th>
+            <th class="num">Depósito</th><th class="num">Full</th><th class="num">Total</th>
+            <th class="num" title="available_quantity on each linked listing that isn't Full">Mercado Libre</th>
+            <th class="num" title="Mercado Libre's own Full stock">ML Full</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+            <tr>
+              <td><a href="{% url 'catalog_product' row.product.pk %}#stock"><span class="sku">{{ row.product.sku }}</span></a></td>
+              <td>{{ row.product.title }}</td>
+              <td class="num{% if row.own < 0 %} error{% endif %}">{{ row.own }}</td>
+              <td class="num{% if row.full < 0 %} error{% endif %}">{{ row.full }}</td>
+              <td class="num"><strong>{{ row.total }}</strong></td>
+              <td class="num">
+                {% for listing in row.listings %}<span title="{{ listing.item_id }}{% if listing.units_per_sale > 1 %} · {{ listing.units_per_sale }} per sale{% endif %}">{{ listing.available_quantity|default_if_none:"?" }}</span>{% if not forloop.last %} · {% endif %}{% empty %}<span class="muted">—</span>{% endfor %}
+                {% if row.own_off %}<span class="pill warn">Differs</span>{% endif %}
+              </td>
+              <td class="num">
+                {% if row.meli_full is not None %}{{ row.meli_full }}{% else %}<span class="muted">—</span>{% endif %}
+                {% if row.full_off %}<span class="pill warn">Differs</span>{% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="card empty"><p>{% if query or show %}No products match.{% else %}No products in the catalog yet.{% endif %}</p></div>
+  {% endif %}
+</div>

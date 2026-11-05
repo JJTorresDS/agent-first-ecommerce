@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+
+{% block title %}Stock movements{% endblock %}
+
+{% block content %}
+  {% include "inventory/_tabs.html" %}
+  <div class="page-head"><h1>Movements</h1></div>
+  <form class="filters" method="get" action="{% url 'inventory_movements' %}" hx-get="{% url 'inventory_movements' %}" hx-target="#movement-results" hx-swap="outerHTML" hx-push-url="true" hx-trigger="change, submit, input changed delay:300ms from:#q">
+    <div class="grow"><label for="q">Search</label><input id="q" type="search" name="q" value="{{ query }}" placeholder="SKU, title or note"></div>
+    <div><label for="kind">Kind</label>
+      <select id="kind" name="kind"><option value="">All</option>{% for value, label in kinds %}<option value="{{ value }}"{% if value == kind %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+    </div>
+    <div><label for="location">Where</label>
+      <select id="location" name="location"><option value="">All</option>{% for value, label in locations %}<option value="{{ value }}"{% if value == location %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+    </div>
+    <div><label for="date_from">From</label><input id="date_from" type="date" name="date_from" value="{{ date_from }}"></div>
+    <div><label for="date_to">To</label><input id="date_to" type="date" name="date_to" value="{{ date_to }}"></div>
+  </form>
+  {% include "inventory/_movements.html" %}
+{% endblock %}

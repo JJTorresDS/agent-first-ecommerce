@@ -108,6 +108,7 @@ INSTALLED_APPS = [
     "meli",
     "catalog",
     "purchasing",
+    "inventory",
 ]
 
 MIDDLEWARE = [

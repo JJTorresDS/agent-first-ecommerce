@@ -569,7 +569,11 @@ class ImpersonationTests(TestCase):
             row,
             f'href="/admin/impersonate/{self.contributor.pk}/"',
         )
-        started = self.client.get(f"/admin/impersonate/{self.contributor.pk}/")
+        asked = self.client.get(f"/admin/impersonate/{self.contributor.pk}/")
+        self.assertContains(asked, "View Vimple as cara@example.com?")
+        self.assertContains(asked, "SCENT")
+        self.assertNotContains(self.client.get("/admin/"), "Viewing cara@example.com")
+        started = self.client.post(f"/admin/impersonate/{self.contributor.pk}/", {"back": "admin"})
         self.assertRedirects(started, "/profile/")
         page = self.client.get("/profile/")
         self.assertContains(page, "Viewing cara@example.com")
@@ -581,7 +585,7 @@ class ImpersonationTests(TestCase):
         self.assertEqual(self.client.get("/cashflow/").status_code, 403)
         self.contributor.profile.refresh_from_db()
         self.assertEqual(self.contributor.profile.organization_id, self.scent.id)
-        denied = self.client.get(f"/admin/impersonate/{self.owner.pk}/")
+        denied = self.client.post(f"/admin/impersonate/{self.owner.pk}/")
         self.assertContains(
             denied,
             "An impersonation is already active.",
@@ -593,7 +597,7 @@ class ImpersonationTests(TestCase):
 
     def test_exit_returns_the_superuser_to_django_admin(self):
         self.client.force_login(self.superuser)
-        self.client.get(f"/admin/impersonate/{self.contributor.pk}/")
+        self.client.post(f"/admin/impersonate/{self.contributor.pk}/")
         exited = self.client.post("/admin/impersonate/exit/")
         self.assertRedirects(exited, "/admin/")
         self.assertContains(self.client.get("/admin/"), "Vimple")
@@ -601,16 +605,55 @@ class ImpersonationTests(TestCase):
         self.assertRedirects(setup, "/organization/setup/")
         page = self.client.get("/organization/setup/")
         self.assertNotContains(page, "Viewing")
-        again = self.client.get(f"/admin/impersonate/{self.contributor.pk}/")
+        again = self.client.post(f"/admin/impersonate/{self.contributor.pk}/")
         self.assertRedirects(again, "/profile/")
+
+    def test_view_as_from_the_access_page_returns_there(self):
+        other = User.objects.create_superuser("root2", "root2@example.com", "secret")
+        create_owned_organization(self.superuser, "Vimple HQ")
+        self.client.force_login(self.superuser)
+        access = self.client.get("/access/")
+        self.assertContains(access, f'action="/admin/impersonate/{self.contributor.pk}/"')
+        self.assertNotContains(access, f'action="/admin/impersonate/{self.superuser.pk}/"')
+        self.assertNotContains(access, f'action="/admin/impersonate/{other.pk}/"')
+        self.assertContains(access, "SCENT")
+        with self.assertLogs("accounts", "INFO") as logs:
+            started = self.client.post(f"/admin/impersonate/{self.contributor.pk}/", {"back": "access"})
+            self.assertRedirects(started, "/profile/")
+            self.assertContains(self.client.get("/profile/"), "Viewing cara@example.com")
+            exited = self.client.post("/admin/impersonate/exit/")
+        self.assertRedirects(exited, "/access/")
+        self.assertIn(f"viewing Vimple as user {self.contributor.pk}", "\n".join(logs.output))
+        self.assertIn("stopped viewing", "\n".join(logs.output))
+        self.assertContains(self.client.get("/access/"), "View as")
+
+    def test_superusers_yourself_and_inactive_users_cannot_be_viewed(self):
+        other = User.objects.create_superuser("root2", "root2@example.com", "secret")
+        gone = User.objects.create_user("gone", email="gone@example.com", is_active=False)
+        self.client.force_login(self.superuser)
+        for target in (self.superuser, other, gone):
+            for method in (self.client.get, self.client.post):
+                response = method(f"/admin/impersonate/{target.pk}/")
+                self.assertEqual(response.status_code, 403, target.username)
+        self.assertNotContains(self.client.get("/admin/"), "Viewing")
+
+    def test_the_switch_needs_a_csrf_token(self):
+        from django.test import Client
+
+        browser = Client(enforce_csrf_checks=True)
+        browser.force_login(self.superuser)
+        forged = browser.post(f"/admin/impersonate/{self.contributor.pk}/", {"back": "access"})
+        self.assertEqual(forged.status_code, 403)
+        self.assertNotContains(browser.get("/admin/"), "Viewing cara@example.com")
 
     def test_a_user_who_is_not_a_superuser_cannot_impersonate(self):
         self.client.force_login(self.owner)
-        denied = self.client.get(f"/admin/impersonate/{self.contributor.pk}/")
-        self.assertContains(
-            denied,
-            "Only a superuser can open Vimple as another user.",
-            status_code=403,
-        )
+        for method in (self.client.get, self.client.post):
+            denied = method(f"/admin/impersonate/{self.contributor.pk}/")
+            self.assertContains(
+                denied,
+                "Only a superuser can open Vimple as another user.",
+                status_code=403,
+            )
         self.contributor.profile.refresh_from_db()
         self.assertEqual(self.contributor.profile.organization_id, self.scent.id)

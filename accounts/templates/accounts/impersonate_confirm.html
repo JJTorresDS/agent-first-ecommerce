@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+
+{% block title %}View as {{ target.email|default:target.get_username }}{% endblock %}
+
+{% block content %}
+  <section class="card narrow">
+    <h1>View Vimple as {{ target.email|default:target.get_username }}?</h1>
+    <p>You'll see {% if membership %}<strong>{{ membership.organization.name }}</strong> as {{ membership.get_role_display|lower }}{% else %}what this user sees, with no organization yet{% endif %}, with this user's access. Anything you change is changed for real.</p>
+    <p class="muted">A bar at the top shows who you're viewing as. Use Exit there to come back.</p>
+    <form method="post" class="actions">
+      {% csrf_token %}
+      <input type="hidden" name="back" value="{{ back }}">
+      <a href="{% if back == 'access' %}{% url 'access' %}{% else %}{% url 'admin:index' %}{% endif %}">Cancel</a>
+      <button class="accent" type="submit">View as this user</button>
+    </form>
+  </section>
+{% endblock %}

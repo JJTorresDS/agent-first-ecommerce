@@ -1,7 +1,17 @@
 <tr id="access-user-{{ row.user.pk }}">
-  <td>{{ row.user.email|default:row.user.get_username }}</td>
+  <td>{{ row.user.email|default:row.user.get_username }}{% if row.user.is_superuser %} <span class="pill">Superuser</span>{% endif %}</td>
+  <td>{{ row.organization.name|default:"—" }}</td>
   <td>{% include "accounts/_access_check.html" with app="tasks" checked=row.tasks %}</td>
   <td>{% include "accounts/_access_check.html" with app="cashflow" checked=row.cashflow %}</td>
   <td>{% include "accounts/_access_check.html" with app="catalog" checked=row.catalog %}</td>
   <td>{% include "accounts/_access_check.html" with app="purchasing" checked=row.purchasing %}</td>
+  <td class="num">
+    {% if row.viewable and row.user.pk != request.user.pk %}
+      <form method="post" action="{% url 'impersonate' row.user.pk %}" class="inline">
+        {% csrf_token %}
+        <input type="hidden" name="back" value="access">
+        <button type="submit" title="Open Vimple as this user">View as</button>
+      </form>
+    {% endif %}
+  </td>
 </tr>

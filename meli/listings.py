@@ -34,6 +34,8 @@ UPDATE_FIELDS = [
     "catalog_listing",
     "permalink",
     "thumbnail",
+    "logistic_type",
+    "inventory_id",
     "meli_created_at",
     "meli_updated_at",
     "synced_at",
@@ -74,6 +76,7 @@ def rows_for(item):
         "catalog_listing": bool(item.get("catalog_listing")),
         "permalink": _https(item.get("permalink")),
         "thumbnail": _https(item.get("secure_thumbnail") or item.get("thumbnail")),
+        "logistic_type": _text((item.get("shipping") or {}).get("logistic_type"), 32),
         "meli_created_at": _when(item.get("date_created")),
         "meli_updated_at": _when(item.get("last_updated")),
     }
@@ -87,6 +90,7 @@ def rows_for(item):
                 "price": _money(item.get("price")),
                 "available_quantity": _count(item.get("available_quantity")),
                 "sold_quantity": _count(item.get("sold_quantity")),
+                "inventory_id": _text(item.get("inventory_id"), 32),
                 "payload": base,
             }
         ]
@@ -99,6 +103,7 @@ def rows_for(item):
             "price": _money(variation.get("price", item.get("price"))),
             "available_quantity": _count(variation.get("available_quantity")),
             "sold_quantity": _count(variation.get("sold_quantity")),
+            "inventory_id": _text(variation.get("inventory_id") or item.get("inventory_id"), 32),
             "payload": {**base, "variation": variation},
         }
         for variation in variations
@@ -146,6 +151,9 @@ def store_items(organization, items):
         if rows:
             stale = stale.exclude(kept)
         stale.delete()
+    from inventory.ledger import apply_pending_sales
+
+    apply_pending_sales(organization)
     return len(listings)
 
 
@@ -174,6 +182,7 @@ def sync_listings(organization):
         for start in range(0, len(seen), BATCH):
             store_items(organization, fetch_items(token, seen[start : start + BATCH]))
         MeliListing.objects.filter(organization=organization).exclude(item_id__in=seen).delete()
+        refresh_full_stock(organization, token)
     except Exception as error:
         logger.warning("Listing sync failed for %s: %s", organization.pk, describe_failure(error))
         _finish(record, MeliListingSync.State.FAILED, _reason(error))
@@ -192,13 +201,45 @@ def refresh_listing(organization, item_id):
     return store_items(organization, fetch_items(account.fresh_access_token(), [item_id]))
 
 
+def refresh_full_stock(organization, token=None):
+    """Mercado Libre's Full stock for every Full listing. One inventory that fails is logged and skipped."""
+    from .client import fetch_full_stock
+    from .postsale import _account_for
+
+    rows = MeliListing.objects.filter(organization=organization, logistic_type="fulfillment").exclude(inventory_id="")
+    inventory_ids = sorted(set(rows.values_list("inventory_id", flat=True)))
+    if not inventory_ids:
+        return 0
+    if token is None:
+        account = _account_for(organization)
+        if account is None:
+            return 0
+        token = account.fresh_access_token()
+    read = 0
+    for inventory_id in inventory_ids:
+        try:
+            payload = fetch_full_stock(token, inventory_id)
+        except (OSError, ValueError) as error:
+            logger.warning("Full stock %s could not be read for %s: %s", inventory_id, organization.pk, describe_failure(error))
+            continue
+        units = _count(payload.get("available_quantity"))
+        rows.filter(inventory_id=inventory_id).update(full_available=units)
+        read += 1
+    return read
+
+
 def link_product(product):
     """A new catalog product takes the unlinked listings that already carry its SKU."""
-    return (
+    linked = (
         MeliListing.objects.filter(organization_id=product.organization_id, product__isnull=True)
         .filter(seller_sku__iexact=product.sku)
         .update(product=product)
     )
+    if linked:
+        from inventory.ledger import apply_pending_sales
+
+        apply_pending_sales(product.organization)
+    return linked
 
 
 def link_new_product(sender, instance, created, **kwargs):

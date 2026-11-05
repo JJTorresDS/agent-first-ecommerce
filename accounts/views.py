@@ -1,10 +1,11 @@
+import logging
 import re
 
 from django.contrib.auth import get_user_model, login
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponseBadRequest, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
-from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.http import require_http_methods, require_POST
 
 from .models import (
     IMPERSONATOR_SESSION_KEY,
@@ -20,6 +21,7 @@ from .models import (
 )
 
 _AUTH_BACKEND = "django.contrib.auth.backends.ModelBackend"
+logger = logging.getLogger(__name__)
 
 
 def home(request):
@@ -57,6 +59,8 @@ def _access_row(user):
         )
     return {
         "user": user,
+        "organization": membership.organization if membership else None,
+        "viewable": user.is_active and not user.is_superuser,
         "tasks": AppAccess.App.TASKS in granted,
         "cashflow": AppAccess.App.CASHFLOW in granted,
         "catalog": AppAccess.App.CATALOG in granted,
@@ -269,9 +273,14 @@ def members(request):
     )
 
 
+IMPERSONATE_RETURN_KEY = "impersonate_return"
+_RETURN_PLACES = {"access": "access", "admin": "admin:index"}
+
+
 @login_required
-@require_GET
+@require_http_methods(["GET", "POST"])
 def impersonate(request, user_id):
+    """View Vimple as another user. A GET only asks; the switch is a POST, so a link can't trigger it."""
     if request.session.get(IMPERSONATOR_SESSION_KEY):
         return HttpResponseForbidden("An impersonation is already active.")
     if not request.user.is_superuser:
@@ -279,9 +288,23 @@ def impersonate(request, user_id):
             "Only a superuser can open Vimple as another user."
         )
     target = get_object_or_404(get_user_model(), pk=user_id)
+    if target.pk == request.user.pk or target.is_superuser or not target.is_active:
+        return HttpResponseForbidden("Only an active user who is not a superuser can be viewed.")
+    back = request.POST.get("back") or request.GET.get("back") or "admin"
+    if back not in _RETURN_PLACES:
+        back = "admin"
+    if request.method == "GET":
+        return render(
+            request,
+            "accounts/impersonate_confirm.html",
+            {"target": target, "membership": membership_for(target), "back": back},
+        )
     superuser_id = request.user.pk
     login(request, target, backend=_AUTH_BACKEND)
+    # login() empties the session when the user changes, so write these after it.
     request.session[IMPERSONATOR_SESSION_KEY] = superuser_id
+    request.session[IMPERSONATE_RETURN_KEY] = back
+    logger.info("Superuser %s is viewing Vimple as user %s", superuser_id, target.pk)
     return redirect("profile")
 
 
@@ -294,9 +317,13 @@ def impersonate_exit(request):
     ).first()
     if superuser is None:
         return HttpResponseForbidden("No impersonation is active.")
+    back = request.session.get(IMPERSONATE_RETURN_KEY) or "admin"
+    viewed = request.user.pk
     login(request, superuser, backend=_AUTH_BACKEND)
     request.session.pop(IMPERSONATOR_SESSION_KEY, None)
-    return redirect("admin:index")
+    request.session.pop(IMPERSONATE_RETURN_KEY, None)
+    logger.info("Superuser %s stopped viewing Vimple as user %s", superuser.pk, viewed)
+    return redirect(_RETURN_PLACES.get(back, "admin:index"))
 
 
 @login_required

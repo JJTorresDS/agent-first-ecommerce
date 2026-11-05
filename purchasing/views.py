@@ -1,9 +1,12 @@
+from datetime import datetime, time
+
 from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Count, DecimalField, ExpressionWrapper, F, Max, Q, Sum
 from django.http import HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.utils.dateparse import parse_date
 
 from accounts.access import require_app
@@ -47,6 +50,7 @@ def purchases(request):
     if query:
         rows = rows.filter(Q(invoice_number__icontains=query) | Q(items__product__sku__icontains=query)).distinct()
     page = Paginator(rows.order_by("-purchased_on", "-created_at"), PAGE_SIZE).get_page(request.GET.get("page") or 1)
+    _mark_status(page.object_list, organization)
     context = {
         "purchases": page.object_list,
         "page_obj": page,
@@ -60,6 +64,25 @@ def purchases(request):
     }
     template = "purchasing/_purchases.html" if request.headers.get("HX-Request") else "purchasing/purchases.html"
     return render(request, template, context)
+
+
+def _mark_status(purchases, organization):
+    """Set .status on each purchase in two grouped queries."""
+    from inventory.models import StockMovement
+
+    ids = [row.pk for row in purchases]
+    received = dict(
+        StockMovement.objects.filter(organization=organization, purchase_item__purchase_id__in=ids)
+        .values_list("purchase_item__purchase_id")
+        .annotate(units=Sum("quantity"))
+    )
+    ordered = dict(
+        PurchaseItem.objects.filter(organization=organization, purchase_id__in=ids)
+        .values_list("purchase_id")
+        .annotate(units=Sum("quantity"))
+    )
+    for row in purchases:
+        row.status = purchase_status(row, received.get(row.pk, 0), ordered.get(row.pk, 0))
 
 
 @require_app(AppAccess.App.PURCHASING)
@@ -93,8 +116,15 @@ def purchase_edit(request, pk=None):
         ]
     else:
         lines = []
-    if request.method == "POST":
+    receive_errors = []
+    if request.method == "POST" and request.POST.get("action") == "receive" and purchase:
+        receive_errors = _receive(request, purchase)
+        if not receive_errors:
+            return redirect(f"{reverse('purchase', args=[purchase.pk])}?received=1")
+        form = PurchaseForm(instance=instance, organization=organization, can_link_receipts=can_link_receipts)
+    elif request.method == "POST":
         lines, line_errors = read_lines(request.POST, organization)
+        line_errors += _received_guard(purchase, lines)
         if form.is_valid() and not line_errors:
             saved = _save(form, lines, organization)
             return redirect(f"{reverse('purchase', args=[saved.pk])}?saved=1")
@@ -116,11 +146,95 @@ def purchase_edit(request, pk=None):
             "line_errors": line_errors,
             "products": [product_label(product) for product in products],
             "saved": request.GET.get("saved") == "1",
+            "received_notice": request.GET.get("received") == "1",
+            "receiving": _receiving(purchase),
+            "receive_errors": receive_errors,
+            "status": purchase_status(purchase) if purchase else "",
+            "today": timezone.localdate(),
             "can_edit": can_edit,
             "can_link_receipts": can_link_receipts,
             "active_tab": "purchases",
         },
     )
+
+
+def _received_by_line(purchase):
+    """{line id: units received} for one purchase."""
+    from inventory.models import StockMovement
+
+    if purchase is None:
+        return {}
+    rows = (
+        StockMovement.objects.filter(organization_id=purchase.organization_id, purchase_item__purchase=purchase)
+        .values("purchase_item_id")
+        .annotate(units=Sum("quantity"))
+    )
+    return {row["purchase_item_id"]: row["units"] or 0 for row in rows}
+
+
+def _receiving(purchase):
+    """Each line with what was ordered, received and is still to come."""
+    if purchase is None:
+        return []
+    received = _received_by_line(purchase)
+    return [
+        {"item": item, "received": received.get(item.pk, 0), "remaining": item.quantity - received.get(item.pk, 0)}
+        for item in purchase.items.filter(organization_id=purchase.organization_id).select_related("product")
+    ]
+
+
+def purchase_status(purchase, received=None, ordered=None):
+    """Ordered, Partly received or Received."""
+    if received is None:
+        received = sum(_received_by_line(purchase).values())
+    if ordered is None:
+        ordered = purchase.items.aggregate(units=Sum("quantity"))["units"] or 0
+    if not received:
+        return "ordered"
+    return "received" if received >= ordered else "partial"
+
+
+def _received_guard(purchase, lines):
+    """A line can't drop below, lose, or change the product of what already arrived."""
+    received = _received_by_line(purchase)
+    if not received:
+        return []
+    errors = []
+    items = {str(item.pk): item for item in purchase.items.filter(pk__in=received)}
+    kept = {line["id"]: line for line in lines}
+    for key, item in items.items():
+        units = received[item.pk]
+        line = kept.get(key)
+        if line is None:
+            errors.append(f"{item.product.sku}: {units} already received, so the line stays.")
+        elif line.get("product") is not None and line["product"].pk != item.product_id:
+            errors.append(f"{item.product.sku}: {units} already received, so the product stays.")
+        elif isinstance(line.get("quantity"), int) and line["quantity"] < units:
+            errors.append(f"{item.product.sku}: {units} already received, so the quantity can't be lower.")
+    return errors
+
+
+def _receive(request, purchase):
+    from django.core.exceptions import ValidationError
+
+    from inventory.ledger import receive
+
+    quantities = {}
+    for item in purchase.items.filter(organization_id=purchase.organization_id):
+        raw = (request.POST.get(f"receive_{item.pk}") or "").strip()
+        if not raw:
+            continue
+        try:
+            quantities[item.pk] = int(raw)
+        except ValueError:
+            return [f"{item.product.sku}: enter a whole number."]
+    day = parse_date(request.POST.get("received_on") or "") or timezone.localdate()
+    at = timezone.make_aware(datetime.combine(day, time(12)))
+    try:
+        receive(purchase, quantities, by=request.user.email or request.user.get_username(), at=at)
+    except ValidationError as error:
+        return error.messages
+    return []
 
 
 @transaction.atomic

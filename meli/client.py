@@ -189,6 +189,45 @@ def fetch_items(access_token, item_ids):
     return found
 
 
+def fetch_full_stock(access_token, inventory_id):
+    """Units Mercado Libre holds in Full for one inventory id."""
+    inventory = quote(str(inventory_id), safe="")
+    return _api_request(
+        access_token,
+        f"https://api.mercadolibre.com/inventories/{inventory}/stock/fulfillment",
+    )
+
+
+ORDER_HISTORY_LIMIT = 5000
+
+
+def fetch_orders_since(access_token, seller_id, since):
+    """Every order created since a moment, oldest first, up to 5,000."""
+    orders = []
+    offset = 0
+    while offset < ORDER_HISTORY_LIMIT:
+        query = urlencode(
+            {
+                "seller": seller_id,
+                "order.date_created.from": _iso(since),
+                "sort": "date_asc",
+                "limit": 50,
+                "offset": offset,
+            }
+        )
+        payload = _api_request(access_token, f"https://api.mercadolibre.com/orders/search?{query}")
+        batch = payload.get("results")
+        if not isinstance(batch, list):
+            raise ValueError("Mercado Libre response had no orders.")
+        orders.extend(order for order in batch if isinstance(order, dict))
+        paging = payload.get("paging") if isinstance(payload.get("paging"), dict) else {}
+        total = paging.get("total")
+        offset += 50
+        if len(batch) < 50 or (isinstance(total, int) and offset >= total):
+            break
+    return orders
+
+
 def post_answer(access_token, question_id, text):
     return _api_request(
         access_token,

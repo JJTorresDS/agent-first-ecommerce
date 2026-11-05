@@ -1,0 +1,35 @@
+<div id="movement-results">
+  {% if movements %}
+    <div class="card flush table-scroll">
+      <table class="list wide">
+        <thead><tr><th>When</th><th>SKU</th><th>What</th><th>Where</th><th class="num">Units</th><th>Source</th><th>By</th></tr></thead>
+        <tbody>
+          {% for row in movements %}
+            <tr>
+              <td>{{ row.occurred_at|date:"Y-m-d H:i" }}</td>
+              <td><a href="{% url 'catalog_product' row.product_id %}#stock"><span class="sku">{{ row.product.sku }}</span></a></td>
+              <td>{{ row.get_kind_display }}</td>
+              <td>{{ row.location.name }}</td>
+              <td class="num"><strong class="{% if row.quantity > 0 %}gain{% else %}loss{% endif %}">{% if row.quantity > 0 %}+{% endif %}{{ row.quantity }}</strong></td>
+              <td>
+                {% if row.purchase_item_id %}<a href="{% url 'purchase' row.purchase_item.purchase_id %}">Purchase {{ row.purchase_item.purchase.invoice_number|default:row.purchase_item.purchase_id }}</a>
+                {% elif row.meli_sale_id %}Order {{ row.meli_sale.order_id }}
+                {% else %}{{ row.note }}{% endif %}
+              </td>
+              <td class="muted">{{ row.created_by }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if page_obj.paginator.num_pages > 1 %}
+      <nav class="pager" aria-label="Pages">
+        {% if page_obj.has_previous %}<a href="{% querystring page=page_obj.previous_page_number %}" hx-get="{% querystring page=page_obj.previous_page_number %}" hx-target="#movement-results" hx-swap="outerHTML" hx-push-url="true">Previous</a>{% endif %}
+        <span>Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+        {% if page_obj.has_next %}<a href="{% querystring page=page_obj.next_page_number %}" hx-get="{% querystring page=page_obj.next_page_number %}" hx-target="#movement-results" hx-swap="outerHTML" hx-push-url="true">Next</a>{% endif %}
+      </nav>
+    {% endif %}
+  {% else %}
+    <div class="card empty"><p>No movements{% if query or kind or location or date_from or date_to %} match{% else %} yet{% endif %}.</p></div>
+  {% endif %}
+</div>

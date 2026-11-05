@@ -23,6 +23,8 @@ class VimpleUserAdmin(UserAdmin):
 
     @admin.display(description="Open")
     def open_as_user(self, obj):
+        if obj.is_superuser or not obj.is_active:
+            return ""
         url = reverse("impersonate", args=[obj.pk])
         return format_html('<a href="{}">Open as this user</a>', url)
 
