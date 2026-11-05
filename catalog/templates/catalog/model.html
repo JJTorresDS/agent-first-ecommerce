@@ -18,17 +18,23 @@
       <form method="post" id="model-form" class="form-grid">
         {% csrf_token %}
         <input type="hidden" name="action" value="model">
-        {% include "_field.html" with field=form.category %}
-        {% include "_field.html" with field=form.brand %}
+        {% include "catalog/_code_select.html" with field=form.category kind="category" %}
+        {% include "catalog/_code_select.html" with field=form.brand kind="brand" %}
         {% include "_field.html" with field=form.code %}
         {% include "_field.html" with field=form.condition %}
         {% include "_field.html" with field=form.name wide=True %}
         {% include "_field.html" with field=form.description wide=True %}
         <div class="actions wide">
-          {% if not model %}<p class="muted">Missing a category or brand? <a href="{% url 'catalog_codes' %}">Add it first</a>.</p>{% endif %}
           <button class="primary" type="submit">{% if model %}Save model{% else %}Create model{% endif %}</button>
         </div>
       </form>
+      {# Outside #model-form: a form can't sit inside another one. #}
+      {% for dialog in code_dialogs %}
+        <dialog class="modal" id="code-dialog-{{ dialog.kind }}" aria-labelledby="code-dialog-{{ dialog.kind }}-title">
+          <h2 id="code-dialog-{{ dialog.kind }}-title">New {{ dialog.label }}</h2>
+          {% include "catalog/_code_dialog_form.html" %}
+        </dialog>
+      {% endfor %}
     {% elif model %}
       <dl class="facts">
         <div><dt>Category</dt><dd>{{ model.category.name }}</dd></div>
@@ -109,6 +115,47 @@
       document.addEventListener("input", update);
       document.addEventListener("change", update);
       update();
+
+      // + next to Category or Brand: add one in a dialog and select it, keeping what's typed in the model form.
+      // The dialog's form is replaced when the server sends errors, so look it up each time.
+      function clearDialog(dialog) {
+        dialog.querySelectorAll("p.error").forEach(function (error) { error.remove(); });
+        dialog.querySelectorAll(".has-error").forEach(function (field) { field.classList.remove("has-error"); });
+        // Not form.reset(): after an error the inputs' defaults are the rejected values.
+        dialog.querySelectorAll("input[type=text]").forEach(function (input) { input.value = ""; });
+      }
+      document.addEventListener("click", function (event) {
+        var opener = event.target.closest("[data-dialog]");
+        if (opener) {
+          var dialog = document.getElementById(opener.getAttribute("data-dialog"));
+          if (!dialog) return;
+          clearDialog(dialog);
+          dialog.showModal();
+          var first = dialog.querySelector("input:not([type=hidden])");
+          if (first) first.focus();
+          return;
+        }
+        var closer = event.target.closest("[data-close-dialog]");
+        if (closer) closer.closest("dialog").close();
+      });
+      document.body.addEventListener("catalog-code-added", function (event) {
+        var added = event.detail;
+        var select = document.getElementById("id_" + added.kind);
+        if (select) {
+          var option = new Option(added.label, added.id, true, true);
+          select.add(option);
+          select.value = added.id;
+        }
+        var known = codes[added.kind === "category" ? "categories" : "brands"];
+        if (known) known[added.id] = added.code;
+        var dialog = document.getElementById("code-dialog-" + added.kind);
+        if (dialog) {
+          dialog.close();
+          clearDialog(dialog);
+        }
+        update();
+        if (select) select.focus();
+      });
     })();
   </script>
 {% endblock %}

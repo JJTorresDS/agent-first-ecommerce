@@ -9,4 +9,5 @@ urlpatterns = [
     path("models/<int:pk>/", views.model_edit, name="catalog_model"),
     path("products/<uuid:pk>/", views.product_detail, name="catalog_product"),
     path("codes/", views.codes, name="catalog_codes"),
+    path("codes/new/<str:kind>/", views.code_new, name="catalog_code_new"),
 ]

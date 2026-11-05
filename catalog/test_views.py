@@ -232,3 +232,70 @@ class CatalogFlowTests(TestCase):
         self.assertContains(page, "Cost by supplier")
         self.assertContains(page, "Importadora Sur")
         self.assertContains(page, "ARS 12000.00")
+
+
+class CodeDialogTests(TestCase):
+    """The + next to Category and Brand on the model page adds one without leaving it."""
+
+    def setUp(self):
+        self.organization = Organization.objects.create(name="Test Seller")
+        self.other = Organization.objects.create(name="Other")
+        self.owner = member(self.organization)
+        self.client.force_login(self.owner)
+
+    def _added(self, response):
+        import json
+
+        self.assertEqual(response.status_code, 204)
+        return json.loads(response["HX-Trigger"])["catalog-code-added"]
+
+    def test_an_owner_adds_a_category_and_a_brand(self):
+        category = self._added(
+            self.client.post("/catalog/codes/new/category/", {"category-code": "perf", "category-name": "Perfumes"})
+        )
+        row = Category.objects.get(organization=self.organization)
+        self.assertEqual(row.code, "PERF")
+        self.assertEqual(category, {"kind": "category", "id": str(row.pk), "code": "PERF", "label": "PERF · Perfumes"})
+        brand = self._added(self.client.post("/catalog/codes/new/brand/", {"brand-code": "ONLY", "brand-name": "Only"}))
+        self.assertEqual(brand["label"], "ONLY · Only")
+        self.assertEqual(Brand.objects.get(pk=brand["id"]).organization, self.organization)
+
+    def test_a_duplicate_shows_the_error_in_the_dialog(self):
+        Category.objects.create(organization=self.organization, code="PERF", name="Perfumes")
+        response = self.client.post("/catalog/codes/new/category/", {"category-code": "PERF", "category-name": "Otra"})
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("HX-Trigger", response)
+        self.assertContains(response, 'class="modal-form"')
+        self.assertContains(response, 'class="error"')
+        self.assertEqual(Category.objects.filter(organization=self.organization).count(), 1)
+
+    def test_another_organizations_code_is_neither_a_clash_nor_shown(self):
+        theirs = Category.objects.create(organization=self.other, code="PERF", name="Perfumes")
+        added = self._added(
+            self.client.post("/catalog/codes/new/category/", {"category-code": "PERF", "category-name": "Perfumes"})
+        )
+        self.assertNotEqual(added["id"], str(theirs.pk))
+        self.assertEqual(Category.objects.get(pk=added["id"]).organization, self.organization)
+        page = self.client.get("/catalog/models/new/")
+        self.assertNotContains(page, f'value="{theirs.pk}"')
+
+    def test_only_editors_add_and_only_by_post(self):
+        self.assertEqual(self.client.get("/catalog/codes/new/category/").status_code, 405)
+        self.assertEqual(self.client.post("/catalog/codes/new/supplier/", {}).status_code, 404)
+        self.client.force_login(member(self.organization, role=Membership.Role.CONTRIBUTOR, username="bea"))
+        response = self.client.post("/catalog/codes/new/brand/", {"brand-code": "ONLY", "brand-name": "Only"})
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(Brand.objects.exists())
+        page = self.client.get("/catalog/models/new/")
+        self.assertNotContains(page, 'class="add-code"')
+        self.assertNotContains(page, "<dialog")
+
+    def test_the_model_page_offers_both_buttons_unless_the_codes_are_locked(self):
+        page = self.client.get("/catalog/models/new/")
+        self.assertContains(page, 'data-dialog="code-dialog-category"')
+        self.assertContains(page, 'data-dialog="code-dialog-brand"')
+        self.assertContains(page, 'id="code-dialog-category"')
+        self.assertNotContains(page, "Add it first")
+        locked = product(self.organization).product_model
+        page = self.client.get(f"/catalog/models/{locked.pk}/")
+        self.assertNotContains(page, 'class="add-code"')

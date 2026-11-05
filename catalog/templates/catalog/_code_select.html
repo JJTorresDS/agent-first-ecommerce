@@ -1,0 +1,9 @@
+<div class="field{% if field.errors %} has-error{% endif %}">
+  <label for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %} <span class="req" aria-hidden="true">*</span>{% endif %}</label>
+  <div class="select-add">
+    {{ field }}
+    {% if not field.field.disabled %}<button type="button" class="add-code" data-dialog="code-dialog-{{ kind }}" aria-label="New {{ kind }}" title="New {{ kind }}">+</button>{% endif %}
+  </div>
+  {% if field.help_text %}<p class="help">{{ field.help_text }}</p>{% endif %}
+  {% for error in field.errors %}<p class="error">{{ error }}</p>{% endfor %}
+</div>

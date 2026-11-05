@@ -456,6 +456,14 @@
       width: 100%; padding: 0.5rem 0.6rem; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); color: var(--text);
     }
     .field.has-error input, .field.has-error select, .line.has-error input { border-color: var(--danger); }
+    .select-add { display: flex; gap: 0.4rem; align-items: stretch; }
+    .select-add select { flex: 1; min-width: 0; }
+    button.add-code { flex: none; width: 2.4rem; padding: 0; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); color: var(--ink); font-size: 1.15rem; line-height: 1; cursor: pointer; }
+    dialog.modal { width: min(420px, calc(100vw - 32px)); border: 1px solid var(--line); border-radius: 12px; padding: 1.25rem 1.5rem; background: var(--surface); color: var(--text); }
+    dialog.modal::backdrop { background: color-mix(in srgb, var(--ink) 45%, transparent); }
+    dialog.modal h2 { font-size: 1rem; margin: 0 0 0.9rem; }
+    .modal-form { display: grid; gap: 0.9rem; }
+    .modal-form .actions { margin-top: 0.25rem; gap: 0.5rem; }
     fieldset:disabled input, fieldset:disabled select, fieldset:disabled textarea { background: var(--gray-1); color: var(--text); }
     .facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem 1rem; margin: 0; }
     .facts dt { margin: 0; }

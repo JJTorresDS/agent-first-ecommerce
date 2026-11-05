@@ -1,9 +1,12 @@
+import json
+
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db.models import Count, Q
-from django.http import HttpResponseForbidden
+from django.http import Http404, HttpResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.views.decorators.http import require_POST
 
 from accounts.access import require_app
 from accounts.models import AppAccess, can_edit_products, membership_for, user_can_open
@@ -22,6 +25,11 @@ from .validators import validate_attributes
 
 PAGE_SIZE = 50
 READ_ONLY = "Only owners and admins can change the catalog."
+# Categories and brands: the model, its form, and the Codes page's examples (name, code).
+_KINDS = {
+    "category": (Category, CategoryForm, "Perfumes", "PERF"),
+    "brand": (Brand, BrandForm, "Only", "ONLY"),
+}
 
 
 def _scope(request):
@@ -118,8 +126,46 @@ def model_edit(request, pk=None):
             "can_edit": can_edit,
             "active_tab": "models",
             "codes": _codes(organization),
+            "code_dialogs": [_code_dialog(organization, kind) for kind in _KINDS] if can_edit else [],
         },
     )
+
+
+@require_app(AppAccess.App.CATALOG)
+@require_POST
+def code_new(request, kind):
+    """Add a category or brand from the model page's dialog, without leaving it.
+
+    Errors come back as the dialog's form; a saved row comes back as a 204 with an
+    HX-Trigger event that adds it to the select.
+    """
+    if kind not in _KINDS:
+        raise Http404
+    organization, can_edit = _scope(request)
+    if not can_edit:
+        return HttpResponseForbidden(READ_ONLY)
+    dialog = _code_dialog(organization, kind, request.POST)
+    form = dialog["form"]
+    if not form.is_valid():
+        return render(request, "catalog/_code_dialog_form.html", {"dialog": dialog})
+    row = form.save()
+    # 204: htmx leaves the dialog's form in place and still fires the event.
+    response = HttpResponse(status=204)
+    response["HX-Trigger"] = json.dumps(
+        {"catalog-code-added": {"kind": kind, "id": str(row.pk), "code": row.code, "label": str(row)}}
+    )
+    return response
+
+
+def _code_dialog(organization, kind, data=None):
+    Model, Form, example_name, example_code = _KINDS[kind]
+    return {
+        "kind": kind,
+        "label": Model._meta.verbose_name,
+        "form": Form(data, prefix=kind, instance=Model(organization=organization)),
+        "example_name": example_name,
+        "example_code": example_code,
+    }
 
 
 def _new_variant(organization, model):
@@ -196,12 +242,11 @@ def codes(request):
     organization, can_edit = _scope(request)
     if request.method == "POST" and not can_edit:
         return HttpResponseForbidden(READ_ONLY)
-    kinds = {"category": (Category, CategoryForm), "brand": (Brand, BrandForm)}
-    forms = {kind: Form(prefix=kind, instance=Model(organization=organization)) for kind, (Model, Form) in kinds.items()}
+    forms = {kind: Form(prefix=kind, instance=Model(organization=organization)) for kind, (Model, Form, *_) in _KINDS.items()}
     editing = {}
-    if request.method == "POST" and request.POST.get("kind") in kinds:
+    if request.method == "POST" and request.POST.get("kind") in _KINDS:
         kind = request.POST["kind"]
-        Model, Form = kinds[kind]
+        Model, Form, *_ = _KINDS[kind]
         row = Model(organization=organization)
         if request.POST.get("id"):
             row = get_object_or_404(Model, organization=organization, pk=request.POST["id"])

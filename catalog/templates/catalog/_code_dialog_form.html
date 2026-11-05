@@ -1,0 +1,20 @@
+{% with form=dialog.form kind=dialog.kind %}
+<form method="post" class="modal-form" action="{% url 'catalog_code_new' kind %}" hx-post="{% url 'catalog_code_new' kind %}" hx-target="this" hx-swap="outerHTML">
+  {% csrf_token %}
+  {% for error in form.non_field_errors %}<p class="error">{{ error }}</p>{% endfor %}
+  <div class="field{% if form.code.errors %} has-error{% endif %}">
+    <label for="id_{{ kind }}-code">Code <span class="req" aria-hidden="true">*</span></label>
+    <input type="text" id="id_{{ kind }}-code" name="{{ kind }}-code" value="{{ form.code.value|default:'' }}" placeholder="{{ dialog.example_code }}" maxlength="{{ form.code.field.max_length }}" class="code-input" required autocomplete="off">
+    {% for error in form.code.errors %}<p class="error">{{ error }}</p>{% endfor %}
+  </div>
+  <div class="field{% if form.name.errors %} has-error{% endif %}">
+    <label for="id_{{ kind }}-name">Name <span class="req" aria-hidden="true">*</span></label>
+    <input type="text" id="id_{{ kind }}-name" name="{{ kind }}-name" value="{{ form.name.value|default:'' }}" placeholder="{{ dialog.example_name }}" maxlength="{{ form.name.field.max_length }}" required autocomplete="off">
+    {% for error in form.name.errors %}<p class="error">{{ error }}</p>{% endfor %}
+  </div>
+  <div class="actions">
+    <button type="button" data-close-dialog>Cancel</button>
+    <button type="submit" class="primary">Add {{ dialog.label }}</button>
+  </div>
+</form>
+{% endwith %}
