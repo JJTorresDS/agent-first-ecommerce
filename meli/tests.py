@@ -1256,9 +1256,21 @@ class _FakeRedis:
     def get(self, key):
         return self.values.get(key)
 
-    def set(self, key, value, ex=None):
+    def mget(self, keys):
+        return [self.values.get(key) for key in keys]
+
+    def set(self, key, value, ex=None, nx=False):
+        if nx and key in self.values:
+            return None
         self.values[key] = value
         return True
+
+    def incr(self, key):
+        self.values[key] = str(int(self.values.get(key) or 0) + 1)
+        return int(self.values[key])
+
+    def pipeline(self, transaction=True):
+        return _FakePipeline(self)
 
     def delete(self, key):
         return int(self.values.pop(key, None) is not None)
@@ -1275,6 +1287,126 @@ class _FakeRedis:
             if items:
                 return (key, items.pop())
         return None
+
+
+class _FakePipeline:
+    def __init__(self, redis):
+        self.redis = redis
+        self.calls = []
+
+    def __getattr__(self, name):
+        def queue(*args, **kwargs):
+            self.calls.append((name, args, kwargs))
+            return self
+
+        return queue
+
+    def execute(self):
+        return [getattr(self.redis, name)(*args, **kwargs) for name, args, kwargs in self.calls]
+
+
+@override_settings(REDIS_URL="redis://fake")
+class InboxChangeMarkTests(TestCase):
+    """Webhook writes mark the organization in Redis; polls with no change answer 204 without reading chats."""
+
+    def setUp(self):
+        from accounts.models import create_owned_organization
+
+        self.fake = _FakeRedis()
+        patcher = patch("meli.jobs._client", return_value=self.fake)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.user = User.objects.create_user("ada", email="ada@example.com")
+        self.organization = create_owned_organization(self.user, "Molihaus")
+        stranger = User.objects.create_user("eve", email="eve@example.com")
+        self.theirs = create_owned_organization(stranger, "Not mine")
+        self.client.force_login(self.user)
+
+    def _question(self, organization, question_id):
+        from inbox.models import Channel
+        from inbox.services import upsert_thread
+
+        with self.captureOnCommitCallbacks(execute=True):
+            return upsert_thread(
+                organization=organization,
+                channel=Channel.MELI_ITEM_QUESTIONS,
+                external_id=question_id,
+                title="Perfume",
+                preview="¿Tenés stock?",
+                link_url="",
+                needs_reply=True,
+                last_message_at=timezone.now(),
+                messages=[
+                    {
+                        "external_id": f"{question_id}:in",
+                        "direction": Message.Direction.INBOUND,
+                        "body": "¿Tenés stock?",
+                        "sent_at": timezone.now(),
+                    }
+                ],
+            )
+
+    def _chat_queries(self, queries):
+        return [query for query in queries if "inbox_conversation" in query["sql"] or "inbox_message" in query["sql"]]
+
+    def test_the_unread_poll_answers_from_redis_until_a_question_arrives(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        first = self.client.get("/profile/unread/").json()
+        with CaptureQueriesContext(connection) as queries:
+            same = self.client.get("/profile/unread/", HTTP_X_UNREAD_VERSION=first["version"])
+        self.assertEqual(same.status_code, 204)
+        self.assertEqual(self._chat_queries(queries), [])
+        # Another organization's question changes nothing here.
+        self._question(self.theirs, "theirs-1")
+        theirs = self.client.get("/profile/unread/", HTTP_X_UNREAD_VERSION=first["version"])
+        self.assertEqual(theirs.status_code, 204)
+        self._question(self.organization, "q-1")
+        changed = self.client.get(
+            f"/profile/unread/?since={first['latest']}", HTTP_X_UNREAD_VERSION=first["version"]
+        ).json()
+        self.assertEqual((changed["total"], changed["new"]), (1, 1))
+
+    def test_two_questions_from_the_same_buyer_chime_twice(self):
+        self._question(self.organization, "q-1")
+        first = self.client.get("/profile/unread/").json()
+        self._question(self.organization, "q-2")
+        self._question(self.organization, "q-3")
+        self._question(self.theirs, "theirs-1")
+        second = self.client.get(
+            f"/profile/unread/?since={first['latest']}", HTTP_X_UNREAD_VERSION=first["version"]
+        ).json()
+        self.assertGreater(second["latest"], first["latest"])
+        self.assertEqual(second["new"], 2)
+        # Polling again from the newest one counts nothing twice.
+        third = self.client.get(f"/profile/unread/?since={second['latest']}").json()
+        self.assertEqual(third["new"], 0)
+
+    def test_the_inbox_poll_answers_204_from_redis_and_refreshes_rarely(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        self._question(self.organization, "q-1")
+        with patch("meli.jobs.dispatch_refresh") as refresh:
+            page = self.client.get("/inbox/")
+            token = re.search(r'id="chat-list"[^>]*data-version="([^"]+)"', page.content.decode()).group(1)
+            poll = {"HTTP_HX_REQUEST": "true", "HTTP_HX_TARGET": "chat-list", "HTTP_X_INBOX_VERSION": token}
+            with CaptureQueriesContext(connection) as queries:
+                same = self.client.get("/inbox/", **poll)
+            self.assertEqual(same.status_code, 204)
+            self.assertEqual(self._chat_queries(queries), [])
+            self._question(self.theirs, "theirs-1")
+            self.assertEqual(self.client.get("/inbox/", **poll).status_code, 204)
+            self._question(self.organization, "q-2")
+            changed = self.client.get("/inbox/", **poll)
+            self.assertEqual(changed.status_code, 200)
+            self.assertNotEqual(re.search(r'data-version="([^"]+)"', changed.content.decode()).group(1), token)
+            # The page load refreshed from Mercado Libre and opened the 10-minute window; polls add none.
+            self.assertEqual(refresh.call_count, 1)
+            self.fake.values.clear()
+            self.client.get("/inbox/", HTTP_HX_REQUEST="true", HTTP_HX_TARGET="chat-list")
+            self.assertEqual(refresh.call_count, 2)
 
 
 def sale_thread(text, message_id="msg-1", sender=99, created=None):

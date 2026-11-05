@@ -80,4 +80,15 @@ def upsert_thread(
     stale = [message.pk for key, message in existing.items() if key not in wanted]
     if stale:
         Message.objects.filter(pk__in=stale).delete()
+    inbox_changed(organization.pk)
     return conversation
+
+
+def inbox_changed(organization_id):
+    """After this transaction commits, tell the inbox and unread polls to read Postgres again.
+
+    Every write to a conversation or message calls it; a poll that sees no change answers 204 from Redis.
+    """
+    from meli.jobs import mark_inbox_changed
+
+    transaction.on_commit(lambda: mark_inbox_changed(organization_id))

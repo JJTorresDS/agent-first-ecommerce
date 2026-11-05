@@ -1,4 +1,4 @@
-from django.db.models import Count, Max
+from django.db.models import Count, Max, Q
 
 from .models import Conversation, Message
 
@@ -28,14 +28,19 @@ def unread_by_organization(user, waiting=None):
     return {organization_id: sum(channels.values()) for organization_id, channels in waiting.items()}
 
 
-def latest_incoming(user):
-    """When the newest message from a buyer arrived, over the user's own organizations. One query.
+def latest_incoming(user, since=None):
+    """(When the newest message from a buyer arrived, how many arrived after since), over the user's own organizations. One query.
 
-    The chime follows this, so a second message in a chat that already waits still sounds.
+    The chime follows this, so a second message in a chat that already waits still sounds,
+    and two questions in one poll sound twice.
     """
     if not getattr(user, "is_authenticated", False):
-        return None
-    return Message.objects.filter(
+        return None, 0
+    counts = {"latest": Max("created_at")}
+    if since is not None:
+        counts["new"] = Count("pk", distinct=True, filter=Q(created_at__gte=since))
+    row = Message.objects.filter(
         organization__memberships__user=user,
         direction=Message.Direction.INBOUND,
-    ).aggregate(latest=Max("created_at"))["latest"]
+    ).aggregate(**counts)
+    return row["latest"], row.get("new") or 0

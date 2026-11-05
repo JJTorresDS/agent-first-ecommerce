@@ -31,6 +31,8 @@ DONE_TTL = 2 * 60
 ERROR_TTL = 10 * 60
 REFRESH_COOLDOWN = 60
 REFRESH_LIMIT = 20
+# Webhooks keep chats current; a poll still re-reads Mercado Libre this often, for a missed one.
+INBOX_POLL_REFRESH = 10 * 60
 BLOCK_SECONDS = 5
 _local_reply_status = {}
 _local_reply_error = {}
@@ -61,6 +63,62 @@ def reply_error_key(conversation_id):
 
 def refresh_status_key(organization_id):
     return _key("refresh", "status", organization_id)
+
+
+def inbox_mark_key(organization_id):
+    return _key("inbox", "mark", organization_id)
+
+
+def mark_inbox_changed(organization_id):
+    """Bump the organization's change mark, so the next inbox and unread polls read Postgres.
+
+    Call it after the write commits (inbox.services.inbox_changed), or a poll could read the
+    new mark with the old rows and then answer 204 over them.
+    """
+    if organization_id is None or not postsale_queue_enabled():
+        return
+    try:
+        _client().incr(inbox_mark_key(organization_id))
+    except Exception:
+        logger.exception("Could not mark the inbox of %s changed", organization_id)
+
+
+def unread_marks(organization_ids):
+    """The change marks of these organizations in one call, or None when Redis is unused or fails."""
+    if not postsale_queue_enabled():
+        return None
+    if not organization_ids:
+        return []
+    try:
+        return _client().mget([inbox_mark_key(organization_id) for organization_id in organization_ids])
+    except Exception:
+        logger.exception("Could not read the inbox change marks")
+        return None
+
+
+def inbox_poll_state(organization_id, conversation_id=""):
+    """One Redis round trip for the inbox list poll, or None when Redis is unused or fails.
+
+    Returns (the organization's change mark, the open chat's reply status and error), and
+    whether the safety refresh from Mercado Libre is due.
+    """
+    if not postsale_queue_enabled():
+        return None
+    try:
+        pipe = _client().pipeline(transaction=False)
+        pipe.mget(
+            [
+                inbox_mark_key(organization_id),
+                reply_status_key(conversation_id),
+                reply_error_key(conversation_id),
+            ]
+        )
+        pipe.set(_key("inbox", "refreshed", organization_id), "1", ex=INBOX_POLL_REFRESH, nx=True)
+        parts, due = pipe.execute()
+    except Exception:
+        logger.exception("Could not read the inbox poll state")
+        return None
+    return parts, bool(due)
 
 
 def _client():
@@ -218,7 +276,7 @@ def dispatch_reply(conversation):
             return enqueue_reply(conversation)
         except Exception:
             logger.exception("Could not queue the reply")
-            _drop_pending(conversation.pk)
+            _drop_pending(conversation.pk, conversation.organization_id)
             return "failed"
     if _under_test():
         run_reply_job(conversation.organization_id, conversation.pk)
@@ -287,7 +345,7 @@ def _send_reply(organization_id, conversation_id):
             if send is not None:
                 send(conversation, pending.body)
         except ReplyFailed as error:
-            _drop_pending(conversation.pk)
+            _drop_pending(conversation.pk, conversation.organization_id)
             _set_reply_error(conversation_id, error.message, pending.body)
             _set_reply_status(conversation_id, "failed")
         else:
@@ -295,26 +353,28 @@ def _send_reply(organization_id, conversation_id):
                 conversation_id=conversation.pk,
                 external_id="pending",
             ).exists():
-                _drop_pending(conversation.pk)
+                _drop_pending(conversation.pk, conversation.organization_id)
                 _set_reply_error(conversation_id, "", pending.body)
                 _set_reply_status(conversation_id, "failed")
             else:
                 _set_reply_status(conversation_id, "ok")
     except Exception:
         logger.exception("Reply failed for %s", conversation_id)
-        _drop_pending(conversation_id)
+        _drop_pending(conversation_id, organization_id)
         _set_reply_status(conversation_id, "failed")
     finally:
         close_old_connections()
 
 
-def _drop_pending(conversation_id):
+def _drop_pending(conversation_id, organization_id):
     from inbox.models import Message
+    from inbox.services import inbox_changed
 
     Message.objects.filter(
         conversation_id=conversation_id,
         external_id="pending",
     ).delete()
+    inbox_changed(organization_id)
 
 
 def _under_test():

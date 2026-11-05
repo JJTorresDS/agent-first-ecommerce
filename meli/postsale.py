@@ -7,7 +7,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from inbox.models import Channel, Conversation, Message
-from inbox.services import upsert_thread
+from inbox.services import inbox_changed, upsert_thread
 
 from .client import (
     describe_failure,
@@ -267,6 +267,7 @@ def remember_reply(conversation, text, sent_at, message_id=""):
             last_message_at=sent_at,
             updated_at=now,
         )
+        inbox_changed(conversation.organization_id)
     conversation.preview, conversation.needs_reply, conversation.last_message_at = text[:200], False, sent_at
     return conversation
 

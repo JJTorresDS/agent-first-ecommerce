@@ -784,8 +784,9 @@
   </script>
   {% if user.is_authenticated %}
   <script>
-    // A short chime for new chats waiting, made with Web Audio (no sound file).
-    // Browsers allow sound only after a click on the page, so it unlocks on the first one.
+    // A short chime for each new message, made with Web Audio (no sound file).
+    // Each page load gets a new audio context. Chrome lets it start once you've used the site;
+    // Safari waits for a click or key on this page, so every one unlocks it too.
     window.vimpleSound = (function () {
       var context = null;
       var played = 0;
@@ -794,13 +795,30 @@
       }
       function unlock() {
         var Audio = window.AudioContext || window.webkitAudioContext;
-        if (!context && Audio) context = new Audio();
-        if (context && context.state === "suspended") context.resume();
+        try {
+          if (!context && Audio) context = new Audio();
+          if (context && context.state !== "running") context.resume().catch(function () {});
+        } catch (error) {}
       }
-      // Every click or key may unlock (Safari can suspend audio again later); it's cheap.
+      // Made now, not on the first click: a tab you opened and left must still chime.
+      unlock();
       document.addEventListener("pointerdown", unlock);
       document.addEventListener("keydown", unlock);
       function locked() { return !context || context.state !== "running"; }
+      // Resolves true once the context runs, false when the browser keeps it suspended.
+      function ready() {
+        unlock();
+        if (!context) return Promise.resolve(false);
+        if (!locked()) return Promise.resolve(true);
+        var resumed = Promise.resolve(context.resume()).catch(function () {});
+        // A refused resume can stay pending; don't wait on it.
+        var timeout = new Promise(function (done) { setTimeout(done, 1000); });
+        return Promise.race([resumed, timeout]).then(function () { return !locked(); });
+      }
+      function chime(start) {
+        note(880, start, 0.18);
+        note(1320, start + 0.14, 0.26);
+      }
       function note(frequency, start, length) {
         var tone = context.createOscillator();
         var gain = context.createGain();
@@ -822,24 +840,22 @@
         locked: locked,
         // From the menu's test button: a click, so the browser lets the audio start.
         test: function () {
-          unlock();
-          var self = this;
-          var started = context && context.resume ? context.resume() : Promise.resolve();
-          return Promise.resolve(started).then(function () {
-            if (locked()) return false;
-            var now = context.currentTime;
-            note(880, now, 0.18);
-            note(1320, now + 0.14, 0.26);
-            return true;
+          return ready().then(function (running) {
+            if (running) chime(context.currentTime);
+            return running;
           });
         },
-        play: function () {
+        // One chime per message, a little apart, at most three in a row. Resolves whether it sounded.
+        play: function (count) {
           played += 1;
-          if (!enabled() || locked()) return false;
-          var now = context.currentTime;
-          note(880, now, 0.18);
-          note(1320, now + 0.14, 0.26);
-          return true;
+          if (!enabled()) return Promise.resolve(false);
+          var times = Math.min(Math.max(Number(count) || 1, 1), 3);
+          return ready().then(function (running) {
+            if (!running) return false;
+            var now = context.currentTime;
+            for (var index = 0; index < times; index += 1) chime(now + index * 0.6);
+            return true;
+          });
         },
         plays: function () { return played; },
       };
@@ -873,9 +889,9 @@
       }
       var title = document.title;
       var waiting = 0;
-      function flagTitle() {
+      function flagTitle(count) {
         // Works without sound or permission: the tab title says a message came in.
-        waiting += 1;
+        waiting += count;
         document.title = "(" + waiting + ") New message · " + title;
         if (document.hasFocus()) setTimeout(clearTitle, 8000);
       }
@@ -884,34 +900,47 @@
         document.title = title;
       }
       window.addEventListener("focus", clearTitle);
-      function chimeOnce(newest) {
-        flagTitle();
-        // Every open tab sees the same new message; the first one to get here chimes for it.
-        try {
-          if (Number(localStorage.getItem("vimple-chimed-latest") || 0) >= newest) return;
-          localStorage.setItem("vimple-chimed-latest", String(newest));
-        } catch (error) {}
-        window.vimpleSound.play();
+      function chimedUpTo() {
+        try { return Number(localStorage.getItem("vimple-chimed-latest") || 0); } catch (error) { return 0; }
+      }
+      function chimeFor(newest, count) {
+        flagTitle(count);
+        // Every open tab sees the same new messages; the first one that can play chimes for them.
+        // A tab the browser keeps silent doesn't claim them, so another tab still can.
+        if (chimedUpTo() >= newest) return;
+        window.vimpleSound.play(count).then(function (sounded) {
+          if (!sounded || chimedUpTo() >= newest) return;
+          try { localStorage.setItem("vimple-chimed-latest", String(newest)); } catch (error) {}
+        });
       }
       // Unlike the inbox list, this keeps going in a hidden tab: the chime matters most when
       // you're looking at another tab (for example Mercado Libre). It's one small request, 204 when unchanged.
       function poll() {
-        fetch("{% url 'profile_unread' %}", { headers: { "X-Unread-Version": version }, credentials: "same-origin" })
+        var url = "{% url 'profile_unread' %}" + (latest !== null ? "?since=" + latest : "");
+        fetch(url, { headers: { "X-Unread-Version": version }, credentials: "same-origin" })
           .then(function (response) { return response.status === 200 ? response.json() : null; })
           .then(function (data) {
             if (!data) return;
             version = data.version;
-            // A newer message from a buyer, in any organization: chime, even when the
-            // waiting total stays the same (a second message in a chat that already waits).
+            // Newer messages from buyers, in any organization: one chime each, even when the
+            // waiting total stays the same (more messages in a chat that already waits).
             var newest = Number(data.latest) || 0;
-            if (latest !== null && newest > latest) chimeOnce(newest);
+            if (latest !== null && newest > latest) chimeFor(newest, Math.max(Number(data.new) || 0, 1));
             latest = newest;
             paint(data);
           })
           .catch(function () {});
       }
       poll();
-      setInterval(poll, {{ unread_poll_ms|default:20000 }});
+      // Chrome slows timers in a tab hidden for 5 minutes to once a minute, but not a worker's,
+      // so the worker keeps the 20 s pace and the chime comes on time while you're in another tab.
+      var every = {{ unread_poll_ms|default:20000 }};
+      try {
+        var tick = new Blob(["setInterval(function () { postMessage(0); }, " + every + ");"], { type: "text/javascript" });
+        new Worker(URL.createObjectURL(tick)).onmessage = poll;
+      } catch (error) {
+        setInterval(poll, every);
+      }
       document.addEventListener("visibilitychange", function () {
         if (document.visibilityState === "visible") poll();
       });

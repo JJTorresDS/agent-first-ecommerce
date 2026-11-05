@@ -1,4 +1,7 @@
 import hashlib
+import json
+import time
+import uuid
 from datetime import timedelta
 from urllib.parse import urlencode
 
@@ -15,6 +18,7 @@ from accounts.models import membership_for
 
 from .channels import can_send, list_actions, reply_limit_for
 from .models import Conversation, Message
+from .services import inbox_changed
 
 
 def inbox_location(*, conversation=None, failed=False, sync=""):
@@ -53,6 +57,7 @@ def _save_pending(conversation, text):
     )
     conversation.preview = text[:200]
     conversation.save(update_fields=["preview", "updated_at"])
+    inbox_changed(conversation.organization_id)
 
 
 def send_and_redirect(request, conversation):
@@ -99,6 +104,25 @@ def _active_first(conversations, selected_id):
     if selected is None:
         return rows, rows[0] if rows else None
     return [selected] + [row for row in rows if row.pk != selected.pk], selected
+
+
+def _poll_token(organization, parts, request):
+    """The list poll's version when Redis holds the change marks; no Postgres read.
+
+    It moves with the organization's mark (every chat write), the open chat's reply state,
+    the query, and each minute, so a write that missed its mark shows within a minute.
+    """
+    query = [request.GET.get(key) or "" for key in ("conversation", "since")]
+    minute = int(time.time() // 60)
+    raw = json.dumps([str(organization.pk), parts, query, minute])
+    return "r" + hashlib.sha1(raw.encode()).hexdigest()[:15]
+
+
+def _uuid_text(value):
+    try:
+        return str(uuid.UUID(value))
+    except (TypeError, ValueError, AttributeError):
+        return ""
 
 
 def _list_version(rows, context):
@@ -157,15 +181,25 @@ def inbox(request):
     if membership is None:
         return redirect("organization_setup")
     organization = membership.organization
-    from meli.jobs import dispatch_refresh
+    from meli.jobs import dispatch_refresh, inbox_poll_state
 
     thread_request = _thread_request(request)
     list_poll = _list_poll(request)
     if thread_request or list_poll:
         # Partials skip the nav context processor and its queries.
         request.inbox_partial = True
+    selected_id = request.GET.get("conversation") or ""
+    poll_token = ""
     if not thread_request:
-        dispatch_refresh(organization)
+        state = inbox_poll_state(organization.pk, _uuid_text(selected_id))
+        # Webhooks keep the chats current: a poll re-reads Mercado Libre only when the safety refresh is due.
+        if not list_poll or state is None or state[1]:
+            dispatch_refresh(organization)
+        if state is not None:
+            poll_token = _poll_token(organization, state[0], request)
+            # Nothing was written since this token: answer from Redis, before any Postgres read.
+            if list_poll and request.headers.get("X-Inbox-Version") == poll_token:
+                return HttpResponse(status=204)
     show_older = request.GET.get("since") == "all"
     conversations = Conversation.objects.filter(organization=organization)
     if not show_older:
@@ -180,7 +214,6 @@ def inbox(request):
         "-last_message_at",
         "-created_at",
     )
-    selected_id = request.GET.get("conversation") or ""
     if thread_request:
         selected = _selected(conversations, selected_id) or conversations.first()
         context = {
@@ -205,7 +238,7 @@ def inbox(request):
             reply_error=request.GET.get("reply") == "failed",
         ),
     }
-    context["list_version"] = _list_version(rows, context)
+    context["list_version"] = poll_token or _list_version(rows, context)
     if list_poll:
         if request.headers.get("X-Inbox-Version") == context["list_version"]:
             return HttpResponse(status=204)

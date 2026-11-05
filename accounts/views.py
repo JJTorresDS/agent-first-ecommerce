@@ -2,6 +2,8 @@ import hashlib
 import json
 import logging
 import re
+import time
+from datetime import datetime, timezone as dt_timezone
 
 from django.contrib.auth import get_user_model, login
 from django.contrib.auth.decorators import login_required
@@ -20,6 +22,7 @@ from .models import (
     create_owned_organization,
     ensure_profile,
     membership_for,
+    memberships_for,
 )
 
 _AUTH_BACKEND = "django.contrib.auth.backends.ModelBackend"
@@ -54,31 +57,60 @@ def profile_menu(request):
 def profile_unread(request):
     """Chats waiting for a reply in each of the user's organizations, for the avatar badge and the chime.
 
-    Answers 204 when X-Unread-Version matches, so an unchanged poll sends nothing.
+    Answers 204 when X-Unread-Version matches, so an unchanged poll sends nothing. With Redis the
+    version comes from the organizations' change marks, so that 204 reads no chats from Postgres.
+    since (epoch milliseconds, the last latest this tab saw) asks how many messages came after it,
+    so each one chimes.
     """
     from inbox.unread import latest_incoming, unread_by_organization
+    from meli.jobs import unread_marks
 
     membership = membership_for(request.user)
     active = membership.organization_id if membership else None
+    organization_ids = sorted(str(item.organization_id) for item in memberships_for(request.user))
+    marks = unread_marks(organization_ids)
+    version = ""
+    if marks is not None:
+        # Each minute too, in case a write missed its mark.
+        raw = json.dumps([str(active), organization_ids, marks, int(time.time() // 60)])
+        version = "r" + hashlib.sha1(raw.encode()).hexdigest()[:15]
+        if request.headers.get("X-Unread-Version") == version:
+            return HttpResponse(status=204)
     counts = unread_by_organization(request.user)
-    newest = latest_incoming(request.user)
+    newest, new = latest_incoming(request.user, _since(request.GET.get("since")))
     # Milliseconds since 1970: browsers compare numbers; Safari can't parse microsecond ISO dates.
     latest = int(newest.timestamp() * 1000) if newest else 0
     organizations = {str(key): value for key, value in sorted(counts.items(), key=lambda pair: str(pair[0]))}
-    version = hashlib.sha1(json.dumps([str(active), organizations, latest]).encode()).hexdigest()[:16]
-    if request.headers.get("X-Unread-Version") == version:
-        return HttpResponse(status=204)
+    if not version:
+        version = hashlib.sha1(json.dumps([str(active), organizations, latest]).encode()).hexdigest()[:16]
+        if request.headers.get("X-Unread-Version") == version:
+            return HttpResponse(status=204)
     response = JsonResponse(
         {
             "total": sum(counts.values()),
             "other": sum(value for key, value in counts.items() if key != active),
             "organizations": organizations,
             "latest": latest,
+            "new": new,
             "version": version,
         }
     )
     response["Cache-Control"] = "no-store"
     return response
+
+
+def _since(raw):
+    """The moment after a latest the browser saw (epoch milliseconds), or None.
+
+    latest drops the microseconds, so the message it came from would count again at that exact millisecond.
+    """
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    if value < 0:
+        return None
+    return datetime.fromtimestamp((value + 1) / 1000, tz=dt_timezone.utc)
 
 
 def _access_row(user):
