@@ -1,0 +1,38 @@
+<div id="listing-results">
+  {% if listings %}
+    <div class="card flush table-scroll">
+      <table class="list wide">
+        <thead><tr><th></th><th>Listing</th><th>Title</th><th>SKU</th><th>Status</th><th class="num">Price</th><th class="num">Available</th><th class="num">Sold</th></tr></thead>
+        <tbody>
+          {% for row in listings %}
+            <tr>
+              <td class="thumb-cell">{% if row.thumbnail_url %}<img class="thumb" src="{{ row.thumbnail_url }}" alt="" loading="lazy">{% else %}<span class="thumb"></span>{% endif %}</td>
+              <td class="mono">{% if row.listing_url %}<a href="{{ row.listing_url }}" target="_blank" rel="noopener">{{ row.item_id }}</a>{% else %}{{ row.item_id }}{% endif %}{% if row.variation_label %}<br><span class="muted">{{ row.variation_label }}</span>{% endif %}</td>
+              <td>{{ row.title }}</td>
+              <td>
+                {% if row.product %}<a href="{% url 'catalog_product' row.product_id %}" title="Linked to the catalog"><span class="sku">{{ row.product.sku }}</span></a>
+                {% elif row.seller_sku %}<span class="mono">{{ row.seller_sku }}</span><br><span class="pill">Not in catalog</span>
+                {% else %}<span class="muted">No SKU</span>{% endif %}
+              </td>
+              <td><span class="pill {% if row.status == 'active' %}active{% elif row.status == 'closed' %}archived{% endif %}">{{ row.status|default:"—" }}</span></td>
+              <td class="num">{% if row.price is not None %}{{ row.currency }} {{ row.price }}{% endif %}</td>
+              <td class="num">{{ row.available_quantity|default_if_none:"" }}</td>
+              <td class="num">{{ row.sold_quantity|default_if_none:"" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if page_obj.paginator.num_pages > 1 %}
+      <nav class="pager" aria-label="Pages">
+        {% if page_obj.has_previous %}<a href="{% querystring page=page_obj.previous_page_number %}" hx-get="{% querystring page=page_obj.previous_page_number %}" hx-target="#listing-results" hx-swap="outerHTML" hx-push-url="true">Previous</a>{% endif %}
+        <span>Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+        {% if page_obj.has_next %}<a href="{% querystring page=page_obj.next_page_number %}" hx-get="{% querystring page=page_obj.next_page_number %}" hx-target="#listing-results" hx-swap="outerHTML" hx-push-url="true">Next</a>{% endif %}
+      </nav>
+    {% endif %}
+  {% else %}
+    <div class="card empty">
+      <p>{% if query or link or status %}No listings match these filters.{% else %}No listings yet. Sync to bring them in.{% endif %}</p>
+    </div>
+  {% endif %}
+</div>

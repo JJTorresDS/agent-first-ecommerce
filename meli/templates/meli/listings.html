@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block title %}Mercado Libre listings{% endblock %}
+
+{% block content %}
+  {% include "catalog/_tabs.html" %}
+  <div class="page-head">
+    <h1>Mercado Libre listings</h1>
+  </div>
+  {% if not connected %}
+    <div class="card empty">
+      <p>Mercado Libre isn't connected for this organization.</p>
+      <p><a href="{% url 'mercadolibre_settings' %}">Connect Mercado Libre</a> to bring its listings here.</p>
+    </div>
+  {% else %}
+    {% include "meli/_listing_sync.html" %}
+  {% endif %}
+  {% if connected or listings or query or link or status %}
+    <form
+      class="filters"
+      method="get"
+      action="{% url 'meli_listings' %}"
+      hx-get="{% url 'meli_listings' %}"
+      hx-target="#listing-results"
+      hx-swap="outerHTML"
+      hx-push-url="true"
+      hx-trigger="change, submit, input changed delay:300ms from:#q"
+    >
+      <div class="grow">
+        <label for="q">Search</label>
+        <input id="q" type="search" name="q" value="{{ query }}" placeholder="Item id, title or SKU">
+      </div>
+      <div>
+        <label for="link">Link</label>
+        <select id="link" name="link">
+          <option value="">All</option>
+          {% for value, label in link_states %}<option value="{{ value }}"{% if value == link %} selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="status">Status</label>
+        <select id="status" name="status">
+          <option value="">All</option>
+          {% for value, label in statuses %}<option value="{{ value }}"{% if value == status %} selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+      </div>
+    </form>
+    {% include "meli/_listings.html" %}
+  {% endif %}
+{% endblock %}

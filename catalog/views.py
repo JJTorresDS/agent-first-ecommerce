@@ -160,6 +160,7 @@ def product_detail(request, pk):
             saved.attributes = submitted
             saved.save()
             return redirect(f"{reverse('catalog_product', args=[product.pk])}?saved=1")
+    listings = product.meli_listings.filter(organization=organization).order_by("status", "item_id")
     can_see_costs = user_can_open(request.user, AppAccess.App.PURCHASING)
     costs, lines = [], []
     if can_see_costs:
@@ -178,6 +179,7 @@ def product_detail(request, pk):
             "attributes": attributes,
             "attributes_error": attributes_error,
             "variants": product.variants().order_by("sku"),
+            "listings": listings,
             "can_see_costs": can_see_costs,
             "costs": costs,
             "lines": lines,

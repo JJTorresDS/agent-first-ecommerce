@@ -1,0 +1,21 @@
+<section id="listing-sync" class="card sync-card"{% if record and record.busy %} hx-get="{% url 'meli_listings' %}?poll=sync" hx-trigger="every 3s" hx-target="#listing-sync" hx-swap="outerHTML"{% endif %}>
+  <div>
+    {% if record and record.busy %}
+      <p class="sync-line"><span class="spinner" aria-hidden="true"></span>Reading your Mercado Libre listings…</p>
+    {% elif record and record.finished_at %}
+      <p class="sync-line">
+        {% if record.state == "failed" %}<span class="error">Last sync failed: {{ record.error }}</span>{% else %}Last sync {{ record.finished_at|date:"Y-m-d H:i" }}{% endif %}
+      </p>
+      <p class="muted">{{ record.total }} listing{{ record.total|pluralize }} · <strong>{{ record.linked }}</strong> linked · {{ record.unmatched }} SKU not in catalog · {{ record.no_sku }} without SKU</p>
+    {% else %}
+      <p class="sync-line">Not synced yet.</p>
+      <p class="muted">Vimple reads every listing (active, paused, closed…) and links it to the catalog product with the same SKU. Nothing changes on Mercado Libre.</p>
+    {% endif %}
+  </div>
+  {% if can_edit %}
+    <form method="post" action="{% url 'meli_listings' %}">
+      {% csrf_token %}
+      <button class="accent" type="submit"{% if record and record.busy %} disabled{% endif %}>Sync listings</button>
+    </form>
+  {% endif %}
+</section>

@@ -41,6 +41,14 @@ class MeliConfig(AppConfig):
         register_list_action(questions_sync_action)
         register_list_action(postsale_sync_action)
 
+        from django.db.models.signals import post_save
+
+        from catalog.models import MasterProduct
+
+        from .listings import link_new_product
+
+        post_save.connect(link_new_product, sender=MasterProduct, dispatch_uid="meli-link-new-product")
+
         from .jobs import start_postsale_worker
 
         start_postsale_worker()

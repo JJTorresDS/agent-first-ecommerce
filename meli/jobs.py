@@ -23,7 +23,8 @@ QUEUE = _key("postsale", "queue")
 REPLY_QUEUE = _key("reply", "queue")
 REFRESH_QUEUE = _key("refresh", "queue")
 NOTIFICATION_QUEUE = _key("notification", "queue")
-NOTIFICATION_TOPICS = {"questions", "messages"}
+LISTINGS_QUEUE = _key("listings", "queue")
+NOTIFICATION_TOPICS = {"questions", "messages", "items"}
 ACTIVE_TTL = 30 * 60
 DONE_TTL = 2 * 60
 ERROR_TTL = 10 * 60
@@ -500,6 +501,8 @@ def run_notification_job(job):
             _load_question_from_notification(job)
         elif job.get("topic") == "messages":
             load_postsale_from_notification(job)
+        elif job.get("topic") == "items":
+            _refresh_listing_from_notification(job)
     except (OSError, ValueError, InvalidToken) as error:
         logger.warning(
             "Notification %s could not be loaded: %s",
@@ -512,8 +515,79 @@ def run_notification_job(job):
         close_old_connections()
 
 
+def _refresh_listing_from_notification(job):
+    """An items webhook: re-read that one listing for every organization with this seller."""
+    import re
+
+    from cryptography.fernet import InvalidToken
+
+    from .listings import refresh_listing
+    from .views import _clip, _organizations_for
+
+    match = re.fullmatch(r"/items/([A-Z]{3}\d+)", str(job.get("resource") or ""))
+    if not match:
+        return
+    for organization in _organizations_for(_clip(job.get("user_id"), 64)):
+        try:
+            refresh_listing(organization, match.group(1))
+        except (OSError, ValueError, InvalidToken) as error:
+            logger.warning(
+                "Listing %s could not be refreshed for %s: %s",
+                match.group(1),
+                organization.pk,
+                describe_failure(error),
+            )
+
+
+def dispatch_listing_sync(organization):
+    """Queue a full listing sync. One already queued or running is left as it is."""
+    from .models import MeliListingSync
+
+    record, _ = MeliListingSync.objects.get_or_create(organization=organization)
+    if record.busy():
+        return record
+    record.state = MeliListingSync.State.QUEUED
+    record.error = ""
+    record.save(update_fields=["state", "error", "updated_at"])
+    if _under_test():
+        _run_listing_sync(str(organization.pk))
+    elif postsale_queue_enabled():
+        try:
+            _client().lpush(LISTINGS_QUEUE, str(organization.pk))
+        except Exception:
+            logger.exception("Could not queue the listing sync")
+            record.state = MeliListingSync.State.FAILED
+            record.error = "The sync could not be queued. Try again."
+            record.save(update_fields=["state", "error", "updated_at"])
+    else:
+        threading.Thread(
+            target=_run_listing_sync,
+            args=(str(organization.pk),),
+            name="meli-listings",
+            daemon=True,
+        ).start()
+    record.refresh_from_db()
+    return record
+
+
+def _run_listing_sync(organization_id):
+    from accounts.models import Organization
+
+    from .listings import sync_listings
+
+    close_old_connections()
+    try:
+        organization = Organization.objects.filter(pk=organization_id).first()
+        if organization is not None:
+            sync_listings(organization)
+    except Exception:
+        logger.exception("Listing sync failed for %s", organization_id)
+    finally:
+        close_old_connections()
+
+
 # Replies first: a person is waiting on them. BRPOP takes the first non-empty list.
-WORKER_QUEUES = (REPLY_QUEUE, NOTIFICATION_QUEUE, QUEUE, REFRESH_QUEUE)
+WORKER_QUEUES = (REPLY_QUEUE, NOTIFICATION_QUEUE, QUEUE, LISTINGS_QUEUE, REFRESH_QUEUE)
 
 
 def run_next_job(block_seconds=BLOCK_SECONDS, queues=WORKER_QUEUES):
@@ -530,6 +604,7 @@ def run_next_job(block_seconds=BLOCK_SECONDS, queues=WORKER_QUEUES):
         REPLY_QUEUE: _run_reply_payload,
         NOTIFICATION_QUEUE: _run_notification_payload,
         QUEUE: _run_job,
+        LISTINGS_QUEUE: _run_listing_sync,
         REFRESH_QUEUE: _run_refresh,
     }
     handlers[queue](value)

@@ -45,9 +45,10 @@ def exchange_code(code, redirect_uri):
 class MercadoLibreError(ValueError):
     """Mercado Libre refused the call. message is its own reason, safe to show."""
 
-    def __init__(self, message):
+    def __init__(self, message, status=None):
         super().__init__(message)
         self.message = message
+        self.status = status
 
 
 def describe_failure(error):
@@ -77,7 +78,7 @@ def _error_reason(error):
     return reason or f"HTTP {error.code}"
 
 
-def _api_request(access_token, url, payload=None):
+def _api_request(access_token, url, payload=None, expect=dict):
     headers = {
         "Accept": "application/json",
         "Authorization": f"Bearer {access_token}",
@@ -91,9 +92,9 @@ def _api_request(access_token, url, payload=None):
         with urlopen(request, timeout=15) as response:
             parsed = json.loads(response.read().decode() or "null")
     except HTTPError as error:
-        raise MercadoLibreError(_error_reason(error)) from None
-    if not isinstance(parsed, dict):
-        raise ValueError("Mercado Libre response was not an object.")
+        raise MercadoLibreError(_error_reason(error), error.code) from None
+    if not isinstance(parsed, expect):
+        raise ValueError(f"Mercado Libre response was not a {expect.__name__}.")
     return parsed
 
 
@@ -126,6 +127,66 @@ def fetch_question(access_token, question_id):
 def fetch_item(access_token, item_id):
     item = quote(str(item_id), safe="")
     return _api_request(access_token, f"https://api.mercadolibre.com/items/{item}")
+
+
+LISTING_STATUSES = ("active", "paused", "closed", "under_review", "inactive")
+ITEMS_PER_CALL = 20
+
+
+def fetch_seller_item_ids(access_token, seller_id, status):
+    """Every item id of one status. The scan search pages with scroll_id past 1,000 items."""
+    seller = quote(str(seller_id), safe="")
+    ids = []
+    scroll_id = ""
+    for _page in range(2000):
+        fields = {"status": status, "search_type": "scan", "limit": 100}
+        if scroll_id:
+            fields["scroll_id"] = scroll_id
+        payload = _api_request(
+            access_token,
+            f"https://api.mercadolibre.com/users/{seller}/items/search?{urlencode(fields)}",
+        )
+        results = payload.get("results")
+        if not isinstance(results, list):
+            raise ValueError("Mercado Libre item search had no results.")
+        if not results:
+            break
+        ids.extend(str(item) for item in results if item)
+        scroll_id = str(payload.get("scroll_id") or "")
+        if not scroll_id:
+            break
+    return ids
+
+
+def fetch_items(access_token, item_ids):
+    """Items by id, 20 per call, with every attribute (variation SKUs come only this way).
+
+    Returns {item_id: body}, and {item_id: None} for an item Mercado Libre no longer has.
+    """
+    found = {}
+    item_ids = list(item_ids)
+    for start in range(0, len(item_ids), ITEMS_PER_CALL):
+        chunk = item_ids[start : start + ITEMS_PER_CALL]
+        query = urlencode({"ids": ",".join(chunk), "include_attributes": "all"})
+        rows = _api_request(
+            access_token,
+            f"https://api.mercadolibre.com/items?{query}",
+            expect=list,
+        )
+        if len(rows) != len(chunk):
+            raise ValueError("Mercado Libre returned a different number of items than asked for.")
+        # Rows come back in the order the ids were asked for, even for an item that is gone.
+        for item_id, row in zip(chunk, rows):
+            row = row if isinstance(row, dict) else {}
+            body = row.get("body") if isinstance(row.get("body"), dict) else {}
+            if row.get("code") == 200 and body.get("id"):
+                found[str(body["id"])] = body
+            elif row.get("code") == 404:
+                found[item_id] = None
+            else:
+                reason = " ".join(str(body.get("message") or body.get("error") or "").split())[:300]
+                raise MercadoLibreError(reason or f"HTTP {row.get('code')}", row.get("code"))
+    return found
 
 
 def post_answer(access_token, question_id, text):

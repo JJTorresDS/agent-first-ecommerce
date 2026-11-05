@@ -239,3 +239,111 @@ def _text(value, limit):
     if value is None:
         return ""
     return str(value)[:limit]
+
+
+class MeliListing(models.Model):
+    """One sellable unit on Mercado Libre: an item, or one variation of it.
+
+    product is the catalog product with the same SKU in this organization, when there is one.
+    One catalog product can be on many listings.
+    """
+
+    organization = models.ForeignKey(
+        "accounts.Organization",
+        on_delete=models.CASCADE,
+        related_name="meli_listings",
+    )
+    item_id = models.CharField(max_length=32)
+    variation_id = models.CharField(max_length=32, blank=True)
+    product = models.ForeignKey(
+        "catalog.MasterProduct",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="meli_listings",
+    )
+    seller_sku = models.CharField(max_length=120, blank=True)
+    title = models.CharField(max_length=255, blank=True)
+    variation_label = models.CharField(max_length=255, blank=True)
+    status = models.CharField(max_length=32, blank=True)
+    sub_status = models.JSONField(default=list, blank=True)
+    price = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    currency = models.CharField(max_length=8, blank=True)
+    available_quantity = models.IntegerField(null=True, blank=True)
+    sold_quantity = models.IntegerField(null=True, blank=True)
+    listing_type_id = models.CharField(max_length=32, blank=True)
+    category_id = models.CharField(max_length=32, blank=True)
+    condition = models.CharField(max_length=32, blank=True)
+    catalog_listing = models.BooleanField(default=False)
+    permalink = models.CharField(max_length=512, blank=True)
+    thumbnail = models.CharField(max_length=512, blank=True)
+    meli_created_at = models.DateTimeField(null=True, blank=True)
+    meli_updated_at = models.DateTimeField(null=True, blank=True)
+    synced_at = models.DateTimeField()
+    payload = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        db_table = "meli_listing"
+        ordering = ["title", "item_id", "variation_id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "item_id", "variation_id"],
+                name="uniq_meli_listing_org_item_variation",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["organization", "seller_sku"], name="meli_listing_org_sku"),
+            models.Index(fields=["organization", "product"], name="meli_listing_org_product"),
+        ]
+
+    def __str__(self):
+        return f"{self.item_id} {self.variation_id}".strip()
+
+    def listing_url(self):
+        if self.permalink.startswith(("http://", "https://")):
+            return self.permalink
+        return ""
+
+    def thumbnail_url(self):
+        if self.thumbnail.startswith("https://"):
+            return self.thumbnail
+        return ""
+
+    def link_state(self):
+        if self.product_id:
+            return "linked"
+        return "unmatched" if self.seller_sku else "no_sku"
+
+
+class MeliListingSync(models.Model):
+    """The last full listing sync of one organization: its state and what it found."""
+
+    class State(models.TextChoices):
+        QUEUED = "queued", "Queued"
+        RUNNING = "running", "Running"
+        OK = "ok", "Done"
+        FAILED = "failed", "Failed"
+
+    organization = models.OneToOneField(
+        "accounts.Organization",
+        on_delete=models.CASCADE,
+        related_name="meli_listing_sync",
+    )
+    state = models.CharField(max_length=16, choices=State.choices, blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    total = models.PositiveIntegerField(default=0)
+    linked = models.PositiveIntegerField(default=0)
+    no_sku = models.PositiveIntegerField(default=0)
+    unmatched = models.PositiveIntegerField(default=0)
+    error = models.CharField(max_length=300, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "meli_listing_sync"
+
+    def busy(self):
+        """Queued or running, unless it has been stuck for longer than a sync can take."""
+        if self.state not in {self.State.QUEUED, self.State.RUNNING}:
+            return False
+        return self.updated_at > timezone.now() - timedelta(minutes=30)
