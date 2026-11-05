@@ -737,3 +737,24 @@ class UnreadAcrossOrganizationsTests(TestCase):
             if "inbox_conversation" in query["sql"] and "accounts_membership" in query["sql"]
         ]
         self.assertEqual(len(counting), 1)
+
+
+    def test_latest_moves_for_a_second_message_in_a_waiting_chat(self):
+        from inbox.models import Conversation, Message
+
+        chat = Conversation.objects.filter(organization=self.scent, needs_reply=True).first()
+        first = self.client.get("/profile/unread/").json()
+        Message.objects.create(
+            organization=self.scent, conversation=chat, direction=Message.Direction.INBOUND,
+            body="De hecho 2 preguntas", external_id="second", sent_at=timezone.now(),
+        )
+        second = self.client.get("/profile/unread/", HTTP_X_UNREAD_VERSION=first["version"]).json()
+        self.assertEqual(second["total"], first["total"])
+        self.assertGreater(second["latest"], first["latest"] or "")
+        theirs = Conversation.objects.filter(organization=self.theirs).first()
+        Message.objects.create(
+            organization=self.theirs, conversation=theirs, direction=Message.Direction.INBOUND,
+            body="Not yours", external_id="theirs", sent_at=timezone.now(),
+        )
+        third = self.client.get("/profile/unread/", HTTP_X_UNREAD_VERSION=second["version"])
+        self.assertEqual(third.status_code, 204)

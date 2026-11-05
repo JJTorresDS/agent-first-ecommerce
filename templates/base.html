@@ -822,7 +822,7 @@
     // Chats waiting in each organization: the avatar badge, the menu's counts, and the chime.
     window.vimpleUnread = (function () {
       var version = "";
-      var last = null;
+      var latest = null;
       var counts = {};
       function paintMenu() {
         document.querySelectorAll(".count-pill[data-org]").forEach(function (pill) {
@@ -844,12 +844,12 @@
         if (dot) dot.hidden = !data.other;
         paintMenu();
       }
-      function chimeOnce(total) {
-        // Several open tabs see the same rise; only the first one within a minute chimes.
+      function chimeOnce(newest) {
+        // Every open tab sees the same new message; the first one to get here chimes for it.
         try {
-          var seen = JSON.parse(localStorage.getItem("vimple-chimed") || "{}");
-          if (seen.total === total && Date.now() - seen.at < 60000) return;
-          localStorage.setItem("vimple-chimed", JSON.stringify({ total: total, at: Date.now() }));
+          var chimed = localStorage.getItem("vimple-chimed-latest") || "";
+          if (chimed && Date.parse(chimed) >= Date.parse(newest)) return;
+          localStorage.setItem("vimple-chimed-latest", newest);
         } catch (error) {}
         window.vimpleSound.play();
       }
@@ -860,8 +860,12 @@
           .then(function (data) {
             if (!data) return;
             version = data.version;
-            if (last !== null && data.total > last) chimeOnce(data.total);
-            last = data.total;
+            // A newer message from a buyer, in any organization: chime, even when the
+            // waiting total stays the same (a second message in a chat that already waits).
+            if (latest !== null && data.latest && (!latest || Date.parse(data.latest) > Date.parse(latest))) {
+              chimeOnce(data.latest);
+            }
+            latest = data.latest || "";
             paint(data);
           })
           .catch(function () {});

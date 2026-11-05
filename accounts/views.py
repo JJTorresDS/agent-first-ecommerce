@@ -56,13 +56,15 @@ def profile_unread(request):
 
     Answers 204 when X-Unread-Version matches, so an unchanged poll sends nothing.
     """
-    from inbox.unread import unread_by_organization
+    from inbox.unread import latest_incoming, unread_by_organization
 
     membership = membership_for(request.user)
     active = membership.organization_id if membership else None
     counts = unread_by_organization(request.user)
+    newest = latest_incoming(request.user)
+    latest = newest.isoformat() if newest else ""
     organizations = {str(key): value for key, value in sorted(counts.items(), key=lambda pair: str(pair[0]))}
-    version = hashlib.sha1(json.dumps([str(active), organizations]).encode()).hexdigest()[:16]
+    version = hashlib.sha1(json.dumps([str(active), organizations, latest]).encode()).hexdigest()[:16]
     if request.headers.get("X-Unread-Version") == version:
         return HttpResponse(status=204)
     response = JsonResponse(
@@ -70,6 +72,7 @@ def profile_unread(request):
             "total": sum(counts.values()),
             "other": sum(value for key, value in counts.items() if key != active),
             "organizations": organizations,
+            "latest": latest,
             "version": version,
         }
     )

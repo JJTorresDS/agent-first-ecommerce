@@ -713,7 +713,9 @@ class ItemQuestionTests(TestCase):
 
         from meli.jobs import (
             REFRESH_QUEUE,
+            REPLY_LANE,
             REPLY_QUEUE,
+            WORKER_QUEUES,
             refresh_status_key,
             reply_status_key,
             run_next_job,
@@ -775,10 +777,15 @@ class ItemQuestionTests(TestCase):
             run_reply_job(other.pk, conversation.pk)
             self.assertEqual(opened.call_count, 0)
             self.assertEqual(ItemQuestion.objects.get().answer_text, "")
-            # The worker waits on every queue at once and takes the reply first.
+            # Replies have their own lane: it takes the reply and never the refresh,
+            # and the general lane never takes a reply.
             fake.lpush(REFRESH_QUEUE, str(self.organization.pk))
-            self.assertTrue(run_next_job())
+            self.assertNotIn(REPLY_QUEUE, WORKER_QUEUES)
+            with self.assertLogs("meli", "INFO") as logs:
+                self.assertTrue(run_next_job(queues=REPLY_LANE))
+            self.assertIn("sent in", "\n".join(logs.output))
             self.assertEqual(fake.lists[REFRESH_QUEUE], [str(self.organization.pk)])
+            self.assertFalse(run_next_job(queues=REPLY_LANE))
             calls = opened.call_count
             # A refresh queued before the last one finished is skipped.
             fake.set(refresh_status_key(self.organization.pk), "ok")
@@ -976,6 +983,34 @@ class ItemQuestionTests(TestCase):
         self.assertEqual(ItemQuestion.objects.count(), 0)
         page = self.client.get("/meli/questions/?sync=failed", follow=True)
         self.assertContains(page, "Open questions could not be loaded.")
+
+    def test_an_answer_is_one_call_then_a_background_reread(self):
+        ItemQuestion.objects.create(
+            organization=self.organization,
+            question_id="13683341904",
+            text="Tienen stock?",
+            status="UNANSWERED",
+        )
+        project_question(ItemQuestion.objects.get())
+        conversation = Conversation.objects.get()
+        calls = []
+
+        def open_response(request, timeout=15):
+            calls.append(request.full_url)
+            if request.full_url.endswith("/answers"):
+                return TokenResponse({"text": "Si hay"})
+            if "/questions/" in request.full_url:
+                return TokenResponse(ANSWERED)
+            return question_api(request, timeout)
+
+        with patch("meli.client.urlopen", side_effect=open_response):
+            self.client.post(f"/inbox/{conversation.pk}/reply/", {"text": "Si hay"})
+        self.assertTrue(calls[0].endswith("/answers"))
+        conversation.refresh_from_db()
+        self.assertFalse(conversation.needs_reply)
+        self.assertEqual(ItemQuestion.objects.get().answer_text, "Si hay")
+        # The re-read after it (inline under tests) keeps the answer.
+        self.assertTrue(any("/questions/13683341904" in url for url in calls[1:]))
 
     def test_failed_reply_leaves_the_question_unanswered(self):
         ItemQuestion.objects.create(
@@ -2652,3 +2687,29 @@ class SeparateEnvironmentTests(TestCase):
             page,
             "The saved Mercado Libre connection can&#x27;t be read on this server.",
         )
+
+
+
+class WorkerLaneTests(TestCase):
+    def test_the_worker_starts_a_reply_lane_and_a_general_lane(self):
+        from meli import jobs
+
+        started = []
+
+        class FakeThread:
+            def __init__(self, target, args, name, daemon):
+                started.append((name, args[0]))
+
+            def start(self):
+                pass
+
+        with (
+            patch.object(jobs, "_started", False),
+            patch.object(jobs, "postsale_queue_enabled", return_value=True),
+            patch.object(jobs, "_skip_worker", return_value=False),
+            patch("meli.jobs.threading.Thread", FakeThread),
+        ):
+            jobs.start_postsale_worker()
+        self.assertEqual(started, [("meli-replies", jobs.REPLY_LANE), ("meli-jobs", jobs.WORKER_QUEUES)])
+        self.assertEqual(jobs.REPLY_LANE, (jobs.REPLY_QUEUE,))
+        self.assertNotIn(jobs.REPLY_QUEUE, jobs.WORKER_QUEUES)

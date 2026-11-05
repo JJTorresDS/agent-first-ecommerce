@@ -68,8 +68,10 @@ def send_post_sale(conversation, text):
 
 
 def send_item_question(conversation, text):
+    """Answer a presale question with one Mercado Libre call; the question is re-read in the background."""
+    from .jobs import dispatch_notification
     from .projection import project_question
-    from .views import _account_for, _load_question
+    from .views import _account_for
 
     question = ItemQuestion.objects.filter(
         organization_id=conversation.organization_id,
@@ -91,7 +93,7 @@ def send_item_question(conversation, text):
     question.status = "ANSWERED"
     question.answered_at = timezone.now()
     question.save(update_fields=["answer_text", "status", "answered_at", "updated_at"])
-    try:
-        _load_question(question.organization, question.question_id)
-    except (OSError, ValueError, InvalidToken):
-        project_question(question)
+    project_question(question)
+    dispatch_notification(
+        {"topic": "questions", "resource": f"/questions/{question.question_id}", "user_id": account.meli_user_id}
+    )

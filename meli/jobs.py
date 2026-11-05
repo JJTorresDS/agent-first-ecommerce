@@ -200,6 +200,7 @@ def enqueue_reply(conversation):
             {
                 "organization_id": str(conversation.organization_id),
                 "conversation_id": str(conversation.pk),
+                "queued_at": time.time(),
             }
         ),
     )
@@ -243,10 +244,25 @@ def _run_reply_payload(payload):
     except ValueError:
         logger.exception("Reply queue item was not JSON")
         return
-    run_reply_job(job.get("organization_id"), job.get("conversation_id"))
+    run_reply_job(job.get("organization_id"), job.get("conversation_id"), job.get("queued_at"))
 
 
-def run_reply_job(organization_id, conversation_id):
+def run_reply_job(organization_id, conversation_id, queued_at=None):
+    """Send one queued reply. Logs how long it waited and how long the channel took."""
+    started = time.time()
+    try:
+        _send_reply(organization_id, conversation_id)
+    finally:
+        waited = started - queued_at if isinstance(queued_at, (int, float)) else 0.0
+        logger.info(
+            "Reply %s sent in %.1f s after waiting %.1f s",
+            conversation_id,
+            time.time() - started,
+            max(0.0, waited),
+        )
+
+
+def _send_reply(organization_id, conversation_id):
     from inbox.channels import ReplyFailed, sender_for
     from inbox.models import Conversation, Message
 
@@ -633,8 +649,10 @@ def _run_sales_sync(organization_id):
         close_old_connections()
 
 
-# Replies first: a person is waiting on them. BRPOP takes the first non-empty list.
-WORKER_QUEUES = (REPLY_QUEUE, NOTIFICATION_QUEUE, QUEUE, LISTINGS_QUEUE, SALES_QUEUE, REFRESH_QUEUE)
+# Replies have their own thread (REPLY_LANE): a person is waiting, and a sync or refresh
+# can take tens of seconds. The other thread takes the rest; BRPOP takes the first non-empty list.
+REPLY_LANE = (REPLY_QUEUE,)
+WORKER_QUEUES = (NOTIFICATION_QUEUE, QUEUE, LISTINGS_QUEUE, SALES_QUEUE, REFRESH_QUEUE)
 
 
 def run_next_job(block_seconds=BLOCK_SECONDS, queues=WORKER_QUEUES):
@@ -659,10 +677,10 @@ def run_next_job(block_seconds=BLOCK_SECONDS, queues=WORKER_QUEUES):
     return True
 
 
-def _worker_loop():
+def _worker_loop(queues=WORKER_QUEUES):
     while True:
         try:
-            run_next_job()
+            run_next_job(queues=queues)
         except Exception:
             logger.exception("Post-sale worker lost the Redis connection")
             close_old_connections()
@@ -670,18 +688,18 @@ def _worker_loop():
 
 
 def start_postsale_worker():
-    """One daemon thread for the Gunicorn process. Tests and migrate stay quiet."""
+    """Two daemon threads for the Gunicorn process: replies alone, and everything else.
+
+    Tests and migrate stay quiet.
+    """
     global _started
     if not postsale_queue_enabled() or _skip_worker():
         return
     with _start_lock:
         if _started:
             return
-        threading.Thread(
-            target=_worker_loop,
-            name="postsale-sync",
-            daemon=True,
-        ).start()
+        for name, queues in (("meli-replies", REPLY_LANE), ("meli-jobs", WORKER_QUEUES)):
+            threading.Thread(target=_worker_loop, args=(queues,), name=name, daemon=True).start()
         _started = True
 
 
