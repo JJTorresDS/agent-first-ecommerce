@@ -1,0 +1,49 @@
+<section id="drafts" class="card flush"{% if busy %} hx-get="{% url 'meli_drafts' %}?poll=drafts" hx-trigger="every 3s" hx-target="#drafts" hx-select="#drafts" hx-swap="outerHTML"{% endif %}>
+  {% if drafts %}
+    <form method="post" action="{% url 'meli_drafts' %}">
+      {% csrf_token %}
+      <div class="table-scroll">
+        <table class="list">
+          <thead>
+            <tr>
+              <th class="check-col" aria-label="Post"></th>
+              <th></th><th>SKU</th><th>Catalog product</th><th class="num">Price</th><th class="num">Qty / stock</th><th>Status</th><th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for draft in drafts %}
+              <tr>
+                <td class="check-col">{% if can_edit and draft.status == "ready" %}<input type="checkbox" name="draft" value="{{ draft.pk }}" aria-label="Post {{ draft.product.sku }}">{% endif %}</td>
+                <td class="thumb-cell">{% if draft.catalog_picture %}<img class="thumb" src="{{ draft.catalog_picture }}" alt="" loading="lazy">{% else %}<span class="thumb"></span>{% endif %}</td>
+                <td><span class="sku">{{ draft.product.sku }}</span></td>
+                <td>
+                  <a href="{{ draft.catalog_url }}" target="_blank" rel="noopener">{{ draft.catalog_name|default:draft.catalog_product_id }}</a>
+                  {% if draft.error %}<p class="{% if draft.status == 'published' %}muted{% else %}error{% endif %}">{{ draft.error }}</p>{% endif %}
+                </td>
+                <td class="num">ARS {{ draft.price }}</td>
+                <td class="num">{{ draft.quantity }} / {{ draft.stock }}</td>
+                <td>
+                  <span class="pill {% if draft.status == 'ready' or draft.status == 'published' %}active{% elif draft.status == 'needs_fix' or draft.status == 'failed' %}warn{% elif draft.status == 'draft' %}{% else %}partial{% endif %}">
+                    {% if draft.status == "checking" or draft.status == "queued" or draft.status == "publishing" %}<span class="spinner" aria-hidden="true"></span>{% endif %}{{ draft.get_status_display }}
+                  </span>
+                </td>
+                <td>
+                  {% if draft.item_id %}<a href="{{ draft.item_url }}" target="_blank" rel="noopener">{{ draft.item_id }}</a>
+                  {% elif not draft.locked %}<a href="{% url 'meli_draft' draft.pk %}">{% if can_edit %}Edit{% else %}View{% endif %}</a>{% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% if can_edit %}
+        <div class="actions drafts-actions">
+          <button type="submit" name="action" value="post"{% if not ready_count %} disabled{% endif %}>Post selected</button>
+          <button class="accent" type="submit" name="action" value="post_all"{% if not ready_count %} disabled{% endif %}>Post all ready ({{ ready_count }})</button>
+        </div>
+      {% endif %}
+    </form>
+  {% else %}
+    <p class="muted drafts-empty">No drafts yet.</p>
+  {% endif %}
+</section>

@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block title %}New Mercado Libre listings{% endblock %}
+
+{% block content %}
+  {% include "catalog/_tabs.html" %}
+  <div class="page-head">
+    <h1>New Mercado Libre listings</h1>
+  </div>
+
+  {% if not connected %}
+    <div class="card empty">
+      <p>Mercado Libre isn't connected for this organization.</p>
+      <p><a href="{% url 'mercadolibre_settings' %}">Connect Mercado Libre</a> to post listings from Vimple.</p>
+    </div>
+  {% elif not started %}
+    <div class="card empty">
+      <p>Listings are posted with the stock in your Depósito, so count it first.</p>
+      <p><a href="{% url 'inventory_count' %}">Start the inventory</a></p>
+    </div>
+  {% elif can_edit %}
+    <section class="card">
+      <h2>Add from a catalog product</h2>
+      <p class="muted">On Mercado Libre, open the catalog product (the page with "Vender uno igual") and paste its URL. The listing competes for that product, with the Vimple product's SKU and stock.</p>
+      {% for error in add_form.non_field_errors %}<p class="error">{{ error }}</p>{% endfor %}
+      <form method="post" class="form-grid">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="add">
+        {% include "_field.html" with field=add_form.url wide=True %}
+        {% include "_field.html" with field=add_form.product wide=True %}
+        {% include "_field.html" with field=add_form.price %}
+        {% include "_field.html" with field=add_form.quantity %}
+        <div class="actions wide">
+          {% if not add_form.product.field.queryset.exists %}<p class="muted">No product has stock in the Depósito yet.</p>{% else %}<span></span>{% endif %}
+          <button class="primary" type="submit">Save draft</button>
+        </div>
+      </form>
+    </section>
+  {% endif %}
+
+  {% include "meli/_drafts.html" %}
+
+  <section class="card">
+    <h2>Defaults</h2>
+    <p class="muted">Each draft uses these unless you untick "Use the defaults" on it. In-person pickup is always off.</p>
+    <form method="post" class="form-grid">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="defaults">
+      <fieldset class="form-grid wide"{% if not can_edit %} disabled{% endif %}>
+        {% include "meli/_settings_fields.html" with form=defaults_form %}
+      </fieldset>
+      {% if can_edit %}<div class="actions wide"><span></span><button class="primary" type="submit">Save defaults</button></div>{% endif %}
+    </form>
+  </section>
+{% endblock %}

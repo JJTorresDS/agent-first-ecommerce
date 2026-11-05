@@ -1,13 +1,15 @@
+import json
 from datetime import datetime, time
 
 from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Count, DecimalField, ExpressionWrapper, F, Max, Q, Sum
-from django.http import HttpResponseForbidden
+from django.http import HttpResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_date
+from django.views.decorators.http import require_POST
 
 from accounts.access import require_app
 from accounts.models import AppAccess, can_edit_products, membership_for, user_can_open
@@ -153,6 +155,7 @@ def purchase_edit(request, pk=None):
             "today": timezone.localdate(),
             "can_edit": can_edit,
             "can_link_receipts": can_link_receipts,
+            "supplier_form": SupplierForm(prefix="supplier") if can_edit else None,
             "active_tab": "purchases",
         },
     )
@@ -276,6 +279,35 @@ def suppliers(request):
         "purchasing/suppliers.html",
         {"suppliers": rows, "form": form, "can_edit": can_edit, "active_tab": "suppliers"},
     )
+
+
+@require_app(AppAccess.App.PURCHASING)
+@require_POST
+def supplier_new(request):
+    """Add a supplier from the purchase page's dialog, without leaving it.
+
+    Errors come back as the dialog's form; a saved supplier comes back as a 204 with an
+    HX-Trigger event that adds it to the supplier select.
+    """
+    _membership, organization, can_edit = _scope(request)
+    if not can_edit:
+        return HttpResponseForbidden(READ_ONLY)
+    form = SupplierForm(request.POST, prefix="supplier", instance=Supplier(organization=organization))
+    if not form.is_valid():
+        return render(request, "purchasing/_supplier_dialog_form.html", {"supplier_form": form})
+    supplier = form.save()
+    response = HttpResponse(status=204)
+    response["HX-Trigger"] = json.dumps(
+        {
+            "select-option-added": {
+                "select": "id_supplier",
+                "dialog": "supplier-dialog",
+                "id": str(supplier.pk),
+                "label": str(supplier),
+            }
+        }
+    )
+    return response
 
 
 @require_app(AppAccess.App.PURCHASING)

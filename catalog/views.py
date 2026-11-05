@@ -152,7 +152,16 @@ def code_new(request, kind):
     # 204: htmx leaves the dialog's form in place and still fires the event.
     response = HttpResponse(status=204)
     response["HX-Trigger"] = json.dumps(
-        {"catalog-code-added": {"kind": kind, "id": str(row.pk), "code": row.code, "label": str(row)}}
+        {
+            "select-option-added": {
+                "select": f"id_{kind}",
+                "dialog": f"code-dialog-{kind}",
+                "id": str(row.pk),
+                "label": str(row),
+                "kind": kind,
+                "code": row.code,
+            }
+        }
     )
     return response
 

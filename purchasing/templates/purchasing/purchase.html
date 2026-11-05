@@ -56,8 +56,10 @@
       <fieldset class="form-grid"{% if not can_edit %} disabled{% endif %}>
         <div class="field{% if form.supplier.errors %} has-error{% endif %}">
           <label for="{{ form.supplier.id_for_label }}">Supplier <span class="req" aria-hidden="true">*</span></label>
-          {{ form.supplier }}
-          {% if can_edit %}<p class="help"><a href="{% url 'suppliers' %}">New supplier</a></p>{% endif %}
+          <div class="select-add">
+            {{ form.supplier }}
+            {% if can_edit %}<button type="button" class="add-code" data-dialog="supplier-dialog" aria-label="New supplier" title="New supplier">+</button>{% endif %}
+          </div>
           {% for error in form.supplier.errors %}<p class="error">{{ error }}</p>{% endfor %}
         </div>
         {% include "_field.html" with field=form.purchased_on %}
@@ -94,6 +96,13 @@
       <p class="muted">Only owners and admins can change purchases.</p>
     {% endif %}
   </form>
+  {# Outside #purchase-form: a form can't sit inside another one. #}
+  {% if supplier_form %}
+    <dialog class="modal" id="supplier-dialog" aria-labelledby="supplier-dialog-title">
+      <h2 id="supplier-dialog-title">New supplier</h2>
+      {% include "purchasing/_supplier_dialog_form.html" %}
+    </dialog>
+  {% endif %}
 
   <script>
     (function () {

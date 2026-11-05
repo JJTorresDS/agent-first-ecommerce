@@ -1,6 +1,7 @@
 from datetime import timedelta
 from zoneinfo import ZoneInfo
 
+from django.conf import settings
 from django.db import models, transaction
 from django.utils import timezone
 
@@ -433,3 +434,123 @@ class MeliSalesSync(models.Model):
         if self.state not in {MeliListingSync.State.QUEUED, MeliListingSync.State.RUNNING}:
             return False
         return self.updated_at > timezone.now() - timedelta(minutes=30)
+
+
+class ListingSettings(models.Model):
+    """The choices of Mercado Libre's sell flow that Vimple fills in, as defaults or for one draft.
+
+    In-person pickup is not a choice: every listing goes out without it.
+    """
+
+    class Condition(models.TextChoices):
+        NEW = "new", "New"
+        USED = "used", "Used"
+
+    class Warranty(models.TextChoices):
+        SELLER = "seller", "Seller warranty"
+        FACTORY = "factory", "Factory warranty"
+        NONE = "none", "No warranty"
+
+    installments = models.BooleanField(
+        default=False,
+        help_text="On: 3 installments at the published price (Premium). Off: no installments (Clásica).",
+    )
+    invoice_a = models.BooleanField(default=False, verbose_name="Factura A", help_text="Offer Factura A to companies.")
+    condition = models.CharField(max_length=8, choices=Condition.choices, default=Condition.NEW)
+    flex = models.BooleanField(default=False, verbose_name="Mercado Envíos Flex")
+    warranty = models.CharField(max_length=8, choices=Warranty.choices, default=Warranty.SELLER)
+    warranty_days = models.PositiveSmallIntegerField(default=30)
+    regulatory_na = models.BooleanField(
+        default=True,
+        verbose_name="Resolución 155/98: no aplica",
+        help_text="Sent only for categories that ask for it, such as perfumes.",
+    )
+
+    SETTING_FIELDS = ("installments", "invoice_a", "condition", "flex", "warranty", "warranty_days", "regulatory_na")
+
+    class Meta:
+        abstract = True
+
+
+class ListingDefaults(ListingSettings):
+    """An organization's defaults for new Mercado Libre listings."""
+
+    organization = models.OneToOneField(
+        "accounts.Organization",
+        on_delete=models.CASCADE,
+        related_name="listing_defaults",
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "meli_listing_defaults"
+
+
+class ListingDraft(ListingSettings):
+    """A Mercado Libre listing prepared in Vimple: checked by Mercado Libre, then posted.
+
+    draft → checking → ready or needs_fix; ready → queued → publishing → published or failed.
+    The settings fields apply only when use_defaults is off.
+    """
+
+    class Kind(models.TextChoices):
+        CATALOG = "catalog", "Catalog"
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        CHECKING = "checking", "Checking"
+        READY = "ready", "Ready"
+        NEEDS_FIX = "needs_fix", "Needs a fix"
+        QUEUED = "queued", "Queued"
+        PUBLISHING = "publishing", "Posting"
+        PUBLISHED = "published", "Published"
+        FAILED = "failed", "Failed"
+
+    # Locked while Mercado Libre has it or is about to.
+    LOCKED = (Status.QUEUED, Status.PUBLISHING, Status.PUBLISHED)
+    BUSY = (Status.CHECKING, Status.QUEUED, Status.PUBLISHING)
+
+    organization = models.ForeignKey(
+        "accounts.Organization",
+        on_delete=models.CASCADE,
+        related_name="listing_drafts",
+    )
+    kind = models.CharField(max_length=16, choices=Kind.choices, default=Kind.CATALOG)
+    product = models.ForeignKey(
+        "catalog.MasterProduct",
+        on_delete=models.PROTECT,
+        related_name="listing_drafts",
+    )
+    catalog_url = models.URLField(max_length=1024, blank=True)
+    catalog_product_id = models.CharField(max_length=32, blank=True)
+    catalog_name = models.CharField(max_length=255, blank=True)
+    catalog_picture = models.CharField(max_length=1024, blank=True)
+    category_id = models.CharField(max_length=32, blank=True)
+    has_regulatory = models.BooleanField(default=False, help_text="The category asks for the 155/98 file number.")
+    price = models.DecimalField(max_digits=14, decimal_places=2)
+    quantity = models.PositiveIntegerField(default=1)
+    use_defaults = models.BooleanField(default=True)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.DRAFT)
+    error = models.CharField(max_length=500, blank=True)
+    item_id = models.CharField(max_length=32, blank=True)
+    published_at = models.DateTimeField(null=True, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "meli_listing_draft"
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["organization", "status"])]
+
+    def locked(self):
+        return self.status in self.LOCKED
+
+    def item_url(self):
+        return f"https://articulo.mercadolibre.com.ar/{self.item_id[:3]}-{self.item_id[3:]}" if self.item_id else ""

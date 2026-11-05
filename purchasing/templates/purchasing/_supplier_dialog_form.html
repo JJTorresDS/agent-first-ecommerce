@@ -1,0 +1,12 @@
+<form method="post" class="modal-form" action="{% url 'supplier_new' %}" hx-post="{% url 'supplier_new' %}" hx-target="this" hx-swap="outerHTML">
+  {% csrf_token %}
+  {% for error in supplier_form.non_field_errors %}<p class="error">{{ error }}</p>{% endfor %}
+  {% include "_field.html" with field=supplier_form.name %}
+  {% include "_field.html" with field=supplier_form.tax_id %}
+  {% include "_field.html" with field=supplier_form.email %}
+  {% include "_field.html" with field=supplier_form.phone %}
+  <div class="actions">
+    <button type="button" data-close-dialog>Cancel</button>
+    <button type="submit" class="primary">Add supplier</button>
+  </div>
+</form>

@@ -247,7 +247,7 @@ class CodeDialogTests(TestCase):
         import json
 
         self.assertEqual(response.status_code, 204)
-        return json.loads(response["HX-Trigger"])["catalog-code-added"]
+        return json.loads(response["HX-Trigger"])["select-option-added"]
 
     def test_an_owner_adds_a_category_and_a_brand(self):
         category = self._added(
@@ -255,7 +255,17 @@ class CodeDialogTests(TestCase):
         )
         row = Category.objects.get(organization=self.organization)
         self.assertEqual(row.code, "PERF")
-        self.assertEqual(category, {"kind": "category", "id": str(row.pk), "code": "PERF", "label": "PERF · Perfumes"})
+        self.assertEqual(
+            category,
+            {
+                "select": "id_category",
+                "dialog": "code-dialog-category",
+                "id": str(row.pk),
+                "label": "PERF · Perfumes",
+                "kind": "category",
+                "code": "PERF",
+            },
+        )
         brand = self._added(self.client.post("/catalog/codes/new/brand/", {"brand-code": "ONLY", "brand-name": "Only"}))
         self.assertEqual(brand["label"], "ONLY · Only")
         self.assertEqual(Brand.objects.get(pk=brand["id"]).organization, self.organization)

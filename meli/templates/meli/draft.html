@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block title %}{{ draft.catalog_name|default:draft.product.sku }}{% endblock %}
+
+{% block content %}
+  {% include "catalog/_tabs.html" %}
+  <div class="page-head">
+    <h1>{{ draft.catalog_name|default:draft.catalog_product_id }}</h1>
+    <span class="sku sku-lg">{{ draft.product.sku }}</span>
+  </div>
+  <section class="card">
+    <p class="muted"><a href="{{ draft.catalog_url }}" target="_blank" rel="noopener">{{ draft.catalog_product_id }}</a> · {{ available }} in stock in the Depósito · {{ draft.get_status_display }}</p>
+    {% if draft.error %}<p class="error">{{ draft.error }}</p>{% endif %}
+    {% for error in form.non_field_errors %}<p class="error">{{ error }}</p>{% endfor %}
+    <form method="post" class="form-grid" id="draft-form">
+      {% csrf_token %}
+      <fieldset class="form-grid wide"{% if not can_edit %} disabled{% endif %}>
+        {% include "_field.html" with field=form.price %}
+        {% include "_field.html" with field=form.quantity %}
+        {% include "meli/_check_field.html" with field=form.use_defaults %}
+        <div class="form-grid wide" id="own-settings"{% if form.use_defaults.value %} hidden{% endif %}>
+          {% include "meli/_settings_fields.html" %}
+        </div>
+      </fieldset>
+      {% if can_edit %}
+        <div class="actions wide">
+          <button type="submit" name="action" value="delete" class="danger" formnovalidate>Delete draft</button>
+          <button class="primary" type="submit">Save and check</button>
+        </div>
+      {% endif %}
+    </form>
+  </section>
+  <script>
+    // Unticking "Use the defaults" shows this listing's own settings, starting from the defaults.
+    (function () {
+      var box = document.getElementById("id_use_defaults");
+      var own = document.getElementById("own-settings");
+      if (!box || !own) return;
+      box.addEventListener("change", function () { own.hidden = box.checked; });
+    })();
+  </script>
+{% endblock %}

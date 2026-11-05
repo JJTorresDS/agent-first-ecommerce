@@ -116,45 +116,12 @@
       document.addEventListener("change", update);
       update();
 
-      // + next to Category or Brand: add one in a dialog and select it, keeping what's typed in the model form.
-      // The dialog's form is replaced when the server sends errors, so look it up each time.
-      function clearDialog(dialog) {
-        dialog.querySelectorAll("p.error").forEach(function (error) { error.remove(); });
-        dialog.querySelectorAll(".has-error").forEach(function (field) { field.classList.remove("has-error"); });
-        // Not form.reset(): after an error the inputs' defaults are the rejected values.
-        dialog.querySelectorAll("input[type=text]").forEach(function (input) { input.value = ""; });
-      }
-      document.addEventListener("click", function (event) {
-        var opener = event.target.closest("[data-dialog]");
-        if (opener) {
-          var dialog = document.getElementById(opener.getAttribute("data-dialog"));
-          if (!dialog) return;
-          clearDialog(dialog);
-          dialog.showModal();
-          var first = dialog.querySelector("input:not([type=hidden])");
-          if (first) first.focus();
-          return;
-        }
-        var closer = event.target.closest("[data-close-dialog]");
-        if (closer) closer.closest("dialog").close();
-      });
-      document.body.addEventListener("catalog-code-added", function (event) {
+      // A category or brand added from its + dialog: base.html adds and selects the option; the preview needs its code.
+      document.body.addEventListener("select-option-added", function (event) {
         var added = event.detail;
-        var select = document.getElementById("id_" + added.kind);
-        if (select) {
-          var option = new Option(added.label, added.id, true, true);
-          select.add(option);
-          select.value = added.id;
-        }
-        var known = codes[added.kind === "category" ? "categories" : "brands"];
+        var known = codes[added.kind === "category" ? "categories" : added.kind === "brand" ? "brands" : ""];
         if (known) known[added.id] = added.code;
-        var dialog = document.getElementById("code-dialog-" + added.kind);
-        if (dialog) {
-          dialog.close();
-          clearDialog(dialog);
-        }
         update();
-        if (select) select.focus();
       });
     })();
   </script>

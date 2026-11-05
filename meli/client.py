@@ -78,7 +78,8 @@ def _error_reason(error):
     return reason or f"HTTP {error.code}"
 
 
-def _api_request(access_token, url, payload=None, expect=dict):
+def _api_request(access_token, url, payload=None, expect=dict, method=None):
+    """GET, or POST when there is a payload; method overrides it (DELETE, PUT)."""
     headers = {
         "Accept": "application/json",
         "Authorization": f"Bearer {access_token}",
@@ -87,14 +88,15 @@ def _api_request(access_token, url, payload=None, expect=dict):
     if payload is not None:
         body = json.dumps(payload).encode()
         headers["Content-Type"] = "application/json"
-    request = Request(url, data=body, headers=headers)
+    request = Request(url, data=body, headers=headers, method=method)
     try:
         with urlopen(request, timeout=15) as response:
             parsed = json.loads(response.read().decode() or "null")
     except HTTPError as error:
         raise MercadoLibreError(_error_reason(error), error.code) from None
     if not isinstance(parsed, expect):
-        raise ValueError(f"Mercado Libre response was not a {expect.__name__}.")
+        names = " or ".join(kind.__name__ for kind in (expect if isinstance(expect, tuple) else (expect,)))
+        raise ValueError(f"Mercado Libre response was not a {names}.")
     return parsed
 
 
@@ -363,4 +365,51 @@ def refresh_access_token(refresh_token):
             "client_secret": settings.MELI_CLIENT_SECRET,
             "refresh_token": refresh_token,
         }
+    )
+
+
+def fetch_catalog_product(access_token, product_id):
+    """A catalog product (the /p/MLA… page): name, status, domain_id, pictures."""
+    product = quote(str(product_id), safe="")
+    return _api_request(access_token, f"https://api.mercadolibre.com/products/{product}")
+
+
+def predict_category(access_token, site_id, text):
+    """Mercado Libre's best guesses for a title: [{domain_id, category_id, category_name}, …]."""
+    site = quote(str(site_id), safe="")
+    query = urlencode({"q": text, "limit": 5})
+    return _api_request(
+        access_token,
+        f"https://api.mercadolibre.com/sites/{site}/domain_discovery/search?{query}",
+        expect=list,
+    )
+
+
+def fetch_category_attributes(access_token, category_id):
+    category = quote(str(category_id), safe="")
+    return _api_request(
+        access_token,
+        f"https://api.mercadolibre.com/categories/{category}/attributes",
+        expect=list,
+    )
+
+
+def validate_item(access_token, body):
+    """Mercado Libre's check of a new item, without creating it. Raises MercadoLibreError with its reason."""
+    _api_request(access_token, "https://api.mercadolibre.com/items/validate", body, expect=(dict, type(None)))
+
+
+def create_item(access_token, body):
+    return _api_request(access_token, "https://api.mercadolibre.com/items", body)
+
+
+def remove_flex(access_token, site_id, item_id):
+    """Take one item out of Mercado Envíos Flex (the account puts new items in)."""
+    site = quote(str(site_id), safe="")
+    item = quote(str(item_id), safe="")
+    _api_request(
+        access_token,
+        f"https://api.mercadolibre.com/sites/{site}/shipping/selfservice/items/{item}",
+        method="DELETE",
+        expect=(dict, list, type(None)),
     )

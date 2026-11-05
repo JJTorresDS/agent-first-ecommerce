@@ -49,7 +49,10 @@ Organization is the tenant. Its UUID does not change. The name can.
 - Background jobs log every failure with describe_failure (error class and Mercado Libre's reason, never a token). Never pass silently on an exception.
 - The webhook stores the row and calls dispatch_notification. It makes no Mercado Libre calls, because Mercado Libre expects an answer in about 500 ms. The worker loads the notification.
 - MeliListing is one row per (item, variation), linked to catalog.MasterProduct by SKU: the SELLER_SKU attribute, else seller_custom_field, the variation's own first (meli/listings.py sku_of). Items are fetched with include_attributes=all, or variation SKUs are missing. One product can have many listings.
-- The full listing sync scans every status (active, paused, closed, under_review, inactive) and deletes rows for items it didn't see only after every scan succeeded. items webhooks refresh one item; a 404 removes its rows. MeliListingSync holds the last run's state and counts. Nothing is written to Mercado Libre yet.
+- The full listing sync scans every status (active, paused, closed, under_review, inactive) and deletes rows for items it didn't see only after every scan succeeded. items webhooks refresh one item; a 404 removes its rows. MeliListingSync holds the last run's state and counts.
+- New listings are ListingDrafts (meli/drafts.py, page /catalog/meli/new/). draft → checking → ready or needs_fix → queued → publishing → published or failed. A draft is checked with POST /items/validate before it can be posted, so Mercado Libre's own reason shows on the draft. Checking and posting run in the worker (DRAFTS_QUEUE, dispatch_drafts); pages never call Mercado Libre. A posted draft is claimed (queued → publishing) before POST /items, so a repeated click or job creates one item.
+- A draft's quantity defaults to 1 and is never above the Depósito stock, checked when saved and again just before posting. No draft without a first inventory count. SELLER_SKU is the Vimple SKU, so the sync links the new listing; after posting, refresh_listing stores it.
+- build_item sends what Mercado Libre's sell flow sends (ids read from synced payloads): INVOICE 6891888 No factura / 6891885 Factura A, WARRANTY_TYPE 2230280 seller / 2230279 factory, WARRANTY_TIME "N días", ITEM_CONDITION 2230284, 155_98_RESOLUTION_FILE_NUMBER -1 only when the category has it, gold_special without installments / gold_pro with, shipping me2 and local_pick_up always false. Flex is removed per item after posting when the settings say no.
 - A new catalog product takes unlinked listings with its SKU through a post_save receiver in meli/apps.py, so the catalog app never imports meli.
 - Fetch post-sale messages with tag=post_sale and mark_as_read=false. Link the post-sale header to /ventas/<id>/detalle, not to the messages page, because opening the messages page marks the buyer's message read.
 - A presale answer is one Mercado Libre call (post_answer); the question is re-read in the background.
@@ -77,6 +80,7 @@ Organization is the tenant. Its UUID does not change. The name can.
 - Catalog pages show costs only to users who can also open Purchasing. Purchase forms offer cashflow receipts only to users who can open Cashflow.
 - Forms take the organization from membership_for, never from the request. Use catalog.forms.TenantForm so organization-scoped unique checks are form errors, and limit every select's queryset to the organization.
 - Purchase lines name products by SKU (purchasing.forms.read_lines), resolved inside the organization; a line id from another purchase is never moved.
+- A + next to a select (category, brand, supplier) opens a dialog outside the page's form. Its view saves with the organization's TenantForm and answers 204 with HX-Trigger select-option-added {select, id, label, dialog}; base.html adds and selects the option. Errors re-render the dialog's form (200).
 
 ## Inventory
 

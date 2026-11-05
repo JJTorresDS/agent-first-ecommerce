@@ -25,6 +25,7 @@ REFRESH_QUEUE = _key("refresh", "queue")
 NOTIFICATION_QUEUE = _key("notification", "queue")
 LISTINGS_QUEUE = _key("listings", "queue")
 SALES_QUEUE = _key("sales", "queue")
+DRAFTS_QUEUE = _key("drafts", "queue")
 NOTIFICATION_TOPICS = {"questions", "messages", "items", "orders_v2"}
 ACTIVE_TTL = 30 * 60
 DONE_TTL = 2 * 60
@@ -667,6 +668,55 @@ def _run_listing_sync(organization_id):
         close_old_connections()
 
 
+def dispatch_drafts(organization, action, draft_ids):
+    """Check or post listing drafts in the worker (action check or publish). Never on the reply lane."""
+    if not draft_ids:
+        return
+    payload = json.dumps(
+        {"organization_id": str(organization.pk), "action": action, "draft_ids": [int(pk) for pk in draft_ids]}
+    )
+    if _under_test():
+        _run_drafts_payload(payload)
+    elif postsale_queue_enabled():
+        try:
+            _client().lpush(DRAFTS_QUEUE, payload)
+        except Exception:
+            logger.exception("Could not queue the drafts %s", action)
+            from .models import ListingDraft
+
+            # Nothing will pick them up: say so on the drafts instead of leaving them spinning.
+            ListingDraft.objects.filter(
+                organization=organization,
+                pk__in=draft_ids,
+                status__in=[ListingDraft.Status.CHECKING, ListingDraft.Status.QUEUED],
+            ).update(status=ListingDraft.Status.FAILED, error="Could not be queued. Try again.")
+    else:
+        threading.Thread(target=_run_drafts_payload, args=(payload,), name="meli-drafts", daemon=True).start()
+
+
+def _run_drafts_payload(payload):
+    from accounts.models import Organization
+
+    from . import drafts
+
+    try:
+        job = json.loads(payload)
+    except ValueError:
+        logger.exception("Drafts queue item was not JSON")
+        return
+    close_old_connections()
+    try:
+        organization = Organization.objects.filter(pk=job.get("organization_id")).first()
+        if organization is None:
+            return
+        run = drafts.publish if job.get("action") == "publish" else drafts.check
+        run(organization, job.get("draft_ids") or [])
+    except Exception:
+        logger.exception("Drafts %s failed for %s", job.get("action"), job.get("organization_id"))
+    finally:
+        close_old_connections()
+
+
 def dispatch_sales_sync(organization):
     """Queue the sales catch-up. One already queued or running is left as it is."""
     from .models import MeliListingSync, MeliSalesSync
@@ -712,7 +762,7 @@ def _run_sales_sync(organization_id):
 # Replies have their own thread (REPLY_LANE): a person is waiting, and a sync or refresh
 # can take tens of seconds. The other thread takes the rest; BRPOP takes the first non-empty list.
 REPLY_LANE = (REPLY_QUEUE,)
-WORKER_QUEUES = (NOTIFICATION_QUEUE, QUEUE, LISTINGS_QUEUE, SALES_QUEUE, REFRESH_QUEUE)
+WORKER_QUEUES = (NOTIFICATION_QUEUE, QUEUE, LISTINGS_QUEUE, SALES_QUEUE, REFRESH_QUEUE, DRAFTS_QUEUE)
 
 
 def run_next_job(block_seconds=BLOCK_SECONDS, queues=WORKER_QUEUES):
@@ -732,6 +782,7 @@ def run_next_job(block_seconds=BLOCK_SECONDS, queues=WORKER_QUEUES):
         LISTINGS_QUEUE: _run_listing_sync,
         SALES_QUEUE: _run_sales_sync,
         REFRESH_QUEUE: _run_refresh,
+        DRAFTS_QUEUE: _run_drafts_payload,
     }
     handlers[queue](value)
     return True

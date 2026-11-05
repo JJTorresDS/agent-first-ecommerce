@@ -3,4 +3,5 @@
   <a class="tab{% if active_tab == 'models' %} active{% endif %}" href="{% url 'catalog_models' %}">Models</a>
   <a class="tab{% if active_tab == 'codes' %} active{% endif %}" href="{% url 'catalog_codes' %}">Categories &amp; brands</a>
   <a class="tab{% if active_tab == 'meli' %} active{% endif %}" href="{% url 'meli_listings' %}">Mercado Libre</a>
+  <a class="tab{% if active_tab == 'meli_new' %} active{% endif %}" href="{% url 'meli_drafts' %}">New listings</a>
 </nav>

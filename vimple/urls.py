@@ -17,6 +17,7 @@ from accounts.views import (
     set_app_access,
 )
 from inbox.views import inbox, inbox_reply
+from meli.draft_views import meli_draft, meli_drafts
 from meli.listing_views import meli_listings
 from meli.views import (
     mercadolibre_callback,
@@ -62,6 +63,8 @@ urlpatterns = [
     path("cashflow/settings/key/", cashflow_parser_key, name="cashflow_parser_key"),
     path("cashflow/settings/drive-token/", cashflow_drive_token, name="cashflow_drive_token"),
     path("catalog/meli/", meli_listings, name="meli_listings"),
+    path("catalog/meli/new/", meli_drafts, name="meli_drafts"),
+    path("catalog/meli/new/<int:pk>/", meli_draft, name="meli_draft"),
     path("catalog/", include("catalog.urls")),
     path("purchases/", include("purchasing.urls")),
     path("inventory/", include("inventory.urls")),

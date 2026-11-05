@@ -201,3 +201,58 @@ class PurchaseFlowTests(TestCase):
         by_date = self.client.get("/purchases/?date_from=2026-10-01")
         self.assertContains(by_date, "S-1")
         self.assertNotContains(by_date, "N-1")
+
+
+class SupplierDialogTests(TestCase):
+    """The + next to Supplier on the purchase page adds one without leaving it."""
+
+    def setUp(self):
+        self.organization = Organization.objects.create(name="Test Seller")
+        self.other = Organization.objects.create(name="Other")
+        self.client.force_login(member(self.organization, apps=PURCHASING))
+
+    def _added(self, response):
+        import json
+
+        self.assertEqual(response.status_code, 204)
+        return json.loads(response["HX-Trigger"])["select-option-added"]
+
+    def test_an_owner_adds_a_supplier_and_it_is_selected(self):
+        added = self._added(
+            self.client.post("/purchases/suppliers/new/", {"supplier-name": "Importadora Sur", "supplier-email": "ventas@sur.com"})
+        )
+        supplier = Supplier.objects.get(organization=self.organization)
+        self.assertEqual(
+            added,
+            {"select": "id_supplier", "dialog": "supplier-dialog", "id": str(supplier.pk), "label": "Importadora Sur"},
+        )
+        self.assertEqual(supplier.email, "ventas@sur.com")
+
+    def test_a_duplicate_shows_the_error_in_the_dialog(self):
+        Supplier.objects.create(organization=self.organization, name="Importadora Sur")
+        response = self.client.post("/purchases/suppliers/new/", {"supplier-name": "Importadora Sur"})
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("HX-Trigger", response)
+        self.assertContains(response, 'class="modal-form"')
+        self.assertContains(response, 'class="error"')
+        self.assertEqual(Supplier.objects.filter(organization=self.organization).count(), 1)
+
+    def test_another_organizations_supplier_is_neither_a_clash_nor_shown(self):
+        theirs = Supplier.objects.create(organization=self.other, name="Importadora Sur")
+        added = self._added(self.client.post("/purchases/suppliers/new/", {"supplier-name": "Importadora Sur"}))
+        self.assertNotEqual(added["id"], str(theirs.pk))
+        self.assertEqual(Supplier.objects.get(pk=added["id"]).organization, self.organization)
+        self.assertNotContains(self.client.get("/purchases/new/"), f'<option value="{theirs.pk}"')
+
+    def test_only_editors_add_and_only_by_post(self):
+        self.assertEqual(self.client.get("/purchases/suppliers/new/").status_code, 405)
+        page = self.client.get("/purchases/new/")
+        self.assertContains(page, 'data-dialog="supplier-dialog"')
+        self.assertContains(page, 'id="supplier-dialog"')
+        self.client.force_login(member(self.organization, role=Membership.Role.CONTRIBUTOR, apps=PURCHASING, username="bea"))
+        response = self.client.post("/purchases/suppliers/new/", {"supplier-name": "Importadora Sur"})
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(Supplier.objects.exists())
+        page = self.client.get("/purchases/new/")
+        self.assertNotContains(page, 'class="add-code"')
+        self.assertNotContains(page, "<dialog")
