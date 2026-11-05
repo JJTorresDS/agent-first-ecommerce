@@ -5,7 +5,7 @@ Read this before changing models, queries, pages, or APIs.
 Organization is the tenant. Its UUID does not change. The name can.
 
 - App models other than Organization carry an organization foreign key, through TenantModel or an explicit field such as ItemQuestion.organization.
-- Pages take the organization from membership_for(request.user). A user with no membership goes to organization setup and sees no other organization's data.
+- Pages take the organization from membership_for(request.user). The user's memberships are read once per request (memberships_for, cached on the user; any Membership, Profile or Organization write clears it), so the middleware, the view and the nav share one query. A user with no membership goes to organization setup and sees no other organization's data.
 - API list, get, create, and update calls take the organization id and filter on it. A row in another organization is not returned and is not moved.
 - Counts, badges, exports, and webhook rows use that same organization. A query with no organization filter is wrong.
 - A new read or write includes a test where another organization's row stays invisible.
@@ -17,7 +17,7 @@ Organization is the tenant. Its UUID does not change. The name can.
 - Check new pages at 390px as well as on desktop; wide tables go in .table-scroll.
 - The profile menu sits inside the dark sidebar but sets its own colors (.profile-panel); nothing in it may inherit from .sidebar.
 - Each organization row in the menu has two buttons in one switch form: the name (go=home, the organization page) and the message icon with its count (go=inbox). organization_switch only follows those two names, never a URL from the request.
-- Chats waiting per organization come from one grouped query over the user's own memberships (inbox.unread.unread_by_organization). The avatar badge counts only other organizations. /profile/unread/ is polled every 20 s, also while the tab is hidden (the chime matters most when you're in another tab), at once after an inbox list poll brings changes, and answers 204 when X-Unread-Version matches. latest is epoch milliseconds, compared as numbers; a newer incoming message (latest, from inbox.unread.latest_incoming) plays a Web Audio chime, even when the waiting total is unchanged (on by default, switch in the menu; tabs share the last chimed message in localStorage, so one tab chimes per message).
+- Chats waiting per organization and channel come from one grouped query over the user's own memberships (inbox.unread.waiting_counts). The nav reads the badges and the bell alerts from it; don't count conversations again. The avatar badge counts only other organizations. /profile/unread/ is polled every 20 s, also while the tab is hidden (the chime matters most when you're in another tab), at once after an inbox list poll brings changes, and answers 204 when X-Unread-Version matches. latest is epoch milliseconds, compared as numbers; a newer incoming message (latest, from inbox.unread.latest_incoming) plays a Web Audio chime, even when the waiting total is unchanged (on by default, switch in the menu; tabs share the last chimed message in localStorage, so one tab chimes per message).
 
 ## Inbox and htmx
 

@@ -4,6 +4,8 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import models
 from django.db.models.functions import Lower
+from django.db.models.signals import post_delete, post_save
+from django.dispatch import receiver
 
 IMPERSONATOR_SESSION_KEY = "impersonator_id"
 
@@ -225,16 +227,49 @@ class Profile(TenantModel):
         return self.display_name or self.user.email or self.user.get_username()
 
 
-def membership_for(user):
+# Bumped by every membership, profile or organization write in this process, so a
+# user's cached memberships are read again after a switch, a join or a removal.
+_membership_writes = 0
+
+
+@receiver([post_save, post_delete], sender=Membership)
+@receiver([post_save, post_delete], sender=Profile)
+@receiver([post_save, post_delete], sender=Organization)
+def _forget_memberships(**kwargs):
+    global _membership_writes
+    _membership_writes += 1
+
+
+def memberships_for(user):
+    """The user's memberships by organization name, in one query, kept on the user for the request.
+
+    Each Neon query costs a network round trip; the view, apps_for and the nav all read these.
+    """
     if not getattr(user, "is_authenticated", False):
+        return []
+    cached = getattr(user, "_memberships_cache", None)
+    if cached is not None and cached[0] == _membership_writes:
+        return cached[1]
+    writes = _membership_writes
+    rows = list(
+        Membership.objects.filter(user=user)
+        .select_related("organization")
+        .order_by("organization__name", "pk")
+    )
+    user._memberships_cache = (writes, rows)
+    return rows
+
+
+def membership_for(user):
+    memberships = memberships_for(user)
+    if not memberships:
         return None
-    memberships = Membership.objects.select_related("organization").filter(user=user)
     profile = _profile_for(user)
     if profile is not None and profile.organization_id:
-        chosen = memberships.filter(organization_id=profile.organization_id).first()
-        if chosen is not None:
-            return chosen
-    return memberships.order_by("pk").first()
+        for membership in memberships:
+            if membership.organization_id == profile.organization_id:
+                return membership
+    return min(memberships, key=lambda membership: membership.pk)
 
 
 def _profile_for(user):
@@ -294,6 +329,8 @@ def ensure_profile(user, organization):
     if profile.organization_id != organization.id:
         profile.organization = organization
         profile.save(update_fields=["organization", "updated_at"])
+    # membership_for reads user.profile; keep it on this row, not one loaded earlier.
+    user.profile = profile
     return profile
 
 

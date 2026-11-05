@@ -1971,7 +1971,7 @@ class PostSaleTests(TestCase):
             last_message_at=now,
         )
         headers = {"HX-Request": "true", "HX-Target": "thread"}
-        with self.assertNumQueries(7):
+        with self.assertNumQueries(6):
             clicked = self.client.get(f"/inbox/?conversation={sale.pk}", headers=headers)
         html = clicked.content.decode()
         self.assertTrue(html.startswith(f'<section id="thread" class="chat-thread" data-conversation="{sale.pk}"'))

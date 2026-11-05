@@ -3,10 +3,10 @@ from notifications.registry import groups_for
 from .models import (
     IMPERSONATOR_SESSION_KEY,
     AppAccess,
-    Membership,
     Profile,
     can_manage_members,
     membership_for,
+    memberships_for,
     apps_for,
 )
 
@@ -18,20 +18,18 @@ def nav(request):
     membership = membership_for(user)
     name, initials, avatar = _identity(user)
     organization = membership.organization if membership else None
-    groups = groups_for(organization)
     user_memberships = []
     other_unread = 0
     impersonating = False
     impersonated_label = ""
+    waiting = {}
     if getattr(user, "is_authenticated", False):
-        user_memberships = list(
-            Membership.objects.filter(user=user)
-            .select_related("organization")
-            .order_by("organization__name", "pk")
-        )
-        from inbox.unread import unread_by_organization
+        # A copy: the sort below must not reorder the list membership_for reads.
+        user_memberships = list(memberships_for(user))
+        from inbox.unread import unread_by_organization, waiting_counts
 
-        unread = unread_by_organization(user)
+        waiting = waiting_counts(user)
+        unread = unread_by_organization(user, waiting)
         for item in user_memberships:
             item.unread = unread.get(item.organization_id, 0)
             item.active = organization is not None and item.organization_id == organization.id
@@ -41,6 +39,7 @@ def nav(request):
         if request.session.get(IMPERSONATOR_SESSION_KEY):
             impersonating = True
             impersonated_label = user.email or user.get_username()
+    groups = groups_for(organization, waiting.get(organization.id, {}) if organization else None)
     apps = apps_for(user, membership)
     return {
         "can_open_cashflow": AppAccess.App.CASHFLOW in apps,

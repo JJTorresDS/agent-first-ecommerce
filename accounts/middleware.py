@@ -1,6 +1,6 @@
 from django.shortcuts import redirect
 
-from .models import Membership
+from .models import memberships_for
 
 _EXEMPT_PREFIXES = (
     "/organization/setup/",
@@ -19,7 +19,8 @@ class OrganizationRequiredMiddleware:
         if (
             request.user.is_authenticated
             and not request.path.startswith(_EXEMPT_PREFIXES)
-            and not Membership.objects.filter(user=request.user).exists()
+            # Fills the request's membership cache, so the view and the nav don't query again.
+            and not memberships_for(request.user)
         ):
             return redirect("organization_setup")
         return self.get_response(request)

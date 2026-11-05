@@ -732,12 +732,48 @@ class UnreadAcrossOrganizationsTests(TestCase):
 
         with CaptureQueriesContext(connection) as queries:
             self.client.get("/profile/")
-        # The bell has its own counts; the per-organization one joins memberships.
-        counting = [
-            query for query in queries
-            if "inbox_conversation" in query["sql"] and "accounts_membership" in query["sql"]
-        ]
+        # The badges and the bell read one count, which joins memberships.
+        counting = [query for query in queries if "inbox_conversation" in query["sql"]]
         self.assertEqual(len(counting), 1)
+        self.assertIn("accounts_membership", counting[0]["sql"])
+        memberships = [query for query in queries if 'FROM "accounts_membership"' in query["sql"]]
+        self.assertEqual(len(memberships), 1)
+
+    def test_the_bell_counts_only_the_active_organization(self):
+        from inbox.unread import waiting_counts
+
+        self.assertEqual(
+            waiting_counts(self.user),
+            {self.home.id: {"meli-postsales": 1}, self.scent.id: {"meli-postsales": 2}},
+        )
+        page = self.client.get("/profile/")
+        self.assertContains(page, "You have 1 unanswered post-sale message")
+        self.assertNotContains(page, "You have 2 unanswered")
+        self.assertNotContains(page, "You have 5 unanswered")
+
+    def test_a_full_page_costs_a_fixed_number_of_queries(self):
+        self.client.get("/profile/")
+        # Session, user, memberships, profile, the profile view's own row, waiting counts, app access.
+        with self.assertNumQueries(7):
+            self.client.get("/profile/")
+        create_owned_organization(self.user, "Third")
+        ensure_profile(self.user, self.home)
+        with self.assertNumQueries(7):
+            self.client.get("/profile/")
+
+    def test_cached_memberships_follow_a_switch_or_a_new_organization(self):
+        from accounts.models import membership_for, memberships_for
+
+        self.assertEqual(membership_for(self.user).organization, self.home)
+        ensure_profile(self.user, self.scent)
+        self.assertEqual(membership_for(self.user).organization, self.scent)
+        third = create_owned_organization(self.user, "Third")
+        self.assertIn(third, [item.organization for item in memberships_for(self.user)])
+        Membership.objects.filter(user=self.user, organization=third).delete()
+        self.assertNotIn(third, [item.organization for item in memberships_for(self.user)])
+        with self.assertNumQueries(0):
+            memberships_for(self.user)
+            membership_for(self.user)
 
 
     def test_latest_moves_for_a_second_message_in_a_waiting_chat(self):

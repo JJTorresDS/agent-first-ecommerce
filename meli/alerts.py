@@ -23,8 +23,11 @@ def postsale_count(organization):
     ).count()
 
 
-def postsale_messages(organization):
-    count = postsale_count(organization)
+def postsale_messages(organization, waiting=None):
+    if waiting is None:
+        count = postsale_count(organization)
+    else:
+        count = waiting.get(Channel.MELI_POSTSALES, 0)
     if not count:
         return None
     noun = "message" if count == 1 else "messages"
@@ -35,8 +38,11 @@ def postsale_messages(organization):
     }
 
 
-def presales_questions(organization):
-    count = unanswered_count(organization)
+def presales_questions(organization, waiting=None):
+    if waiting is None:
+        count = unanswered_count(organization)
+    else:
+        count = waiting.get(Channel.MELI_ITEM_QUESTIONS, 0)
     if not count:
         return None
     noun = "question" if count == 1 else "questions"
