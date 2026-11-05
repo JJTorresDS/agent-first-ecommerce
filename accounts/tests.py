@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from allauth.account.signals import user_signed_up
 from django.contrib.auth import get_user_model
 from django.core import mail
+from django.utils import timezone
 from django.test import SimpleTestCase, TestCase
 
 from accounts.models import (
@@ -657,3 +658,82 @@ class ImpersonationTests(TestCase):
             )
         self.contributor.profile.refresh_from_db()
         self.assertEqual(self.contributor.profile.organization_id, self.scent.id)
+
+
+class UnreadAcrossOrganizationsTests(TestCase):
+    def setUp(self):
+        from inbox.models import Conversation
+
+        self.user = User.objects.create_user("ada", email="ada@example.com")
+        self.home = create_owned_organization(self.user, "Molihaus")
+        self.scent = create_owned_organization(self.user, "Scent")
+        ensure_profile(self.user, self.home)
+        stranger = User.objects.create_user("eve", email="eve@example.com")
+        self.theirs = create_owned_organization(stranger, "Not mine")
+        now = timezone.now()
+        for organization, waiting, done in ((self.home, 1, 1), (self.scent, 2, 3), (self.theirs, 5, 0)):
+            for index in range(waiting + done):
+                Conversation.objects.create(
+                    organization=organization,
+                    channel="meli-postsales",
+                    external_id=f"{organization.pk}-{index}",
+                    title="Chat",
+                    needs_reply=index < waiting,
+                    last_message_at=now,
+                )
+        self.client.force_login(self.user)
+
+    def test_counts_only_cover_the_users_organizations(self):
+        from inbox.unread import unread_by_organization
+
+        self.assertEqual(unread_by_organization(self.user), {self.home.id: 1, self.scent.id: 2})
+
+    def test_the_avatar_shows_other_organizations_and_the_menu_each_one(self):
+        page = self.client.get("/profile/")
+        self.assertContains(page, 'id="other-unread" data-count="2"')
+        self.assertContains(page, "2 chats waiting in other organizations")
+        menu = self.client.get("/profile/menu/").content.decode()
+        self.assertIn('<span class="org-group-current">Molihaus</span>', menu)
+        self.assertLess(menu.index("Molihaus</span>\n                <span class=\"count-pill"), menu.index("Scent</span>"))
+        self.assertIn(f'data-org="{self.scent.id}" title="Chats waiting for a reply">2</span>', menu)
+        self.assertIn('title="2 waiting in other organizations">2</span>', menu)
+        self.assertNotIn("Not mine", menu)
+        self.assertNotIn('class="org-filter"', menu)
+        self.client.post("/organization/switch/", {"organization": str(self.scent.id)})
+        switched = self.client.get("/profile/")
+        self.assertContains(switched, 'id="other-unread" data-count="1"')
+
+    def test_many_organizations_get_a_filter_box(self):
+        for index in range(6):
+            create_owned_organization(self.user, f"Extra {index}")
+        ensure_profile(self.user, self.home)
+        self.assertContains(self.client.get("/profile/menu/"), 'class="org-filter"')
+
+    def test_the_unread_poll_returns_counts_and_204_when_unchanged(self):
+        response = self.client.get("/profile/unread/")
+        data = response.json()
+        self.assertEqual((data["total"], data["other"]), (3, 2))
+        self.assertEqual(data["organizations"], {str(self.home.id): 1, str(self.scent.id): 2})
+        self.assertNotIn(str(self.theirs.id), data["organizations"])
+        same = self.client.get("/profile/unread/", HTTP_X_UNREAD_VERSION=data["version"])
+        self.assertEqual(same.status_code, 204)
+        from inbox.models import Conversation
+
+        Conversation.objects.create(organization=self.scent, channel="meli-postsales", external_id="new", title="New", needs_reply=True, last_message_at=timezone.now())
+        changed = self.client.get("/profile/unread/", HTTP_X_UNREAD_VERSION=data["version"])
+        self.assertEqual(changed.json()["other"], 3)
+        self.client.logout()
+        self.assertEqual(self.client.get("/profile/unread/").status_code, 302)
+
+    def test_the_menu_counts_cost_one_query(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        with CaptureQueriesContext(connection) as queries:
+            self.client.get("/profile/")
+        # The bell has its own counts; the per-organization one joins memberships.
+        counting = [
+            query for query in queries
+            if "inbox_conversation" in query["sql"] and "accounts_membership" in query["sql"]
+        ]
+        self.assertEqual(len(counting), 1)

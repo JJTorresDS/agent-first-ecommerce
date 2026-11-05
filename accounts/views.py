@@ -1,9 +1,11 @@
+import hashlib
+import json
 import logging
 import re
 
 from django.contrib.auth import get_user_model, login
 from django.contrib.auth.decorators import login_required
-from django.http import HttpResponseBadRequest, HttpResponseForbidden
+from django.http import HttpResponse, HttpResponseBadRequest, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods, require_POST
 
@@ -45,6 +47,34 @@ def profile(request):
 @login_required
 def profile_menu(request):
     return render(request, "accounts/_profile_menu.html")
+
+
+@login_required
+@require_http_methods(["GET"])
+def profile_unread(request):
+    """Chats waiting for a reply in each of the user's organizations, for the avatar badge and the chime.
+
+    Answers 204 when X-Unread-Version matches, so an unchanged poll sends nothing.
+    """
+    from inbox.unread import unread_by_organization
+
+    membership = membership_for(request.user)
+    active = membership.organization_id if membership else None
+    counts = unread_by_organization(request.user)
+    organizations = {str(key): value for key, value in sorted(counts.items(), key=lambda pair: str(pair[0]))}
+    version = hashlib.sha1(json.dumps([str(active), organizations]).encode()).hexdigest()[:16]
+    if request.headers.get("X-Unread-Version") == version:
+        return HttpResponse(status=204)
+    response = JsonResponse(
+        {
+            "total": sum(counts.values()),
+            "other": sum(value for key, value in counts.items() if key != active),
+            "organizations": organizations,
+            "version": version,
+        }
+    )
+    response["Cache-Control"] = "no-store"
+    return response
 
 
 def _access_row(user):

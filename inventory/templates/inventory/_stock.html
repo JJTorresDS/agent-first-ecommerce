@@ -32,6 +32,12 @@
       </table>
     </div>
   {% else %}
-    <div class="card empty"><p>{% if query or show %}No products match.{% else %}No products in the catalog yet.{% endif %}</p></div>
+    <div class="card empty">
+      {% if query or show %}<p>No products match.</p>
+      {% else %}
+        <p>No catalog products yet. Stock is kept per catalog product.</p>
+        <p><a href="{% url 'catalog_codes' %}">Add a category and a brand</a>, then <a href="{% url 'catalog_model_new' %}">create a model with its variants</a>, then count.</p>
+      {% endif %}
+    </div>
   {% endif %}
 </div>

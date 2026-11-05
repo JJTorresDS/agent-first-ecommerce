@@ -27,7 +27,15 @@
               <td class="num"><input class="qty" type="number" min="0" name="meli_full_{{ product.pk }}" value="{{ units.meli_full }}" aria-label="{{ product.sku }} in Mercado Libre Full"{% if not can_edit %} disabled{% endif %}></td>
             </tr>
           {% empty %}
-            <tr><td colspan="4" class="muted">No products to count.</td></tr>
+            <tr><td colspan="4">
+              <p><strong>No catalog products yet.</strong> Stock is counted per catalog product, so create them first:</p>
+              <ol class="steps">
+                <li><a href="{% url 'catalog_codes' %}">Add a category and a brand</a> (for example PERF and ONLY).</li>
+                <li><a href="{% url 'catalog_model_new' %}">Create a model</a> and add its variants (30ML, 100ML).</li>
+                <li>Come back here, enter what you have, and save the first count.</li>
+              </ol>
+              <p class="muted">A Mercado Libre listing takes stock from the product whose SKU it carries; <a href="{% url 'meli_listings' %}">Catalog → Mercado Libre</a> shows which listings match.</p>
+            </td></tr>
           {% endfor %}
         </tbody>
       </table>

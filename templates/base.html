@@ -516,6 +516,52 @@
       .code-form button { grid-column: 1 / -1; }
       details.inline-edit[open] .code-form { width: min(20rem, 80vw); }
     }
+  
+    ol.steps { margin: 0.5rem 0 0.75rem; padding-left: 1.25rem; display: grid; gap: 0.35rem; }
+    /* Profile menu: its own colors, so nothing comes from the dark sidebar. */
+    .profile-panel { color: var(--text); background: var(--surface); width: 17.5rem; max-height: min(34rem, calc(100vh - 6rem)); max-height: min(34rem, calc(100dvh - 6rem)); overflow-y: auto; }
+    .profile-panel .profile-menu-link, .profile-panel button.profile-menu-link { color: var(--text); }
+    .profile-head { display: flex; align-items: center; gap: 0.65rem; padding: 0.45rem 0.5rem 0.65rem; border-bottom: 1px solid var(--line); margin-bottom: 0.35rem; }
+    .profile-head img, .profile-head .initials { width: 2.25rem; height: 2.25rem; border-radius: 8px; flex: none; object-fit: cover; }
+    .profile-head > div { min-width: 0; }
+    .profile-head .profile-menu-name, .profile-head .profile-menu-email { padding: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .profile-head .profile-menu-name { color: var(--text); }
+    .org-group { border-bottom: 1px solid var(--line); padding-bottom: 0.35rem; margin-bottom: 0.35rem; }
+    .org-group summary { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.6rem; border-radius: 8px; cursor: pointer; list-style: none; }
+    .org-group summary::-webkit-details-marker { display: none; }
+    .org-group-title { font-weight: 600; }
+    .org-group-current { flex: 1; min-width: 0; text-align: right; color: var(--muted); font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .org-group .chevron { width: 1rem; height: 1rem; flex: none; color: var(--muted); transition: transform 0.15s ease; }
+    .org-group[open] .chevron { transform: rotate(180deg); }
+    .org-filter { width: calc(100% - 1rem); margin: 0.15rem 0.5rem 0.35rem; padding: 0.4rem 0.55rem; border: 1px solid var(--line-strong); border-radius: 6px; font-size: 0.9rem; }
+    .org-list { max-height: 13.5rem; overflow-y: auto; overscroll-behavior: contain; }
+    .org-row-form { margin: 0; }
+    .org-row-form[hidden] { display: none; }
+    button.org-row { display: grid; grid-template-columns: 1.1rem minmax(0, 1fr) auto; align-items: center; gap: 0.45rem; width: 100%; padding: 0.42rem 0.6rem; border: 0; border-radius: 8px; background: transparent; color: var(--text); text-align: left; font: inherit; cursor: pointer; }
+    button.org-row.current { background: var(--neon-faint); font-weight: 600; }
+    .org-check { color: var(--neon-strong); font-weight: 700; }
+    .org-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .count-pill { min-width: 1.35rem; padding: 0.05rem 0.4rem; border-radius: 999px; background: var(--danger); color: #fff; font-size: 0.72rem; font-weight: 700; text-align: center; }
+    .count-pill.empty { display: none; }
+    .count-badge { padding: 0.05rem 0.4rem; border-radius: 999px; background: var(--danger); color: #fff; font-size: 0.72rem; font-weight: 700; }
+    .org-links { padding-top: 0.2rem; }
+    .org-links .profile-menu-link { font-size: 0.9rem; color: var(--muted); }
+    label.sound-toggle { cursor: pointer; }
+    label.sound-toggle input { width: 2.2rem; height: 1.2rem; appearance: none; -webkit-appearance: none; border-radius: 999px; background: var(--gray-3); position: relative; cursor: pointer; transition: background-color 0.15s ease; flex: none; }
+    label.sound-toggle input::after { content: ""; position: absolute; top: 0.15rem; left: 0.15rem; width: 0.9rem; height: 0.9rem; border-radius: 50%; background: #fff; transition: transform 0.15s ease; }
+    label.sound-toggle input:checked { background: var(--neon-strong); }
+    label.sound-toggle input:checked::after { transform: translateX(1rem); }
+    .profile-foot { border-top: 1px solid var(--line); margin-top: 0.35rem; padding-top: 0.35rem; }
+    .avatar-wrap { position: relative; display: inline-flex; flex: none; }
+    .avatar-badge { position: absolute; top: -0.4rem; right: -0.45rem; min-width: 1.1rem; height: 1.1rem; padding: 0 0.28rem; border-radius: 999px; background: var(--danger); color: #fff; font-size: 0.66rem; font-weight: 700; line-height: 1.1rem; text-align: center; box-shadow: 0 0 0 2px var(--ink); }
+    .avatar-badge[hidden] { display: none; }
+    button.menu-toggle { position: relative; }
+    .toggle-dot { position: absolute; top: 0.3rem; right: 0.3rem; width: 0.55rem; height: 0.55rem; border-radius: 50%; background: var(--danger); box-shadow: 0 0 0 2px var(--bg); }
+    .toggle-dot[hidden] { display: none; }
+    @media (hover: hover) {
+      .org-group summary:hover, button.org-row:hover { background: var(--gray-1); }
+      button.org-row.current:hover { background: var(--neon-soft); }
+    }
   </style>
 </head>
 <body>
@@ -619,11 +665,14 @@
           hx-target="#profile-menu"
           hx-swap="innerHTML"
         >
-          {% if nav_avatar %}
-            <img src="{{ nav_avatar }}" alt="">
-          {% else %}
-            <span class="initials">{{ nav_initials }}</span>
-          {% endif %}
+          <span class="avatar-wrap">
+            {% if nav_avatar %}
+              <img src="{{ nav_avatar }}" alt="">
+            {% else %}
+              <span class="initials">{{ nav_initials }}</span>
+            {% endif %}
+            <span class="avatar-badge" id="other-unread" data-count="{{ other_unread }}"{% if not other_unread %} hidden{% endif %} title="{{ other_unread }} chat{{ other_unread|pluralize }} waiting in other organizations">{% if other_unread > 9 %}9+{% else %}{{ other_unread }}{% endif %}</span>
+          </span>
           <span class="who-text">
             <span class="who-name">{{ nav_name }}</span>
             {% if organization %}<span class="org">{{ organization.name }}</span>{% endif %}
@@ -635,6 +684,7 @@
     <main>
       <div class="topbar{% if not organization %} mobile-only{% endif %}">
         <button type="button" class="menu-toggle" aria-label="Open menu" aria-expanded="false">
+          <span class="toggle-dot" id="toggle-unread"{% if not other_unread %} hidden{% endif %}></span>
           <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h11"/></svg>
         </button>
         <span class="topbar-brand">Vimple</span>
@@ -722,5 +772,106 @@
       });
     })();
   </script>
+  {% if user.is_authenticated %}
+  <script>
+    // A short chime for new chats waiting, made with Web Audio (no sound file).
+    // Browsers allow sound only after a click on the page, so it unlocks on the first one.
+    window.vimpleSound = (function () {
+      var context = null;
+      var played = 0;
+      function enabled() {
+        try { return localStorage.getItem("vimple-sound") !== "off"; } catch (error) { return true; }
+      }
+      function unlock() {
+        var Audio = window.AudioContext || window.webkitAudioContext;
+        if (!context && Audio) context = new Audio();
+        if (context && context.state === "suspended") context.resume();
+      }
+      document.addEventListener("pointerdown", unlock, { once: true });
+      document.addEventListener("keydown", unlock, { once: true });
+      function note(frequency, start, length) {
+        var tone = context.createOscillator();
+        var gain = context.createGain();
+        tone.type = "sine";
+        tone.frequency.value = frequency;
+        gain.gain.setValueAtTime(0.0001, start);
+        gain.gain.exponentialRampToValueAtTime(0.18, start + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, start + length);
+        tone.connect(gain).connect(context.destination);
+        tone.start(start);
+        tone.stop(start + length + 0.02);
+      }
+      return {
+        enabled: enabled,
+        setEnabled: function (on) {
+          try { localStorage.setItem("vimple-sound", on ? "on" : "off"); } catch (error) {}
+          if (on) { unlock(); this.play(); }
+        },
+        play: function () {
+          played += 1;
+          if (!enabled() || !context || context.state !== "running") return false;
+          var now = context.currentTime;
+          note(880, now, 0.18);
+          note(1320, now + 0.14, 0.26);
+          return true;
+        },
+        plays: function () { return played; },
+      };
+    })();
+
+    // Chats waiting in each organization: the avatar badge, the menu's counts, and the chime.
+    window.vimpleUnread = (function () {
+      var version = "";
+      var last = null;
+      var counts = {};
+      function paintMenu() {
+        document.querySelectorAll(".count-pill[data-org]").forEach(function (pill) {
+          var count = counts[pill.getAttribute("data-org")];
+          if (count === undefined) return;
+          pill.textContent = count ? String(count) : "";
+          pill.classList.toggle("empty", !count);
+        });
+      }
+      function paint(data) {
+        counts = data.organizations || {};
+        var badge = document.getElementById("other-unread");
+        if (badge) {
+          badge.hidden = !data.other;
+          badge.textContent = data.other > 9 ? "9+" : String(data.other);
+          badge.title = data.other + (data.other === 1 ? " chat" : " chats") + " waiting in other organizations";
+        }
+        var dot = document.getElementById("toggle-unread");
+        if (dot) dot.hidden = !data.other;
+        paintMenu();
+      }
+      function chimeOnce(total) {
+        // Several open tabs see the same rise; only the first one within a minute chimes.
+        try {
+          var seen = JSON.parse(localStorage.getItem("vimple-chimed") || "{}");
+          if (seen.total === total && Date.now() - seen.at < 60000) return;
+          localStorage.setItem("vimple-chimed", JSON.stringify({ total: total, at: Date.now() }));
+        } catch (error) {}
+        window.vimpleSound.play();
+      }
+      function poll() {
+        if (document.visibilityState !== "visible") return;
+        fetch("{% url 'profile_unread' %}", { headers: { "X-Unread-Version": version }, credentials: "same-origin" })
+          .then(function (response) { return response.status === 200 ? response.json() : null; })
+          .then(function (data) {
+            if (!data) return;
+            version = data.version;
+            if (last !== null && data.total > last) chimeOnce(data.total);
+            last = data.total;
+            paint(data);
+          })
+          .catch(function () {});
+      }
+      poll();
+      setInterval(poll, {{ unread_poll_ms|default:30000 }});
+      document.addEventListener("visibilitychange", poll);
+      return { poll: poll, paintMenu: paintMenu };
+    })();
+  </script>
+  {% endif %}
 </body>
 </html>

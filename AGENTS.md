@@ -15,6 +15,8 @@ Organization is the tenant. Its UUID does not change. The name can.
 
 - Colors are the :root variables in templates/base.html, taken from the logo: charcoal (--ink) and grays, with neon green (--neon) only for accents: the active menu item, focus rings, the one main action per page (.accent), SKU chips (.sku) and active status pills. Don't hard-code new colors.
 - Check new pages at 390px as well as on desktop; wide tables go in .table-scroll.
+- The profile menu sits inside the dark sidebar but sets its own colors (.profile-panel); nothing in it may inherit from .sidebar.
+- Chats waiting per organization come from one grouped query over the user's own memberships (inbox.unread.unread_by_organization). The avatar badge counts only other organizations. /profile/unread/ is polled every 30 s while the tab is visible and answers 204 when X-Unread-Version matches; a rise in the total plays a Web Audio chime (on by default, switch in the menu; one tab chimes per rise).
 
 ## Inbox and htmx
 

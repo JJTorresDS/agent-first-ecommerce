@@ -13,6 +13,7 @@ from accounts.views import (
     organization_switch,
     profile,
     profile_menu,
+    profile_unread,
     set_app_access,
 )
 from inbox.views import inbox, inbox_reply
@@ -48,6 +49,7 @@ urlpatterns = [
     path("", home, name="home"),
     path("profile/", profile, name="profile"),
     path("profile/menu/", profile_menu, name="profile_menu"),
+    path("profile/unread/", profile_unread, name="profile_unread"),
     path("organization/setup/", organization_setup, name="organization_setup"),
     path("organization/", organization_settings, name="organization"),
     path("organization/members/", members, name="members"),

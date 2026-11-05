@@ -6,31 +6,82 @@
     hx-on:click="document.getElementById('profile-menu').replaceChildren()"
   ></button>
   <div class="profile-panel">
-    <p class="profile-menu-name">{{ nav_name }}</p>
-    <p class="profile-menu-email">{{ user.email }}</p>
-    {% if organization %}
-      <a class="profile-menu-link" href="{% url 'organization' %}">
-        <span>Organization</span>
-        <span class="muted">{{ organization.name }}</span>
-      </a>
-    {% endif %}
+    <div class="profile-head">
+      {% if nav_avatar %}<img src="{{ nav_avatar }}" alt="">{% else %}<span class="initials">{{ nav_initials }}</span>{% endif %}
+      <div>
+        <p class="profile-menu-name">{{ nav_name }}</p>
+        {% if user.email and user.email != nav_name %}<p class="profile-menu-email">{{ user.email }}</p>{% endif %}
+      </div>
+    </div>
+
     {% if user_memberships %}
-      {% for item in user_memberships %}
-        <form method="post" action="{% url 'organization_switch' %}">
-          {% csrf_token %}
-          <input type="hidden" name="organization" value="{{ item.organization_id }}">
-          <button class="profile-menu-link" type="submit">
-            <span>{{ item.organization.name }}</span>
-            {% if organization and item.organization_id == organization.id %}<span class="muted">Active</span>{% endif %}
-          </button>
-        </form>
-      {% endfor %}
+      <details class="org-group" id="org-group" data-count="{{ user_memberships|length }}">
+        <summary>
+          <span class="org-group-title">Organizations</span>
+          <span class="org-group-current">{{ organization.name|default:"" }}</span>
+          {% if other_unread %}<span class="count-badge" title="{{ other_unread }} waiting in other organizations">{{ other_unread }}</span>{% endif %}
+          <svg class="chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="m4.5 6.5 3.5 3.5 3.5-3.5"/></svg>
+        </summary>
+        {% if user_memberships|length > 6 %}
+          <input type="search" class="org-filter" placeholder="Find an organization" aria-label="Find an organization">
+        {% endif %}
+        <div class="org-list">
+          {% for item in user_memberships %}
+            <form method="post" action="{% url 'organization_switch' %}" class="org-row-form" data-name="{{ item.organization.name|lower }}">
+              {% csrf_token %}
+              <input type="hidden" name="organization" value="{{ item.organization_id }}">
+              <button class="org-row{% if item.active %} current{% endif %}" type="submit"{% if item.active %} aria-current="true"{% endif %}>
+                <span class="org-check" aria-hidden="true">{% if item.active %}✓{% endif %}</span>
+                <span class="org-name">{{ item.organization.name }}</span>
+                <span class="count-pill{% if not item.unread %} empty{% endif %}" data-org="{{ item.organization_id }}" title="Chats waiting for a reply">{% if item.unread %}{{ item.unread }}{% endif %}</span>
+              </button>
+            </form>
+          {% endfor %}
+        </div>
+        <div class="org-links">
+          {% if organization %}<a class="profile-menu-link" href="{% url 'organization' %}">Organization settings</a>{% endif %}
+          <a class="profile-menu-link" href="{% url 'organization_setup' %}">New organization</a>
+        </div>
+      </details>
     {% endif %}
-    <a class="profile-menu-link" href="{% url 'organization_setup' %}">New organization</a>
-    <a class="profile-menu-link" href="{% url 'profile' %}">Profile</a>
-    <form method="post" action="{% url 'account_logout' %}">
-      {% csrf_token %}
-      <button class="profile-menu-link" type="submit">Log out</button>
-    </form>
+
+    <label class="profile-menu-link sound-toggle">
+      <span>Sound for new messages</span>
+      <input type="checkbox" id="sound-toggle" role="switch">
+    </label>
+
+    <div class="profile-foot">
+      <a class="profile-menu-link" href="{% url 'profile' %}">Profile</a>
+      <form method="post" action="{% url 'account_logout' %}">
+        {% csrf_token %}
+        <button class="profile-menu-link" type="submit">Log out</button>
+      </form>
+    </div>
   </div>
+  <script>
+    (function () {
+      var group = document.getElementById("org-group");
+      if (group) {
+        var saved = null;
+        try { saved = localStorage.getItem("vimple-org-group"); } catch (error) {}
+        group.open = saved ? saved === "open" : Number(group.getAttribute("data-count")) <= 5;
+        group.addEventListener("toggle", function () {
+          try { localStorage.setItem("vimple-org-group", group.open ? "open" : "closed"); } catch (error) {}
+        });
+        var filter = group.querySelector(".org-filter");
+        if (filter) filter.addEventListener("input", function () {
+          var term = filter.value.trim().toLowerCase();
+          group.querySelectorAll(".org-row-form").forEach(function (row) {
+            row.hidden = term && row.getAttribute("data-name").indexOf(term) === -1;
+          });
+        });
+      }
+      var sound = document.getElementById("sound-toggle");
+      if (sound && window.vimpleSound) {
+        sound.checked = window.vimpleSound.enabled();
+        sound.addEventListener("change", function () { window.vimpleSound.setEnabled(sound.checked); });
+      }
+      if (window.vimpleUnread) window.vimpleUnread.paintMenu();
+    })();
+  </script>
 </div>
