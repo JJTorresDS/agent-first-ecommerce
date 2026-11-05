@@ -113,6 +113,8 @@ def build_item(draft, settings):
     if draft.kind == ListingDraft.Kind.CATALOG:
         body["catalog_product_id"] = draft.catalog_product_id
         body["catalog_listing"] = True
+        # Mercado Libre still requires a title: the catalog product's own name, as its sell flow uses.
+        body["title"] = draft.catalog_name
     if draft.category_id:
         body["category_id"] = draft.category_id
     return body

@@ -118,10 +118,12 @@ class BodyTests(DraftTestCase):
     def test_the_body_matches_the_sell_flow_defaults(self):
         draft = ListingDraft(
             organization=self.organization, product=self.product, catalog_product_id=CATALOG,
+            catalog_name="Caramel Dream Sweet Tooth 75 Ml",
             category_id="MLA1271", has_regulatory=True, price=Decimal("65000.00"), quantity=2,
         )
         body = build_item(draft, defaults_for(self.organization))
         self.assertEqual(body["catalog_product_id"], CATALOG)
+        self.assertEqual(body["title"], "Caramel Dream Sweet Tooth 75 Ml")
         self.assertIs(body["catalog_listing"], True)
         self.assertEqual((body["price"], body["currency_id"], body["available_quantity"]), (65000, "ARS", 2))
         self.assertEqual(body["listing_type_id"], "gold_special")
@@ -160,6 +162,7 @@ class DraftFlowTests(DraftTestCase):
         self.assertEqual(draft.catalog_name, "Caramel Dream Sweet Tooth 75 Ml")
         self.assertTrue(draft.has_regulatory)
         self.assertEqual(self.meli.validated[-1]["category_id"], "MLA1271")
+        self.assertEqual(self.meli.validated[-1]["title"], "Caramel Dream Sweet Tooth 75 Ml")
         self.assertEqual(self.meli.created, [])
         page = self.client.get("/catalog/meli/new/")
         self.assertContains(page, "Caramel Dream Sweet Tooth 75 Ml")
@@ -248,6 +251,8 @@ class DraftFlowTests(DraftTestCase):
     def test_editing_a_draft_with_its_own_settings_checks_it_again(self):
         self.add()
         draft = self.draft()
+        page = self.client.get(f"/catalog/meli/new/{draft.pk}/")
+        self.assertContains(page, 'id="own-settings" hidden')
         response = self.client.post(
             f"/catalog/meli/new/{draft.pk}/",
             {
