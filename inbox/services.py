@@ -1,4 +1,5 @@
 from django.db import transaction
+from django.utils import timezone
 
 from .models import Conversation, Message
 
@@ -41,21 +42,42 @@ def upsert_thread(
             **({"counterpart_id": _clip(counterpart_id, 64)} if counterpart_id else {}),
         },
     )
-    keep = []
+    # One query reads the chat, then one bulk insert, one bulk update and one delete.
+    # Each query is a round trip to Neon, so never one query per message.
+    wanted = {}
     for item in messages:
-        message, _created = Message.objects.update_or_create(
-            conversation=conversation,
-            external_id=_clip(item["external_id"], 80),
-            defaults={
-                "organization": organization,
-                "direction": item["direction"],
-                "body": item.get("body") or "",
-                "sent_at": item.get("sent_at"),
-            },
-        )
-        keep.append(message.pk)
-    stale = conversation.messages.all()
-    if keep:
-        stale = stale.exclude(pk__in=keep)
-    stale.delete()
+        wanted[_clip(item["external_id"], 80)] = item
+    existing = {message.external_id: message for message in conversation.messages.all()}
+    now = timezone.now()
+    created, changed = [], []
+    for key, item in wanted.items():
+        body = item.get("body") or ""
+        direction = item["direction"]
+        sent_at = item.get("sent_at")
+        message = existing.get(key)
+        if message is None:
+            created.append(
+                Message(
+                    organization=organization,
+                    conversation=conversation,
+                    external_id=key,
+                    direction=direction,
+                    body=body,
+                    sent_at=sent_at,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+        elif (message.body, message.direction, message.sent_at) != (body, direction, sent_at):
+            message.body, message.direction, message.sent_at = body, direction, sent_at
+            # bulk_update skips auto_now, and the inbox poll's version reads updated_at.
+            message.updated_at = now
+            changed.append(message)
+    if created:
+        Message.objects.bulk_create(created)
+    if changed:
+        Message.objects.bulk_update(changed, ["body", "direction", "sent_at", "updated_at"])
+    stale = [message.pk for key, message in existing.items() if key not in wanted]
+    if stale:
+        Message.objects.filter(pk__in=stale).delete()
     return conversation

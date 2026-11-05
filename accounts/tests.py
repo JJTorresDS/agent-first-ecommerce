@@ -750,7 +750,8 @@ class UnreadAcrossOrganizationsTests(TestCase):
         )
         second = self.client.get("/profile/unread/", HTTP_X_UNREAD_VERSION=first["version"]).json()
         self.assertEqual(second["total"], first["total"])
-        self.assertGreater(second["latest"], first["latest"] or "")
+        self.assertIsInstance(second["latest"], int)
+        self.assertGreater(second["latest"], first["latest"])
         theirs = Conversation.objects.filter(organization=self.theirs).first()
         Message.objects.create(
             organization=self.theirs, conversation=theirs, direction=Message.Direction.INBOUND,

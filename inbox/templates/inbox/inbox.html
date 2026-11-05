@@ -162,6 +162,8 @@
     if (target.id === "chat-list") {
       var list = document.getElementById("chat-list");
       if (list) list.scrollTop = inboxListScroll;
+      // The list changed: check every organization for a new message now, not in up to 30 s.
+      if (window.vimpleUnread) window.vimpleUnread.poll();
     }
   });
   document.body.addEventListener("htmx:oobBeforeSwap", function (event) {

@@ -3,6 +3,7 @@ import re
 from datetime import datetime, timedelta, timezone as dt_timezone
 
 from cryptography.fernet import InvalidToken
+from django.db import transaction
 from django.utils import timezone
 
 from inbox.models import Channel, Conversation, Message
@@ -246,34 +247,28 @@ def sync_recent_postsale(organization):
 
 
 def remember_reply(conversation, text, sent_at, message_id=""):
-    messages = [
-        {
-            "external_id": message.external_id,
-            "direction": message.direction,
-            "body": message.body,
-            "sent_at": message.sent_at,
-        }
-        for message in conversation.messages.exclude(external_id="pending")
-    ]
-    messages.append(
-        {
-            "external_id": message_id or f"local:{conversation.external_id}:{int(sent_at.timestamp())}",
-            "direction": Message.Direction.OUTBOUND,
-            "body": text,
-            "sent_at": sent_at,
-        }
-    )
-    return upsert_thread(
-        organization=conversation.organization,
-        channel=conversation.channel,
-        external_id=conversation.external_id,
-        title=conversation.title,
-        preview=text,
-        link_url=conversation.link_url,
-        needs_reply=False,
-        last_message_at=sent_at,
-        messages=messages,
-    )
+    """Store a sent reply as one row and drop the pending bubble. The rest of the chat stays as it is."""
+    key = (message_id or f"local:{conversation.external_id}:{int(sent_at.timestamp())}")[:80]
+    now = timezone.now()
+    with transaction.atomic():
+        # The background re-read may have stored it first; then this only updates it.
+        fields = {"direction": Message.Direction.OUTBOUND, "body": text, "sent_at": sent_at, "updated_at": now}
+        if not Message.objects.filter(conversation=conversation, external_id=key).update(**fields):
+            Message.objects.create(
+                organization_id=conversation.organization_id,
+                conversation=conversation,
+                external_id=key,
+                **fields,
+            )
+        conversation.messages.filter(external_id="pending").delete()
+        Conversation.objects.filter(pk=conversation.pk).update(
+            preview=text[:200],
+            needs_reply=False,
+            last_message_at=sent_at,
+            updated_at=now,
+        )
+    conversation.preview, conversation.needs_reply, conversation.last_message_at = text[:200], False, sent_at
+    return conversation
 
 
 def postsale_sync_action(organization):

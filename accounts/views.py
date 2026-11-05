@@ -62,7 +62,8 @@ def profile_unread(request):
     active = membership.organization_id if membership else None
     counts = unread_by_organization(request.user)
     newest = latest_incoming(request.user)
-    latest = newest.isoformat() if newest else ""
+    # Milliseconds since 1970: browsers compare numbers; Safari can't parse microsecond ISO dates.
+    latest = int(newest.timestamp() * 1000) if newest else 0
     organizations = {str(key): value for key, value in sorted(counts.items(), key=lambda pair: str(pair[0]))}
     version = hashlib.sha1(json.dumps([str(active), organizations, latest]).encode()).hexdigest()[:16]
     if request.headers.get("X-Unread-Version") == version:

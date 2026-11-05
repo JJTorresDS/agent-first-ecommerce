@@ -49,6 +49,8 @@
       <span>Sound for new messages</span>
       <input type="checkbox" id="sound-toggle" role="switch">
     </label>
+    <button type="button" class="profile-menu-link sound-test" id="sound-test">Play test sound</button>
+    <p class="sound-hint" id="sound-hint" hidden>The browser is blocking sound. Click anywhere on the page once, then try again.</p>
 
     <div class="profile-foot">
       <a class="profile-menu-link" href="{% url 'profile' %}">Profile</a>
@@ -77,9 +79,19 @@
         });
       }
       var sound = document.getElementById("sound-toggle");
+      var test = document.getElementById("sound-test");
+      var hint = document.getElementById("sound-hint");
       if (sound && window.vimpleSound) {
         sound.checked = window.vimpleSound.enabled();
         sound.addEventListener("change", function () { window.vimpleSound.setEnabled(sound.checked); });
+      }
+      if (test && window.vimpleSound) {
+        test.addEventListener("click", function () {
+          window.vimpleSound.test().then(function (played) {
+            hint.hidden = played;
+            test.textContent = played ? "Played. Sound is on for this page." : "Play test sound";
+          });
+        });
       }
       if (window.vimpleUnread) window.vimpleUnread.paintMenu();
     })();

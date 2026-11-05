@@ -551,6 +551,8 @@
     label.sound-toggle input::after { content: ""; position: absolute; top: 0.15rem; left: 0.15rem; width: 0.9rem; height: 0.9rem; border-radius: 50%; background: #fff; transition: transform 0.15s ease; }
     label.sound-toggle input:checked { background: var(--neon-strong); }
     label.sound-toggle input:checked::after { transform: translateX(1rem); }
+    button.sound-test { font-size: 0.85rem; color: var(--muted); }
+    .sound-hint { margin: 0 0.6rem 0.4rem; font-size: 0.8rem; color: #8a1f16; }
     .profile-foot { border-top: 1px solid var(--line); margin-top: 0.35rem; padding-top: 0.35rem; }
     .avatar-wrap { position: relative; display: inline-flex; flex: none; }
     .avatar-badge { position: absolute; top: -0.4rem; right: -0.45rem; min-width: 1.1rem; height: 1.1rem; padding: 0 0.28rem; border-radius: 999px; background: var(--danger); color: #fff; font-size: 0.66rem; font-weight: 700; line-height: 1.1rem; text-align: center; box-shadow: 0 0 0 2px var(--ink); }
@@ -787,8 +789,10 @@
         if (!context && Audio) context = new Audio();
         if (context && context.state === "suspended") context.resume();
       }
-      document.addEventListener("pointerdown", unlock, { once: true });
-      document.addEventListener("keydown", unlock, { once: true });
+      // Every click or key may unlock (Safari can suspend audio again later); it's cheap.
+      document.addEventListener("pointerdown", unlock);
+      document.addEventListener("keydown", unlock);
+      function locked() { return !context || context.state !== "running"; }
       function note(frequency, start, length) {
         var tone = context.createOscillator();
         var gain = context.createGain();
@@ -807,9 +811,23 @@
           try { localStorage.setItem("vimple-sound", on ? "on" : "off"); } catch (error) {}
           if (on) { unlock(); this.play(); }
         },
+        locked: locked,
+        // From the menu's test button: a click, so the browser lets the audio start.
+        test: function () {
+          unlock();
+          var self = this;
+          var started = context && context.resume ? context.resume() : Promise.resolve();
+          return Promise.resolve(started).then(function () {
+            if (locked()) return false;
+            var now = context.currentTime;
+            note(880, now, 0.18);
+            note(1320, now + 0.14, 0.26);
+            return true;
+          });
+        },
         play: function () {
           played += 1;
-          if (!enabled() || !context || context.state !== "running") return false;
+          if (!enabled() || locked()) return false;
           var now = context.currentTime;
           note(880, now, 0.18);
           note(1320, now + 0.14, 0.26);
@@ -844,17 +862,31 @@
         if (dot) dot.hidden = !data.other;
         paintMenu();
       }
+      var title = document.title;
+      var waiting = 0;
+      function flagTitle() {
+        // Works without sound or permission: the tab title says a message came in.
+        waiting += 1;
+        document.title = "(" + waiting + ") New message · " + title;
+        if (document.hasFocus()) setTimeout(clearTitle, 8000);
+      }
+      function clearTitle() {
+        waiting = 0;
+        document.title = title;
+      }
+      window.addEventListener("focus", clearTitle);
       function chimeOnce(newest) {
+        flagTitle();
         // Every open tab sees the same new message; the first one to get here chimes for it.
         try {
-          var chimed = localStorage.getItem("vimple-chimed-latest") || "";
-          if (chimed && Date.parse(chimed) >= Date.parse(newest)) return;
-          localStorage.setItem("vimple-chimed-latest", newest);
+          if (Number(localStorage.getItem("vimple-chimed-latest") || 0) >= newest) return;
+          localStorage.setItem("vimple-chimed-latest", String(newest));
         } catch (error) {}
         window.vimpleSound.play();
       }
+      // Unlike the inbox list, this keeps going in a hidden tab: the chime matters most when
+      // you're looking at another tab (for example Mercado Libre). It's one small request, 204 when unchanged.
       function poll() {
-        if (document.visibilityState !== "visible") return;
         fetch("{% url 'profile_unread' %}", { headers: { "X-Unread-Version": version }, credentials: "same-origin" })
           .then(function (response) { return response.status === 200 ? response.json() : null; })
           .then(function (data) {
@@ -862,17 +894,18 @@
             version = data.version;
             // A newer message from a buyer, in any organization: chime, even when the
             // waiting total stays the same (a second message in a chat that already waits).
-            if (latest !== null && data.latest && (!latest || Date.parse(data.latest) > Date.parse(latest))) {
-              chimeOnce(data.latest);
-            }
-            latest = data.latest || "";
+            var newest = Number(data.latest) || 0;
+            if (latest !== null && newest > latest) chimeOnce(newest);
+            latest = newest;
             paint(data);
           })
           .catch(function () {});
       }
       poll();
-      setInterval(poll, {{ unread_poll_ms|default:30000 }});
-      document.addEventListener("visibilitychange", poll);
+      setInterval(poll, {{ unread_poll_ms|default:20000 }});
+      document.addEventListener("visibilitychange", function () {
+        if (document.visibilityState === "visible") poll();
+      });
       return { poll: poll, paintMenu: paintMenu };
     })();
   </script>

@@ -16,7 +16,7 @@ Organization is the tenant. Its UUID does not change. The name can.
 - Colors are the :root variables in templates/base.html, taken from the logo: charcoal (--ink) and grays, with neon green (--neon) only for accents: the active menu item, focus rings, the one main action per page (.accent), SKU chips (.sku) and active status pills. Don't hard-code new colors.
 - Check new pages at 390px as well as on desktop; wide tables go in .table-scroll.
 - The profile menu sits inside the dark sidebar but sets its own colors (.profile-panel); nothing in it may inherit from .sidebar.
-- Chats waiting per organization come from one grouped query over the user's own memberships (inbox.unread.unread_by_organization). The avatar badge counts only other organizations. /profile/unread/ is polled every 30 s while the tab is visible and answers 204 when X-Unread-Version matches; a newer incoming message (latest, from inbox.unread.latest_incoming) plays a Web Audio chime, even when the waiting total is unchanged (on by default, switch in the menu; tabs share the last chimed message in localStorage, so one tab chimes per message).
+- Chats waiting per organization come from one grouped query over the user's own memberships (inbox.unread.unread_by_organization). The avatar badge counts only other organizations. /profile/unread/ is polled every 20 s, also while the tab is hidden (the chime matters most when you're in another tab), at once after an inbox list poll brings changes, and answers 204 when X-Unread-Version matches. latest is epoch milliseconds, compared as numbers; a newer incoming message (latest, from inbox.unread.latest_incoming) plays a Web Audio chime, even when the waiting total is unchanged (on by default, switch in the menu; tabs share the last chimed message in localStorage, so one tab chimes per message).
 
 ## Inbox and htmx
 
@@ -30,6 +30,7 @@ Organization is the tenant. Its UUID does not change. The name can.
 - The list poll sends X-Inbox-Version, which is #chat-list data-version, and the view answers 204 when _list_version is unchanged. Add anything new the list or open conversation shows to _list_version, or polls will not pick it up. The poll pauses while the tab is hidden.
 - A #chat-list swap replaces the scrolling aside. Restore its scrollTop after the swap. Only a click moves a row to the top.
 - On phones (max-width 768px) the inbox shows one pane at a time, chosen by #inbox data-view (list or thread). A row click and inboxShowList set it in the browser, so no request may replace #inbox. Check layout changes at 390px as well as on desktop.
+- Writing a chat (inbox.services.upsert_thread) is bulk: one read of its messages, one bulk_create, one bulk_update (set updated_at yourself; bulk_update skips auto_now), one delete. Never one query per message: a 35-message chat once took 154 queries, 6-10 s on Render. A sent reply is one row (meli.postsale.remember_reply), about 6 queries.
 - Every query and Redis call crosses the network to Neon or Upstash. Keep the Postgres pool and the shared Redis client, and count queries when adding to an inbox request.
 - When a UI fix does not hold, find where the wrong value first appears before adding another guard. Log the value read and the value expected side by side.
 - Remove debug logging, such as #region agent log blocks and .cursor/debug-*.log writers, before finishing.
