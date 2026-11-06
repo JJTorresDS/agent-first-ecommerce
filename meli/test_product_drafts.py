@@ -138,6 +138,25 @@ class ProductDraftTests(DraftTestCase):
         self.assertIn({"id": "EMPTY_GTIN_REASON", "value_id": "17055161"}, sent)
         self.assertNotIn("GTIN", [attribute["id"] for attribute in sent])
 
+    def test_a_hidden_or_unlisted_gtin_reason_still_goes_by_its_id(self):
+        self.product.gtin = ""
+        self.product.save()
+        hidden = [dict(attribute) for attribute in PERFUME_ATTRIBUTES]
+        for attribute in hidden:
+            if attribute["id"] == "EMPTY_GTIN_REASON":
+                attribute["tags"] = {"hidden": True, "required": True}
+        self.meli.category_attributes = hidden
+        self.create()
+        draft = self.draft()
+        reason = next(item for item in draft.category_schema if item["id"] == "EMPTY_GTIN_REASON")
+        self.assertEqual((reason["required"], reason["value_ids"][-1]), (False, "17055161"))
+        self.assertNotIn("Motivo", draft.error)
+        # Not in the category at all, typed with other capitals: still Mercado Libre's id.
+        draft.category_schema = [item for item in draft.category_schema if item["id"] != "EMPTY_GTIN_REASON"]
+        draft.attributes = {"EMPTY_GTIN_REASON": "Otra Razón"}
+        body = build_item(draft, defaults_for(self.organization))
+        self.assertIn({"id": "EMPTY_GTIN_REASON", "value_id": "17055161"}, body["attributes"])
+
     def test_with_a_gtin_no_reason_is_sent(self):
         self.create()
         body = build_item(self.draft(), defaults_for(self.organization))

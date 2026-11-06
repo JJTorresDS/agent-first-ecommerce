@@ -205,12 +205,16 @@ def product_attributes(draft):
     attributes = []
     for key, value in values.items():
         value_id = _allowed_id(schema.get(key), value)
+        if not value_id and key == "EMPTY_GTIN_REASON" and value.lower() == NO_GTIN_REASON.lower():
+            # Sent as text, Mercado Libre still asks for the GTIN; its listings carry this id.
+            value_id = NO_GTIN_REASON_ID
         # A value from Mercado Libre's own list goes by its id, which is what it checks.
         attributes.append({"id": key, "value_id": value_id} if value_id else {"id": key, "value_name": value})
     return attributes
 
 
 NO_GTIN_REASON = "Otra razón"
+NO_GTIN_REASON_ID = "17055161"
 
 # Attribute types whose values must come from Mercado Libre's list; others only suggest values.
 FIXED_TYPES = {"list", "boolean"}
@@ -271,9 +275,11 @@ def schema_of(attributes):
         tags = attribute.get("tags") or {}
         if isinstance(tags, list):
             tags = {tag: True for tag in tags}
-        if tags.get("read_only") or tags.get("hidden"):
+        if tags.get("read_only"):
             continue
-        required = bool(tags.get("required"))
+        # Hidden ones (EMPTY_GTIN_REASON) are kept for their values and ids, but never asked for.
+        hidden = bool(tags.get("hidden"))
+        required = bool(tags.get("required")) and not hidden
         listed = [value for value in attribute.get("values") or [] if isinstance(value, dict) and value.get("name")]
         kind = str(attribute.get("value_type") or "")
         keep = required or kind in FIXED_TYPES or attribute["id"] == "EMPTY_GTIN_REASON"
