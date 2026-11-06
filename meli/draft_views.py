@@ -145,11 +145,12 @@ def _attributes_context(organization, draft, attributes, error):
     """The regular draft's own attributes, with an empty row for each one Mercado Libre still needs."""
     from vimple.ai import enabled
 
-    missing = _missing(organization, draft)
+    missing, wrong = _problems(organization, draft)
     rows = {**attributes, **{item["id"]: attributes.get(item["id"], "") for item in missing}}
     return {
         "attributes": attribute_rows(rows),
         "missing": missing,
+        "wrong": wrong,
         "attributes_error": error,
         "ai": enabled(),
     }
@@ -255,29 +256,32 @@ def meli_draft_ai(request, pk):
         return HttpResponseForbidden("Posted drafts can't change.")
     attributes = attributes_from(request.POST)
     draft.attributes = attributes
-    missing = _missing(organization, draft)
+    missing, wrong = _problems(organization, draft)
+    asked = missing + wrong
     note = ""
     try:
         product = draft.product
         filled = fill_attributes(
-            product.title, product.product_model.brand.name, {**product.attributes, **attributes}, missing
+            product.title, product.product_model.brand.name, {**product.attributes, **attributes}, asked
         )
     except ai.SuggestionFailed:
         filled, note = {}, "The suggestion didn't come through; fill them in yourself."
-    if missing and not filled and not note:
+    if asked and not filled and not note:
         note = "No confident values: fill them in yourself."
-    rows = {**attributes, **{item["id"]: filled.get(item["id"], attributes.get(item["id"], "")) for item in missing}}
+    rows = {**attributes, **{item["id"]: filled.get(item["id"], attributes.get(item["id"], "")) for item in asked}}
     return render(
         request,
         "meli/_draft_attributes.html",
-        {"draft": draft, "attributes": attribute_rows(rows), "missing": missing, "ai_note": note,
+        {"draft": draft, "attributes": attribute_rows(rows), "missing": missing, "wrong": wrong, "ai_note": note,
          "can_edit": True, "ai": True},
     )
 
 
-def _missing(organization, draft):
-    from .drafts import build_item, missing_attributes, settings_of
+def _problems(organization, draft):
+    """(missing, wrong) attributes of a regular draft: what Mercado Libre needs, and values not on its list."""
+    from .drafts import build_item, invalid_values, missing_attributes, settings_of
 
     if draft.kind != ListingDraft.Kind.PRODUCT:
-        return []
-    return missing_attributes(draft, build_item(draft, settings_of(draft, defaults_for(organization))))
+        return [], []
+    body = build_item(draft, settings_of(draft, defaults_for(organization)))
+    return missing_attributes(draft, body), invalid_values(draft, body)

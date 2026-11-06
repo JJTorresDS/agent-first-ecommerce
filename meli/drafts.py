@@ -192,19 +192,65 @@ def product_attributes(draft):
     values = {"BRAND": model.brand.name, "MODEL": model.name}
     if product.gtin:
         values["GTIN"] = product.gtin
+    elif "GTIN" in known:
+        # No barcode: Mercado Libre needs the reason, and "Otra razón" fits every case Vimple has.
+        values["EMPTY_GTIN_REASON"] = NO_GTIN_REASON
     for key, value in (product.attributes or {}).items():
         if key in known and key not in OWN_ATTRIBUTES and _text(value):
             values[key] = _text(value)
     for key, value in (draft.attributes or {}).items():
         if key not in OWN_ATTRIBUTES and _text(value):
             values[key] = _text(value)
-    return [{"id": key, "value_name": value} for key, value in values.items()]
+    schema = {attribute["id"]: attribute for attribute in draft.category_schema or []}
+    attributes = []
+    for key, value in values.items():
+        value_id = _allowed_id(schema.get(key), value)
+        # A value from Mercado Libre's own list goes by its id, which is what it checks.
+        attributes.append({"id": key, "value_id": value_id} if value_id else {"id": key, "value_name": value})
+    return attributes
+
+
+NO_GTIN_REASON = "Otra razón"
+
+# Attribute types whose values must come from Mercado Libre's list; others only suggest values.
+FIXED_TYPES = {"list", "boolean"}
+
+
+def _allowed_id(attribute, value):
+    """Mercado Libre's id for this value when the attribute has a list and the value is on it."""
+    if not attribute:
+        return ""
+    for name, value_id in zip(attribute.get("values") or [], attribute.get("value_ids") or []):
+        if name.lower() == value.lower() and value_id:
+            return value_id
+    return ""
+
+
+def invalid_values(draft, body):
+    """Attributes whose value isn't on Mercado Libre's fixed list: [{id, name, values, value}]."""
+    schema = {attribute["id"]: attribute for attribute in draft.category_schema or []}
+    wrong = []
+    for attribute in body.get("attributes") or []:
+        known = schema.get(attribute["id"])
+        if not known or known.get("type") not in FIXED_TYPES or not known.get("values") or "value_name" not in attribute:
+            continue
+        if attribute["id"] in OWN_ATTRIBUTES:
+            continue
+        wrong.append({**known, "value": attribute["value_name"]})
+    return wrong
+
+
+def invalid_message(items):
+    return "; ".join(
+        f"{item['name']} ({item['id']}): “{item['value']}” isn't one of {', '.join(item['values'][:12])}"
+        for item in items
+    ) + "."
 
 
 def missing_attributes(draft, body):
     """The category's required attributes the body doesn't have: [{id, name, values}].
 
-    GTIN is required only conditionally: without a barcode, the reason (EMPTY_GTIN_REASON) has to be given.
+    GTIN is only conditionally required, and product_attributes always sends it or its reason.
     """
     schema = draft.category_schema or []
     sent = {attribute["id"] for attribute in body.get("attributes") or []}
@@ -213,16 +259,6 @@ def missing_attributes(draft, body):
         for attribute in schema
         if attribute.get("required") and attribute["id"] not in sent and attribute["id"] not in OWN_ATTRIBUTES
     ]
-    ids = {attribute["id"] for attribute in schema}
-    if "GTIN" in ids and not sent & {"GTIN", "EMPTY_GTIN_REASON"} and not any(item["id"] == "GTIN" for item in missing):
-        reason = next((attribute for attribute in schema if attribute["id"] == "EMPTY_GTIN_REASON"), {})
-        missing.append(
-            {
-                "id": "EMPTY_GTIN_REASON",
-                "name": "Why it has no GTIN (or add the GTIN to the product)",
-                "values": reason.get("values") or [],
-            }
-        )
     return missing
 
 
@@ -238,14 +274,18 @@ def schema_of(attributes):
         if tags.get("read_only") or tags.get("hidden"):
             continue
         required = bool(tags.get("required"))
-        values = [str(value.get("name")) for value in attribute.get("values") or [] if isinstance(value, dict) and value.get("name")]
-        keep_values = required or attribute["id"] == "EMPTY_GTIN_REASON"
+        listed = [value for value in attribute.get("values") or [] if isinstance(value, dict) and value.get("name")]
+        kind = str(attribute.get("value_type") or "")
+        keep = required or kind in FIXED_TYPES or attribute["id"] == "EMPTY_GTIN_REASON"
+        listed = listed[:100] if keep else []
         schema.append(
             {
                 "id": str(attribute["id"])[:60],
                 "name": str(attribute.get("name") or attribute["id"])[:100],
                 "required": required,
-                "values": values[:60] if keep_values else [],
+                "type": kind,
+                "values": [str(value["name"]) for value in listed],
+                "value_ids": [str(value.get("id") or "") for value in listed],
             }
         )
     return schema
@@ -381,6 +421,10 @@ def _check_one(draft, token, defaults, stock, site, user_products=False):
     if missing:
         names = ", ".join(attribute["name"] for attribute in missing)
         _set(draft, ListingDraft.Status.NEEDS_FIX, f"Missing: {names}. Add them below.")
+        return
+    wrong = invalid_values(draft, body) if draft.kind != ListingDraft.Kind.CATALOG else []
+    if wrong:
+        _set(draft, ListingDraft.Status.NEEDS_FIX, invalid_message(wrong))
         return
     try:
         validate_item(token, body)

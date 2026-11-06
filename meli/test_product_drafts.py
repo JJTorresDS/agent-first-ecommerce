@@ -18,14 +18,14 @@ from .tests import shared_seller
 
 PERFUME_ATTRIBUTES = [
     {"id": "BRAND", "name": "Marca", "tags": {"required": True}},
-    {"id": "PERFUME_TYPE", "name": "Tipo de perfume", "tags": {"required": True},
+    {"id": "PERFUME_TYPE", "name": "Tipo de perfume", "tags": {"required": True}, "value_type": "list",
      "values": [{"id": "1", "name": "Eau de parfum"}, {"id": "2", "name": "Eau de toilette"}]},
     {"id": "UNIT_VOLUME", "name": "Volumen de la unidad", "tags": {"required": True}},
     {"id": "OLFACTORY_NOTES", "name": "Notas olfativas", "tags": {}},
     {"id": "155_98_RESOLUTION_FILE_NUMBER", "name": "Legajo", "tags": {"required": True}},
     {"id": "SHIPMENT_PACKING", "name": "Embalaje", "tags": {"read_only": True, "required": True}},
     {"id": "GTIN", "name": "Código universal de producto", "tags": {"conditional_required": True}},
-    {"id": "EMPTY_GTIN_REASON", "name": "Motivo de GTIN vacío", "tags": {},
+    {"id": "EMPTY_GTIN_REASON", "name": "Motivo de GTIN vacío", "tags": {}, "value_type": "list",
      "values": [{"id": "17055160", "name": "El producto no tiene código registrado"}, {"id": "17055161", "name": "Otra razón"}]},
 ]
 
@@ -119,27 +119,52 @@ class ProductDraftTests(DraftTestCase):
         self.assertIn("package weight and size", draft.error)
         self.assertEqual(self.meli.validated, [])
 
-    def test_without_a_gtin_the_reason_is_asked_for_with_its_choices(self):
+    def test_without_a_gtin_otra_razon_is_sent_by_rule(self):
         self.product.gtin = ""
         self.product.save()
         self.create()
         draft = self.draft()
-        self.assertIn("Why it has no GTIN", draft.error)
-        page = self.client.get(f"/catalog/meli/new/{draft.pk}/")
-        self.assertContains(page, "one of El producto no tiene código registrado, Otra razón")
-        self.assertContains(page, 'value="EMPTY_GTIN_REASON"')
         self.client.post(
             f"/catalog/meli/new/{draft.pk}/",
             {
                 "price": "15999", "quantity": "1", "category_id": "MLA1271", "use_defaults": "on",
                 "condition": "new", "warranty": "seller", "warranty_days": "30",
-                "attr_key": ["PERFUME_TYPE", "EMPTY_GTIN_REASON"], "attr_value": ["Eau de parfum", "Otra razón"],
+                "attr_key": ["PERFUME_TYPE"], "attr_value": ["Eau de parfum"],
             },
         )
         draft.refresh_from_db()
         self.assertEqual(draft.status, ListingDraft.Status.READY, draft.error)
-        self.assertIn({"id": "EMPTY_GTIN_REASON", "value_name": "Otra razón"}, self.meli.validated[-1]["attributes"])
-        self.assertNotIn("GTIN", [attribute["id"] for attribute in self.meli.validated[-1]["attributes"]])
+        sent = self.meli.validated[-1]["attributes"]
+        self.assertIn({"id": "EMPTY_GTIN_REASON", "value_id": "17055161"}, sent)
+        self.assertNotIn("GTIN", [attribute["id"] for attribute in sent])
+
+    def test_with_a_gtin_no_reason_is_sent(self):
+        self.create()
+        body = build_item(self.draft(), defaults_for(self.organization))
+        ids = [attribute["id"] for attribute in body["attributes"]]
+        self.assertIn("GTIN", ids)
+        self.assertNotIn("EMPTY_GTIN_REASON", ids)
+
+    def test_a_value_not_on_mercado_libres_list_stops_the_check_with_the_choices(self):
+        self.product.gtin = ""
+        self.product.save()
+        self.create()
+        draft = self.draft()
+        self.client.post(
+            f"/catalog/meli/new/{draft.pk}/",
+            {
+                "price": "15999", "quantity": "1", "category_id": "MLA1271", "use_defaults": "on",
+                "condition": "new", "warranty": "seller", "warranty_days": "30",
+                "attr_key": ["PERFUME_TYPE", "EMPTY_GTIN_REASON"], "attr_value": ["eau de parfum", "Other"],
+            },
+        )
+        draft.refresh_from_db()
+        self.assertEqual(draft.status, ListingDraft.Status.NEEDS_FIX)
+        self.assertEqual(
+            draft.error,
+            "Motivo de GTIN vacío (EMPTY_GTIN_REASON): “Other” isn't one of El producto no tiene código registrado, Otra razón.",
+        )
+        self.assertEqual(self.meli.validated, [])
 
     def test_read_only_attributes_are_never_asked_for(self):
         ids = [item["id"] for item in schema_of(PERFUME_ATTRIBUTES)]
@@ -160,7 +185,8 @@ class ProductDraftTests(DraftTestCase):
         draft.refresh_from_db()
         self.assertEqual(draft.status, ListingDraft.Status.READY, draft.error)
         self.assertEqual(draft.attributes, {"PERFUME_TYPE": "Eau de parfum"})
-        self.assertIn({"id": "PERFUME_TYPE", "value_name": "Eau de parfum"}, self.meli.validated[-1]["attributes"])
+        # A value on Mercado Libre's list goes by its id.
+        self.assertIn({"id": "PERFUME_TYPE", "value_id": "1"}, self.meli.validated[-1]["attributes"])
         self.client.post("/catalog/meli/new/", {"action": "post_all"})
         draft.refresh_from_db()
         self.assertEqual(draft.status, ListingDraft.Status.PUBLISHED, draft.error)
@@ -203,6 +229,32 @@ class ProductDraftTests(DraftTestCase):
             self.create(kind="catalog")
         draft = self.draft()
         self.assertEqual((draft.kind, draft.catalog_product_id), (ListingDraft.Kind.CATALOG, "MLA46233297"))
+
+    @override_settings(MISTRAL_API_KEY="test-key")
+    def test_fill_with_ai_also_fixes_a_refused_value_from_the_list(self):
+        self.product.gtin = ""
+        self.product.save()
+        self.create()
+        draft = self.draft()
+        draft.attributes = {"PERFUME_TYPE": "Eau de parfum", "EMPTY_GTIN_REASON": "Other"}
+        draft.save()
+        page = self.client.get(f"/catalog/meli/new/{draft.pk}/")
+        self.assertContains(page, "“Other” isn't allowed; one of El producto no tiene código registrado, Otra razón")
+        self.assertContains(page, "Fill with AI")
+        fake = FakeMistral({"EMPTY_GTIN_REASON": "otra razón"})
+        with patch("vimple.ai.urlopen", side_effect=fake):
+            response = self.client.post(
+                f"/catalog/meli/new/{draft.pk}/ai/",
+                {"attr_key": ["PERFUME_TYPE", "EMPTY_GTIN_REASON"], "attr_value": ["Eau de parfum", "Other"]},
+            )
+        asked = json.loads(fake.asked[0]["messages"][1]["content"])["attributes_to_fill"]
+        self.assertEqual(
+            asked,
+            [{"id": "EMPTY_GTIN_REASON", "name": "Motivo de GTIN vacío", "value_type": "list",
+              "allowed_values": ["El producto no tiene código registrado", "Otra razón"], "current_value_refused": "Other"}],
+        )
+        self.assertContains(response, 'value="Otra razón"')
+        self.assertIn("allowed_values", fake.asked[0]["messages"][0]["content"])
 
     @override_settings(MISTRAL_API_KEY="test-key")
     def test_fill_with_ai_suggests_only_allowed_values(self):

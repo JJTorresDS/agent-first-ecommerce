@@ -112,6 +112,7 @@ INSTALLED_APPS = [
     "catalog",
     "purchasing",
     "inventory",
+    "support",
 ]
 
 MIDDLEWARE = [

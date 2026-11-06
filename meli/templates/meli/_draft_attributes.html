@@ -1,17 +1,25 @@
 <div id="draft-attributes" class="wide">
   <div class="card-head">
     <h3>Attributes for this listing</h3>
-    {% if ai and can_edit and missing %}
+    {% if ai and can_edit %}{% if missing or wrong %}
       <button type="button" class="ai-button" hx-post="{% url 'meli_draft_ai' draft.pk %}" hx-include="#draft-form" hx-target="#draft-attributes" hx-swap="outerHTML" hx-sync="this:drop">
         <span class="spinner htmx-indicator" aria-hidden="true"></span>Fill with AI
       </button>
-    {% endif %}
+    {% endif %}{% endif %}
   </div>
   {% if missing %}
     <p class="muted">Mercado Libre needs:</p>
     <ul class="plain lines missing-attributes">
       {% for item in missing %}
         <li><strong>{{ item.name }}</strong> <span class="mono">{{ item.id }}</span>{% if item.values %}: one of {{ item.values|join:", " }}{% endif %}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+  {% if wrong %}
+    <p class="muted">Not on Mercado Libre's list:</p>
+    <ul class="plain lines missing-attributes">
+      {% for item in wrong %}
+        <li><strong>{{ item.name }}</strong> <span class="mono">{{ item.id }}</span>: “{{ item.value }}” isn't allowed; one of {{ item.values|join:", " }}</li>
       {% endfor %}
     </ul>
   {% endif %}

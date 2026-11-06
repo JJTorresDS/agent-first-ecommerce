@@ -85,21 +85,33 @@ def write_description(name, brand="", attributes=None):
 
 ATTRIBUTES_PROMPT = (
     "You fill Mercado Libre listing attributes for a product, in Spanish (Argentina).\n"
-    "You get the product's data and the attributes to fill: id, name, and allowed values when there "
-    "is a list. Use only facts from the product data. When an attribute has allowed values, answer "
-    "with exactly one of them. Skip any attribute you can't fill with confidence; never guess.\n"
+    "You get the product's data and the attributes to fill: id, name, value_type, allowed_values "
+    "(Mercado Libre's own list for that attribute, read from its API) and, when there is one, the "
+    "current value Mercado Libre refused. Use only facts from the product data.\n"
+    "When allowed_values is not empty, answer with exactly one of them, copied as written; any other "
+    "value is refused. Never repeat a refused current value. Skip any attribute you can't fill with "
+    "confidence; never guess.\n"
     "Return ONLY a JSON object mapping attribute id to value, for example {\"PERFUME_TYPE\": \"Eau de parfum\"}."
 )
 
 
 def fill_attributes(name, brand, attributes, missing):
-    """Values for missing attributes ([{id, name, values}]): only from the allowed list when there is one."""
+    """Values for missing or refused attributes ([{id, name, type, values, value?}]).
+
+    Only values on Mercado Libre's list, in its spelling, when the attribute has one.
+    """
     answer = ai.complete_json(
         ATTRIBUTES_PROMPT,
         {
             "product": _product(name, brand, attributes),
             "attributes_to_fill": [
-                {"id": item["id"], "name": item.get("name", ""), "allowed_values": item.get("values") or []}
+                {
+                    "id": item["id"],
+                    "name": item.get("name", ""),
+                    "value_type": item.get("type", ""),
+                    "allowed_values": item.get("values") or [],
+                    **({"current_value_refused": item["value"]} if item.get("value") else {}),
+                }
                 for item in missing
             ],
         },

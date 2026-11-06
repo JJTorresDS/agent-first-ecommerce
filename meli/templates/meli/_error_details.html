@@ -3,5 +3,12 @@
     <summary>Details</summary>
     <pre id="error-details-{{ draft.pk }}">{{ draft.error_details_text }}</pre>
     <button type="button" data-copy-target="error-details-{{ draft.pk }}">Copy</button>
+    {# Not a form: on the drafts table this sits inside the Post form. #}
+    <div class="report-error" id="report-error-{{ draft.pk }}">
+      <label for="report-note-{{ draft.pk }}">What were you doing? (optional)</label>
+      <textarea id="report-note-{{ draft.pk }}" name="note" rows="2" maxlength="2000"></textarea>
+      <button type="button" hx-post="{% url 'report_draft_error' draft.pk %}" hx-include="#report-note-{{ draft.pk }}"
+        hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' hx-target="#report-error-{{ draft.pk }}" hx-swap="innerHTML" hx-sync="this:drop">Report error</button>
+    </div>
   </details>
 {% endif %}
