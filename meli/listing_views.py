@@ -11,7 +11,12 @@ from accounts.models import AppAccess, can_edit_products, membership_for
 from .models import ListingTemplate, MercadoLibreAccount, MeliListing, MeliListingSync
 
 PAGE_SIZE = 50
-LINK_STATES = (("linked", "Linked"), ("unmatched", "SKU not in catalog"), ("no_sku", "No SKU"))
+LINK_STATES = (
+    ("linked", "Linked"),
+    ("unmatched", "SKU not in catalog"),
+    ("no_sku", "No SKU"),
+    ("template", "Templates"),
+)
 STATUSES = (
     ("active", "Active"),
     ("paused", "Paused"),
@@ -74,6 +79,10 @@ def meli_listings(request):
         rows = rows.filter(product__isnull=True).exclude(seller_sku="")
     elif link == "no_sku":
         rows = rows.filter(product__isnull=True, seller_sku="")
+    elif link == "template":
+        rows = rows.filter(
+            item_id__in=ListingTemplate.objects.filter(organization=organization).values("item_id")
+        )
     if status in dict(STATUSES):
         rows = rows.filter(status=status)
     page = Paginator(rows.order_by("title", "item_id", "variation_id"), PAGE_SIZE).get_page(request.GET.get("page") or 1)

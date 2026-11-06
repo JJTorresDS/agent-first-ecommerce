@@ -316,7 +316,7 @@ class DraftFlowTests(DraftTestCase):
         self.client.force_login(member(organization, username="bea"))
         page = self.client.get("/catalog/meli/new/")
         self.assertContains(page, "count it first")
-        self.assertNotContains(page, "Add from a catalog product")
+        self.assertNotContains(page, "From a Mercado Libre catalog link")
 
     def test_posting_creates_the_item_turns_flex_off_and_links_the_listing(self):
         self.add()

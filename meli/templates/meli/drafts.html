@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 
-{% block title %}New Mercado Libre listings{% endblock %}
+{% block title %}Create a Mercado Libre listing{% endblock %}
 
 {% block content %}
-  {% include "catalog/_tabs.html" %}
+  {% include "meli/_tabs.html" %}
   <div class="page-head">
-    <h1>New Mercado Libre listings</h1>
+    <h1>Create a Mercado Libre listing</h1>
   </div>
 
   {% if not connected %}
@@ -19,8 +19,40 @@
       <p><a href="{% url 'inventory_count' %}">Start the inventory</a></p>
     </div>
   {% elif can_edit %}
-    <section class="card">
-      <h2>Add from a catalog product</h2>
+    <p class="muted">Pick where the listing starts from. Each way opens a draft you check and post from here.</p>
+
+    <section class="card create-start">
+      <h2>From a Vimple product</h2>
+      <p class="muted">A regular listing with the product's title, pictures, attributes and package. Search by title or SKU.</p>
+      <input type="search" name="q" class="pick-search" placeholder="Search products and combos" aria-label="Search products and combos"
+             hx-get="{% url 'meli_listing_pick' %}" hx-trigger="load, input changed delay:300ms, search" hx-target="#pick-products">
+      <div id="pick-products" class="pick-results" aria-live="polite"></div>
+    </section>
+
+    <section class="card create-start">
+      <h2>From a template</h2>
+      <p class="muted">A template is one carefully filled listing per category, kept paused so it never sells. New listings copy its attributes{% if ai %}, adapted to the product by AI,{% endif %} so Mercado Libre doesn't ask for them again.</p>
+      {% if templates %}
+        {% if not ai %}<p class="muted">Copying needs the AI, which isn't set up: the draft starts in the template's category and you fill the attributes.</p>{% endif %}
+        <ul class="template-list">
+          {% for template in templates %}
+            <li>
+              <details class="template-pick">
+                <summary><span class="pill active">{{ template.category_id }}</span> {{ template.title }} <span class="muted">· {{ template.item_id }}</span></summary>
+                <input type="search" name="q" class="pick-search" placeholder="Search the product to list" aria-label="Search the product to list with this template"
+                       hx-get="{% url 'meli_listing_pick' %}" hx-vals='{"template": "{{ template.pk }}"}' hx-trigger="toggle from:closest details once, input changed delay:300ms, search" hx-target="next .pick-results">
+                <div class="pick-results" aria-live="polite"></div>
+              </details>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p>No templates yet. Make one by ticking <strong>Template for this category</strong> on a draft, or with <strong>Make template</strong> on a listing in <a href="{% url 'meli_listings' %}">Listings</a>.</p>
+      {% endif %}
+    </section>
+
+    <section class="card create-start">
+      <h2>From a Mercado Libre catalog link</h2>
       <p class="muted">On Mercado Libre, open the catalog product (the page with "Vender uno igual") and paste its URL. The listing competes for that product, with the Vimple product's SKU and stock.</p>
       {% for error in add_form.non_field_errors %}<p class="error">{{ error }}</p>{% endfor %}
       <form method="post" class="form-grid">
@@ -31,17 +63,18 @@
         {% include "_field.html" with field=add_form.price %}
         {% include "_field.html" with field=add_form.quantity %}
         <div class="actions wide">
-          {% if not add_form.product.field.queryset.exists %}<p class="muted">No product has stock in the Depósito yet.</p>{% else %}<span></span>{% endif %}
+          <p class="muted">{% if not add_form.product.field.queryset.exists %}No product has stock in the Depósito yet. {% endif %}Not in Vimple yet? <a href="{% url 'catalog_import' %}{% if add_form.import_url %}?url={{ add_form.import_url|urlencode }}{% endif %}" id="import-link">Import it as a new product</a>, then list it from here once it has stock.</p>
           <button class="primary" type="submit">Save draft</button>
         </div>
       </form>
     </section>
   {% endif %}
 
+  <h2 class="section-title">Drafts in progress</h2>
   {% include "meli/_drafts.html" %}
 
-  <section class="card">
-    <h2>Defaults</h2>
+  <details class="card defaults-card"{% if defaults_form.errors %} open{% endif %}>
+    <summary><h2>Defaults for new listings</h2></summary>
     <p class="muted">Each draft uses these unless you untick "Use the defaults" on it. In-person pickup is always off.</p>
     <form method="post" class="form-grid">
       {% csrf_token %}
@@ -51,5 +84,17 @@
       </fieldset>
       {% if can_edit %}<div class="actions wide"><span></span><button class="primary" type="submit">Save defaults</button></div>{% endif %}
     </form>
-  </section>
+  </details>
+  <script>
+    // The import link takes the pasted catalog URL with it.
+    (function () {
+      var url = document.getElementById("id_add-url");
+      var link = document.getElementById("import-link");
+      if (!url || !link) return;
+      url.addEventListener("input", function () {
+        var value = url.value.trim();
+        link.href = link.href.split("?")[0] + (value ? "?url=" + encodeURIComponent(value) : "");
+      });
+    })();
+  </script>
 {% endblock %}

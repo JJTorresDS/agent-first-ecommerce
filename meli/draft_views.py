@@ -3,12 +3,14 @@ import re
 from django.core.exceptions import ValidationError
 from django.http import HttpResponseBadRequest, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.views.decorators.http import require_POST
 
 from accounts.access import require_app
 from accounts.models import AppAccess, can_edit_products, membership_for
 from catalog.forms import attribute_rows, attributes_from
 from catalog.validators import validate_attributes
+from vimple.ai import enabled as ai_enabled
 
 from .drafts import (
     package_missing,
@@ -20,7 +22,7 @@ from .drafts import (
     stock_by_product,
 )
 from .forms import CatalogDraftForm, DraftForm, ListingDefaultsForm
-from .models import ListingDraft, MercadoLibreAccount
+from .models import ListingDraft, ListingTemplate, MercadoLibreAccount, MeliListing
 
 READ_ONLY = "Only owners and admins can create Mercado Libre listings."
 
@@ -91,6 +93,10 @@ def meli_drafts(request):
         "started": started,
         "connected": connected,
         "can_edit": can_edit,
+        "templates": ListingTemplate.objects.filter(
+            organization=organization, state=ListingTemplate.State.READY
+        ).order_by("category_id"),
+        "ai": ai_enabled(),
         "active_tab": "meli_new",
     }
     if request.GET.get("poll") == "drafts" and request.headers.get("HX-Request") == "true":
@@ -151,7 +157,8 @@ def meli_draft(request, pk):
             "defaults": defaults,
             "available": available,
             "can_edit": can_edit and not draft.locked(),
-            **(_attributes_context(organization, draft, attributes, attributes_error) if regular else {}),
+            **(_attributes_context(organization, draft, attributes, attributes_error, copy_pending=_copy_pending(request))
+               if regular else {}),
             "active_tab": "meli_new",
         },
     )
@@ -211,7 +218,6 @@ def guided_fields(draft, attributes):
 
 def copy_sources(organization, draft):
     """This organization's listings in the draft's category to copy from: the template first, then newest."""
-    from .models import ListingTemplate, MeliListing
 
     if not draft.category_id or not draft.category_schema:
         return []
@@ -236,6 +242,12 @@ def copy_sources(organization, draft):
         sources.append(row)
     sources.sort(key=lambda row: not row.is_template)
     return sources[:30]
+
+
+def _copy_pending(request):
+    """The listing a draft started from a template copies once its attributes load (?copy=<pk>)."""
+    value = request.GET.get("copy") if request.method == "GET" else ""
+    return int(value) if value and value.isdigit() else None
 
 
 def _attributes_context(organization, draft, attributes, error, **extra):
@@ -292,28 +304,104 @@ PACKAGE_FIRST = "Fill in the package weight and size first."
 
 def _actions_context(organization, listed, can_edit, **objects):
     reason = _listable(organization, listed)
-    return {**objects, "can_edit": can_edit, "reason": reason, "package_first": reason == PACKAGE_FIRST}
+    template = None
+    if not reason and listed.meli_category_id:
+        template = ListingTemplate.objects.filter(
+            organization=organization, category_id=listed.meli_category_id, state=ListingTemplate.State.READY
+        ).first()
+    return {**objects, "can_edit": can_edit, "reason": reason, "package_first": reason == PACKAGE_FIRST,
+            "template": template}
 
 
-def _listable(organization, listed):
-    """Why this product or combo can't get a listing yet, or "" when it can."""
+def _listable(organization, listed, stock=None, connected=None, started=None):
+    """Why this product or combo can't get a listing yet, or "" when it can.
+
+    A list of rows passes stock, connected and started, read once for all of them.
+    """
     from catalog.models import Combo
 
-    if not MercadoLibreAccount.objects.filter(organization=organization).exists():
+    if connected is None:
+        connected = MercadoLibreAccount.objects.filter(organization=organization).exists()
+    if not connected:
         return "Connect Mercado Libre to list it."
-    if not inventory_started(organization):
+    if not (inventory_started(organization) if started is None else started):
         return "Count your stock first to list it."
     if not listed.list_price:
         return "Set a price first."
     if package_missing(listed):
         return PACKAGE_FIRST
-    stock = stock_by_product(organization)
+    if stock is None:
+        stock = stock_by_product(organization)
     if isinstance(listed, Combo):
         if listed.can_make(stock) < 1:
             return "Not enough stock in the Depósito to make one."
     elif stock.get(listed.pk, 0) < 1:
         return "No stock in the Depósito to list."
     return ""
+
+
+PICK_LIMIT = 20
+
+
+@require_app(AppAccess.App.CATALOG)
+def meli_listing_pick(request):
+    """Create listing's search: this organization's products and combos, each with its button or why not yet."""
+    from django.db.models import Q
+
+    from catalog.models import Combo, MasterProduct
+
+    organization, can_edit = _scope(request)
+    query = (request.GET.get("q") or "").strip()[:100]
+    template = None
+    if request.GET.get("template"):
+        template = get_object_or_404(
+            ListingTemplate, organization=organization, pk=request.GET["template"], state=ListingTemplate.State.READY
+        )
+    products = (
+        MasterProduct.objects.filter(organization=organization)
+        .exclude(status=MasterProduct.Status.ARCHIVED)
+    )
+    combos = Combo.objects.filter(organization=organization).exclude(status=Combo.Status.ARCHIVED).prefetch_related(
+        "items"
+    )
+    if query:
+        products = products.filter(Q(title__icontains=query) | Q(sku__icontains=query))
+        combos = combos.filter(Q(title__icontains=query) | Q(sku__icontains=query))
+    rows = list(products.order_by("title")[:PICK_LIMIT]) + list(combos.order_by("title")[:PICK_LIMIT])
+    if template is not None:
+        # The template's own category first: its attributes fit them best.
+        rows.sort(key=lambda row: row.meli_category_id != template.category_id)
+    rows = rows[:PICK_LIMIT]
+    stock = stock_by_product(organization)
+    connected = MercadoLibreAccount.objects.filter(organization=organization).exists()
+    started = inventory_started(organization)
+    for row in rows:
+        row.is_combo = isinstance(row, Combo)
+        row.reason = _listable(organization, row, stock, connected, started)
+        row.stock = row.can_make(stock) if row.is_combo else stock.get(row.pk, 0)
+    return render(
+        request,
+        "meli/_pick.html",
+        {"rows": rows, "query": query, "template": template, "can_edit": can_edit, "package_first": PACKAGE_FIRST},
+    )
+
+
+def _chosen_template(organization, request):
+    """The template a draft starts from (Create listing → From a template), or None."""
+    if not request.POST.get("template"):
+        return None
+    return get_object_or_404(
+        ListingTemplate, organization=organization, pk=request.POST["template"], state=ListingTemplate.State.READY
+    )
+
+
+def _open_draft(organization, draft, template):
+    """The new draft's page; from a template, it copies the template's attributes once they load."""
+    url = reverse("meli_draft", args=[draft.pk])
+    source = template and MeliListing.objects.filter(organization=organization, item_id=template.item_id).first()
+    if source:
+        url += f"?copy={source.pk}"
+    return redirect(url)
 
 
 @require_app(AppAccess.App.CATALOG)
@@ -345,7 +433,8 @@ def meli_draft_from_product(request, pk):
     reason = _listable(organization, product)
     if reason:
         return HttpResponseBadRequest(reason)
-    in_catalog = request.POST.get("kind") == "catalog" and product.meli_catalog_product_id
+    template = _chosen_template(organization, request)
+    in_catalog = request.POST.get("kind") == "catalog" and product.meli_catalog_product_id and template is None
     draft = ListingDraft(
         organization=organization,
         kind=ListingDraft.Kind.CATALOG if in_catalog else ListingDraft.Kind.PRODUCT,
@@ -358,10 +447,12 @@ def meli_draft_from_product(request, pk):
     if in_catalog:
         draft.catalog_product_id = product.meli_catalog_product_id
         draft.catalog_url = f"https://www.mercadolibre.com.ar/p/{product.meli_catalog_product_id}"
+    if template is not None:
+        draft.category_id = template.category_id
     draft.status = ListingDraft.Status.CHECKING
     draft.save()
     dispatch_drafts(organization, "check", [draft.pk])
-    return redirect("meli_draft", pk=draft.pk)
+    return _open_draft(organization, draft, template)
 
 
 @require_app(AppAccess.App.CATALOG)
@@ -448,19 +539,20 @@ def meli_draft_from_combo(request, pk):
     reason = _listable(organization, combo)
     if reason:
         return HttpResponseBadRequest(reason)
+    template = _chosen_template(organization, request)
     draft = ListingDraft(
         organization=organization,
         kind=ListingDraft.Kind.COMBO,
         combo=combo,
         price=combo.list_price,
         quantity=1,
-        category_id=combo.meli_category_id,
+        category_id=template.category_id if template else combo.meli_category_id,
         created_by=request.user,
     )
     draft.status = ListingDraft.Status.CHECKING
     draft.save()
     dispatch_drafts(organization, "check", [draft.pk])
-    return redirect("meli_draft", pk=draft.pk)
+    return _open_draft(organization, draft, template)
 
 
 def _save_to_product(product, attributes):
@@ -490,7 +582,6 @@ def meli_draft_copy(request, pk):
     from vimple import ai
 
     from .drafts import OWN_ATTRIBUTES
-    from .models import MeliListing
 
     organization, can_edit = _scope(request)
     if not can_edit:

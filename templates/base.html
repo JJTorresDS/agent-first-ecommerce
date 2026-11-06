@@ -221,6 +221,13 @@
       transition: background-color 0.12s ease, transform 0.12s ease;
     }
     .nav-link svg { width: 1rem; height: 1rem; flex: none; }
+    .nav-group > summary { list-style: none; }
+    .nav-group > summary::-webkit-details-marker { display: none; }
+    .nav-group .chevron { margin-left: auto; transition: transform 0.12s ease; }
+    .nav-group[open] .chevron { transform: rotate(90deg); }
+    .nav-link.nav-sub { padding-left: 2.2rem; }
+    html.sidebar-collapsed .nav-group .nav-sub { display: none; }
+    html.sidebar-collapsed .nav-group > summary.current { background: var(--ink-2); color: #fff; box-shadow: inset 3px 0 0 var(--neon); }
     .nav-link.active { background: var(--gray-2); }
     .nav-link:active { background: var(--gray-3); transform: scale(0.97); }
     .sidebar-footer {
@@ -355,6 +362,8 @@
       html.sidebar-collapsed .nav-label,
       html.sidebar-collapsed .who-text { display: block; }
       html.sidebar-collapsed .nav-text { display: inline; }
+      html.sidebar-collapsed .nav-group .nav-sub { display: flex; }
+      html.sidebar-collapsed .nav-group > summary.current { background: transparent; box-shadow: none; color: inherit; }
       html.sidebar-collapsed .nav-link, html.sidebar-collapsed button.who { justify-content: flex-start; }
       .nav-link { padding: 0.6rem 0.65rem; }
       input, select, textarea { font-size: 16px; }
@@ -544,6 +553,29 @@
     .sync-card p { margin: 0 0 0.25rem; }
     .sync-line { display: flex; align-items: center; gap: 0.5rem; font-weight: 550; }
     span.thumb { display: block; }
+    /* Create listing: three ways to start, then the drafts. */
+    .create-start h2 { margin-bottom: 0.25rem; }
+    .pick-search { width: 100%; padding: 0.5rem 0.65rem; border: 1px solid var(--line-strong); border-radius: 6px; margin: 0.5rem 0; }
+    .pick-list { list-style: none; margin: 0; padding: 0; }
+    .pick-list li { display: flex; align-items: center; gap: 0.75rem; padding: 0.55rem 0; border-top: 1px solid var(--line); }
+    .pick-list li:first-child { border-top: 0; }
+    .pick-main { flex: 1; min-width: 0; }
+    .pick-main p { margin: 0.15rem 0 0; }
+    .pick-action { flex: none; text-align: right; max-width: 45%; }
+    .pick-action p { margin: 0; }
+    .template-list { list-style: none; margin: 0.5rem 0 0; padding: 0; }
+    .template-pick { border-top: 1px solid var(--line); padding: 0.55rem 0; }
+    .template-pick > summary { cursor: pointer; }
+    .section-title { margin: 1.5rem 0 0.5rem; }
+    .defaults-card > summary { cursor: pointer; list-style: none; }
+    .defaults-card > summary::-webkit-details-marker { display: none; }
+    .defaults-card > summary h2 { display: inline; }
+    .defaults-card > summary::after { content: " ▸"; color: var(--muted); }
+    .defaults-card[open] > summary::after { content: " ▾"; }
+    @media (max-width: 768px) {
+      .pick-list li { flex-wrap: wrap; }
+      .pick-action { max-width: none; width: 100%; text-align: left; padding-left: calc(40px + 0.75rem); }
+    }
     table.list .mono, table.list .sku { white-space: nowrap; }
     .stock-figures { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.75rem; margin-bottom: 0.9rem; }
     .stock-figures div { background: var(--gray-1); border-radius: 10px; padding: 0.7rem 0.85rem; }
@@ -716,10 +748,20 @@
       {% if organization %}
         <div class="nav-section">
           <p class="nav-label">Integrations</p>
-          <a class="nav-link{% if url_name == 'mercadolibre_settings' or url_name == 'mercadolibre_token' %} active{% endif %}" title="Mercado Libre" href="{% url 'mercadolibre_settings' %}">
-            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 2.5v3M10 2.5v3M4.5 5.5h7v3.2a3.5 3.5 0 0 1-7 0zM8 11.7V14"/></svg>
-            <span class="nav-text">Mercado Libre</span>
-          </a>
+          {% with meli_page=url_name|slice:':5' %}
+          <details class="nav-group"{% if meli_page == 'meli_' or url_name|slice:':13' == 'mercadolibre_' %} open{% endif %}>
+            <summary class="nav-link{% if meli_page == 'meli_' or url_name|slice:':13' == 'mercadolibre_' %} current{% endif %}" title="Mercado Libre" data-href="{% if can_open_catalog %}{% url 'meli_listings' %}{% else %}{% url 'mercadolibre_settings' %}{% endif %}">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 2.5v3M10 2.5v3M4.5 5.5h7v3.2a3.5 3.5 0 0 1-7 0zM8 11.7V14"/></svg>
+              <span class="nav-text">Mercado Libre</span>
+              <svg class="chevron nav-text" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m6 4 4 4-4 4"/></svg>
+            </summary>
+            <a class="nav-link nav-sub{% if url_name == 'mercadolibre_settings' or url_name == 'mercadolibre_token' %} active{% endif %}" href="{% url 'mercadolibre_settings' %}"><span class="nav-text">Connect</span></a>
+            {% if can_open_catalog %}
+              <a class="nav-link nav-sub{% if url_name == 'meli_listings' %} active{% endif %}" href="{% url 'meli_listings' %}"><span class="nav-text">Listings</span></a>
+              <a class="nav-link nav-sub{% if meli_page == 'meli_' and url_name != 'meli_listings' %} active{% endif %}" href="{% url 'meli_drafts' %}"><span class="nav-text">Create listing</span></a>
+            {% endif %}
+          </details>
+          {% endwith %}
         </div>
       {% endif %}
       <div class="sidebar-footer">
@@ -790,7 +832,7 @@
       document.addEventListener("keydown", function (event) {
         if (event.key === "Escape") setOpen(false);
       });
-      document.querySelectorAll(".sidebar .nav-link").forEach(function (link) {
+      document.querySelectorAll(".sidebar a.nav-link").forEach(function (link) {
         link.addEventListener("click", function () { setOpen(false); });
       });
       // On a phone the collapse button closes the drawer instead of shrinking it.
@@ -817,6 +859,17 @@
         apply(collapsed);
       });
       if (document.documentElement.classList.contains("sidebar-collapsed")) apply(true);
+    })();
+    (function () {
+      // With the menu shrunk to icons, Mercado Libre is a plain link: there's no room for its pages.
+      var summary = document.querySelector(".nav-group > summary[data-href]");
+      if (!summary) return;
+      summary.addEventListener("click", function (event) {
+        if (!document.documentElement.classList.contains("sidebar-collapsed")) return;
+        if (window.matchMedia("(max-width: 768px)").matches) return;
+        event.preventDefault();
+        window.location.href = summary.dataset.href;
+      });
     })();
     (function () {
       var button = document.querySelector(".alerts");

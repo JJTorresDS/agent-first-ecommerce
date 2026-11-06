@@ -3,9 +3,10 @@
     {% if reason %}
       <p class="{% if package_first %}warn-note{% else %}muted{% endif %}">{{ reason }}{% if package_first %} <a href="#package">Go to Package</a>{% endif %}</p>
     {% else %}
-      <form method="post" action="{% url 'meli_draft_from_combo' combo.pk %}">
+      <form method="post" action="{% url 'meli_draft_from_combo' combo.pk %}" class="head-actions">
         {% csrf_token %}
         <button type="submit" class="primary">Create Mercado Libre listing</button>
+        {% if template %}<button type="submit" name="template" value="{{ template.pk }}" title="Copies the attributes of “{{ template.title }}”">Create from the {{ template.category_id }} template</button>{% endif %}
       </form>
     {% endif %}
   {% endif %}

@@ -3,7 +3,7 @@
 {% block title %}Mercado Libre listings{% endblock %}
 
 {% block content %}
-  {% include "catalog/_tabs.html" %}
+  {% include "meli/_tabs.html" %}
   <div class="page-head">
     <h1>Mercado Libre listings</h1>
   </div>
@@ -31,7 +31,7 @@
         <input id="q" type="search" name="q" value="{{ query }}" placeholder="Item id, title or SKU">
       </div>
       <div>
-        <label for="link">Link</label>
+        <label for="link">Show</label>
         <select id="link" name="link">
           <option value="">All</option>
           {% for value, label in link_states %}<option value="{{ value }}"{% if value == link %} selected{% endif %}>{{ label }}</option>{% endfor %}

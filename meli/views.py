@@ -20,7 +20,6 @@ from accounts.models import can_connect_mercadolibre, membership_for
 
 from cryptography.fernet import InvalidToken
 
-from .alerts import unanswered_count
 from .client import (
     describe_failure,
     exchange_code,
@@ -313,7 +312,6 @@ def _settings_context(membership, meli_error="", access_token=""):
         "access_token": access_token,
         "snippet": _seller_snippet(access_token) if access_token else "",
         "active_tab": "settings",
-        "open_question_count": unanswered_count(membership.organization),
     }
 
 

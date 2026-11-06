@@ -25,6 +25,7 @@ from meli.draft_views import (
     meli_draft_from_combo,
     meli_draft_from_product,
     meli_drafts,
+    meli_listing_pick,
     meli_product_actions,
 )
 from meli.category_views import meli_categories
@@ -76,6 +77,7 @@ urlpatterns = [
     path("catalog/meli/", meli_listings, name="meli_listings"),
     path("catalog/import/", catalog_import, name="catalog_import"),
     path("catalog/meli/new/", meli_drafts, name="meli_drafts"),
+    path("catalog/meli/new/pick/", meli_listing_pick, name="meli_listing_pick"),
     path("catalog/meli/new/<int:pk>/", meli_draft, name="meli_draft"),
     path("catalog/meli/new/<int:pk>/ai/", meli_draft_ai, name="meli_draft_ai"),
     path("catalog/meli/new/<int:pk>/copy/", meli_draft_copy, name="meli_draft_copy"),

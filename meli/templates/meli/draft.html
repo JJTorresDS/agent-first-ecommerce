@@ -3,7 +3,7 @@
 {% block title %}{% if draft.regular %}{{ draft.listed.title }}{% else %}{{ draft.catalog_name|default:draft.listed.sku }}{% endif %}{% endblock %}
 
 {% block content %}
-  {% include "catalog/_tabs.html" %}
+  {% include "meli/_tabs.html" %}
   <div class="page-head">
     <h1>{% if draft.regular %}{{ draft.listed.title }}{% else %}{{ draft.catalog_name|default:draft.catalog_product_id }}{% endif %}</h1>
     <span class="sku sku-lg">{{ draft.listed.sku }}</span>
@@ -64,5 +64,10 @@
       document.body.addEventListener("htmx:afterSwap", apply);
       apply();
     })();
+    // Started from a template: once its attributes are copied, a reload must not copy them again.
+    document.body.addEventListener("htmx:afterRequest", function (event) {
+      if (!/\/copy\/$/.test(event.detail.requestConfig.path)) return;
+      if (window.location.search.indexOf("copy=") >= 0) history.replaceState(null, "", window.location.pathname);
+    });
   </script>
 {% endblock %}

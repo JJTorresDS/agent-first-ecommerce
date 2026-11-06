@@ -31,8 +31,11 @@ def catalog_import(request):
     connected = MercadoLibreAccount.objects.filter(organization=organization).exists()
     context = {"can_edit": True, "connected": connected, "active_tab": "products", "url": "", "error": ""}
     action = request.POST.get("action") if request.method == "POST" else ""
+    # Create listing → From a catalog link sends a link that isn't in Vimple yet: read it straight away.
+    if request.method == "GET" and request.GET.get("url"):
+        action = "read"
     if action == "read" and connected:
-        url = (request.POST.get("url") or "").strip()
+        url = (request.POST.get("url") or request.GET.get("url") or "").strip()
         context["url"] = url
         try:
             values = read(organization, url)

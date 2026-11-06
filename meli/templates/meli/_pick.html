@@ -1,0 +1,32 @@
+{% if rows %}
+  <ul class="pick-list">
+    {% for row in rows %}
+      <li>
+        {% if row.image_url %}<img class="thumb" src="{{ row.image_url }}" alt="" loading="lazy">{% else %}<span class="thumb"></span>{% endif %}
+        <div class="pick-main">
+          <a href="{% if row.is_combo %}{% url 'catalog_combo' row.pk %}{% else %}{% url 'catalog_product' row.pk %}{% endif %}">{{ row.title }}</a>
+          <p class="muted"><span class="sku">{{ row.sku }}</span> {% if row.is_combo %}combo · can make {{ row.stock }}{% else %}{{ row.stock }} in stock{% endif %}{% if template and row.meli_category_id and row.meli_category_id != template.category_id %} · category {{ row.meli_category_id }}, not {{ template.category_id }}{% endif %}</p>
+        </div>
+        <div class="pick-action">
+          {% if row.reason %}
+            <p class="muted">{{ row.reason }} <a href="{% if row.is_combo %}{% url 'catalog_combo' row.pk %}{% else %}{% url 'catalog_product' row.pk %}{% endif %}{% if row.reason == package_first %}#package{% endif %}">Fix it</a></p>
+          {% elif can_edit %}
+            <form method="post" action="{% if row.is_combo %}{% url 'meli_draft_from_combo' row.pk %}{% else %}{% url 'meli_draft_from_product' row.pk %}{% endif %}" class="inline">
+              {% csrf_token %}
+              {% if template %}
+                <button type="submit" name="template" value="{{ template.pk }}" class="primary">Create from template</button>
+              {% else %}
+                <button type="submit" name="kind" value="product" class="primary">Create listing</button>
+                {% if not row.is_combo and row.meli_catalog_product_id %}<button type="submit" name="kind" value="catalog">In its catalog</button>{% endif %}
+              {% endif %}
+            </form>
+          {% endif %}
+        </div>
+      </li>
+    {% endfor %}
+  </ul>
+{% elif query %}
+  <p class="muted">No product or combo matches “{{ query }}”.</p>
+{% else %}
+  <p class="muted">No products in the catalog yet. <a href="{% url 'catalog' %}">Add one</a> or import it from a catalog link below.</p>
+{% endif %}

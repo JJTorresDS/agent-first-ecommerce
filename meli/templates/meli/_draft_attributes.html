@@ -12,6 +12,12 @@
       </div>
     {% endif %}
   </div>
+  {% if copy_pending and ai and can_edit and draft.category_schema and not draft.template %}
+    {# Started from a template: copy its attributes once, as soon as the category's fields are here. #}
+    <p class="muted" id="template-copy" hx-post="{% url 'meli_draft_copy' draft.pk %}" hx-include="#draft-form" hx-vals='{"listing": "{{ copy_pending }}"}' hx-trigger="load" hx-target="#draft-attributes" hx-swap="outerHTML">
+      <span class="spinner htmx-indicator" aria-hidden="true"></span>Copying the template's attributes…
+    </p>
+  {% endif %}
   {% if ai and can_edit and draft.category_schema and not draft.template %}
     <dialog class="modal" id="copy-dialog" aria-labelledby="copy-dialog-title">
       <h2 id="copy-dialog-title">Copy from a listing</h2>
@@ -83,7 +89,7 @@
   {% else %}
     {% if draft.status == "checking" %}
       {# The category's attributes arrive with the first check, in the worker. #}
-      <p class="muted" hx-get="{% url 'meli_draft' draft.pk %}" hx-trigger="every 4s" hx-select="#draft-attributes" hx-target="#draft-attributes" hx-swap="outerHTML">Loading Mercado Libre's attributes for this category…</p>
+      <p class="muted" hx-get="{% url 'meli_draft' draft.pk %}{% if copy_pending %}?copy={{ copy_pending }}{% endif %}" hx-trigger="every 4s" hx-select="#draft-attributes" hx-target="#draft-attributes" hx-swap="outerHTML">Loading Mercado Libre's attributes for this category…</p>
     {% else %}
       <p class="muted">Mercado Libre's attributes show once the draft has a category: enter one and Save and check.</p>
     {% endif %}

@@ -236,7 +236,7 @@ class MercadoLibreConnectTests(TestCase):
         self.assertContains(page, "Connect")
         self.assertContains(page, 'nav-label">Integrations')
         self.assertContains(page, "Mercado Libre")
-        self.assertContains(page, "Settings")
+        self.assertContains(page, 'class="nav-group" open')
         organization = self.client.get("/organization/")
         self.assertNotContains(organization, "Not connected")
         self.assertNotContains(organization, "Create access token")

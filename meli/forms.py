@@ -38,13 +38,20 @@ class CatalogDraftForm(forms.Form):
     """Paste a catalog product URL and pick the Vimple product it sells. The organization comes from the view."""
 
     url = forms.URLField(label="Catalog product URL", max_length=1024, assume_scheme="https")
-    product = StockedProductField(queryset=MasterProduct.objects.none(), label="Vimple product")
+    product = StockedProductField(
+        queryset=MasterProduct.objects.none(),
+        label="Vimple product",
+        required=False,
+        empty_label="The product imported from this link",
+    )
     price = forms.DecimalField(max_digits=14, decimal_places=2, min_value=MIN_PRICE)
     quantity = forms.IntegerField(min_value=1, initial=1)
 
     def __init__(self, *args, organization, stock, **kwargs):
         super().__init__(*args, **kwargs)
+        self.organization = organization
         self.stock = stock
+        self.import_url = ""
         in_stock = [product_id for product_id, units in stock.items() if units > 0]
         field = self.fields["product"]
         field.stock = stock
@@ -65,12 +72,29 @@ class CatalogDraftForm(forms.Form):
 
     def clean(self):
         cleaned = super().clean()
+        if cleaned.get("product") is None and getattr(self, "catalog_product_id", ""):
+            cleaned["product"] = self._product_for_link(cleaned.get("url"))
         product, quantity = cleaned.get("product"), cleaned.get("quantity")
         if product is not None and quantity is not None:
             problem = _quantity_problem(quantity, self.stock.get(product.pk, 0))
             if problem:
                 self.add_error("quantity", problem)
         return cleaned
+
+    def _product_for_link(self, url):
+        """No product picked: the one imported from this catalog page, in this organization."""
+        match = (
+            MasterProduct.objects.filter(organization=self.organization, meli_catalog_product_id=self.catalog_product_id)
+            .exclude(status=MasterProduct.Status.ARCHIVED)
+            .first()
+        )
+        if match is None:
+            self.import_url = url
+            self.add_error("product", "No Vimple product came from this link. Pick one, or import it as a new product.")
+        elif not self.fields["product"].queryset.filter(pk=match.pk).exists():
+            self.add_error("product", f"{match.sku} came from this link but has no stock in the Depósito.")
+            return None
+        return match
 
 
 class DraftForm(forms.ModelForm):

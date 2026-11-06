@@ -100,6 +100,13 @@ Organization is the tenant. Its UUID does not change. The name can.
 - The combo description wand (catalog_ai combo_description) sends Mistral the kit title and, for each line, quantity, title, brand, model description and attributes, read through read_combo_lines (this organization only).
 - Category fields (product, combo, regular draft) load Mercado Libre's top 2 categories for the title from /catalog/meli/categories/ (domain_discovery, cached 10 min) into <datalist id="category-suggestions">: the value is the code, the label the name. catalog.validators.clean_category_id keeps only the leading code ("MLA1271 (Perfumes)" → MLA1271).
 
+## Mercado Libre section
+
+- Everything Mercado Libre sits in one sidebar group (Integrations → Mercado Libre, a <details> with a chevron) and one set of tabs (meli/_tabs.html): Connect (/meli/), Listings (/catalog/meli/) and Create listing (/catalog/meli/new/). Listings and Create listing need the catalog app. Catalog's tabs don't link here; the import page stays under Catalog because it creates a product.
+- Create listing starts a draft three ways, and each ends on the same draft page: from a Vimple product or combo (search, meli_listing_pick, which shows each row's button or the _listable reason with a link to fix it), from a template (pick a ready ListingTemplate, then a product), or from a Mercado Libre catalog link (no product picked: the one whose meli_catalog_product_id matches; none: a link to /catalog/import/?url=…, which reads the link at once).
+- A draft started from a template takes the template's category and opens with ?copy=<listing pk>. Once the first check brings the category's attributes, the page runs Copy from that listing once (the poll keeps ?copy; the URL drops it after the copy). The product and combo pages offer "Create from the <category> template" when one is ready.
+- meli_listing_pick reads stock, connection and inventory once for all rows (_listable's stock, connected, started arguments): more rows, no more queries.
+
 ## Listing templates and attributes
 
 - A regular draft asks for its category's attributes in a guided form built from category_schema (schema_of keeps units, default_unit, hint, hidden): required ones first, the rest under Recommended. A list attribute is a select of Mercado Libre's values; a number_unit one posts its number as attr_value and its unit as unit_<ID>, joined to "30 mL" by posted_attributes. Brand, model, GTIN and their reason come from the product, not from these fields. The form still posts attr_key/attr_value, so the check and build_item read it as before.
