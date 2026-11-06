@@ -17,7 +17,7 @@ def report_draft_error(request, pk):
     from meli.models import ListingDraft
 
     organization = membership_for(request.user).organization
-    draft = get_object_or_404(ListingDraft.objects.select_related("product"), organization=organization, pk=pk)
+    draft = get_object_or_404(ListingDraft.objects.select_related("product", "combo"), organization=organization, pk=pk)
     if not draft.error_details:
         return HttpResponseBadRequest("This draft has nothing to report.")
     settings = settings_of(draft, defaults_for(organization))
@@ -35,7 +35,7 @@ def report_draft_error(request, pk):
             "use_defaults": draft.use_defaults,
             "settings": {name: getattr(settings, name) for name in ListingDraft.SETTING_FIELDS},
         },
-        "product_sku": draft.product.sku,
+        "product_sku": draft.listed().sku,
         "user_product_seller": uses_user_products(organization),
         "page": (request.headers.get("Referer") or "")[:500],
     }

@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block title %}Combos{% endblock %}
+
+{% block content %}
+  {% include "catalog/_tabs.html" %}
+  <div class="page-head">
+    <h1>Combos</h1>
+    {% if can_edit %}<a class="accent" href="{% url 'catalog_combo_new' %}">New combo</a>{% endif %}
+  </div>
+  {% if combos %}
+    <section class="card flush">
+      <div class="table-scroll">
+        <table class="list">
+          <thead><tr><th></th><th>SKU</th><th>Title</th><th>Holds</th><th class="num">Can make</th><th>Status</th></tr></thead>
+          <tbody>
+            {% for combo in combos %}
+              <tr>
+                <td class="thumb-cell"><img class="thumb" src="{{ combo.image_url }}" alt="" loading="lazy"></td>
+                <td><a href="{% url 'catalog_combo' combo.pk %}"><span class="sku">{{ combo.sku }}</span></a></td>
+                <td><a class="row-link" href="{% url 'catalog_combo' combo.pk %}">{{ combo.title }}</a></td>
+                <td class="muted">{% for item in combo.items.all %}{{ item.quantity }} × {{ item.product.sku }}{% if not forloop.last %}, {% endif %}{% endfor %}</td>
+                <td class="num">{{ combo.can_make_now }}</td>
+                <td><span class="pill {{ combo.status }}">{{ combo.get_status_display }}</span></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% else %}
+    <div class="card empty">
+      <p>No combos yet. A combo sells several products as one Mercado Libre listing (a Kit, Pack or Combo); each sale takes every product out of stock.</p>
+    </div>
+  {% endif %}
+{% endblock %}

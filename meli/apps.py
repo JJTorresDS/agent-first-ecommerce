@@ -43,11 +43,12 @@ class MeliConfig(AppConfig):
 
         from django.db.models.signals import post_save
 
-        from catalog.models import MasterProduct
+        from catalog.models import Combo, MasterProduct
 
-        from .listings import link_new_product
+        from .listings import link_new_combo, link_new_product
 
         post_save.connect(link_new_product, sender=MasterProduct, dispatch_uid="meli-link-new-product")
+        post_save.connect(link_new_combo, sender=Combo, dispatch_uid="meli-link-new-combo")
 
         from .jobs import start_postsale_worker
 

@@ -100,7 +100,8 @@ def build_item(draft, settings, user_products=False):
     else:
         sale_terms.append({"id": "WARRANTY_TYPE", "value_id": WARRANTY_TYPE[settings.warranty]})
         sale_terms.append({"id": "WARRANTY_TIME", "value_name": f"{settings.warranty_days} días"})
-    attributes = [{"id": "SELLER_SKU", "value_name": draft.product.sku}]
+    listed = draft.listed()
+    attributes = [{"id": "SELLER_SKU", "value_name": listed.sku}]
     if settings.condition == ListingSettings.Condition.NEW:
         attributes.append({"id": "ITEM_CONDITION", "value_id": CONDITION_NEW})
     else:
@@ -118,21 +119,20 @@ def build_item(draft, settings, user_products=False):
         "shipping": {"mode": "me2", "local_pick_up": False, "free_shipping": Decimal(draft.price) >= FREE_SHIPPING_FROM},
         "attributes": attributes,
     }
-    attributes.extend(package_attributes(draft.product))
+    attributes.extend(package_attributes(listed))
     if draft.kind == ListingDraft.Kind.CATALOG:
         body["catalog_product_id"] = draft.catalog_product_id
         body["catalog_listing"] = True
         # Mercado Libre still requires a title: the catalog product's own name, as its sell flow uses.
         body["title"] = draft.catalog_name
     else:
-        product = draft.product
         # A user-products seller sends family_name and Mercado Libre builds the title;
         # any other seller sends title, and family_name is refused as invalid.
         if user_products:
-            body["family_name"] = product.title
+            body["family_name"] = listed.title
         else:
-            body["title"] = product.title
-        body["pictures"] = [{"source": url} for url in pictures_of(product)]
+            body["title"] = listed.title
+        body["pictures"] = [{"source": url} for url in pictures_of(listed)]
         attributes.extend(product_attributes(draft))
     if draft.category_id:
         body["category_id"] = draft.category_id
@@ -164,8 +164,8 @@ def listed_as_generic(draft):
     """A regular draft whose product has no GTIN goes out as brand Generic, unless the draft names a brand."""
     known = {attribute["id"] for attribute in draft.category_schema or []}
     return (
-        draft.kind == ListingDraft.Kind.PRODUCT
-        and not draft.product.gtin
+        draft.regular()
+        and not draft.listed().gtin
         and "GTIN" in known
         and not (draft.attributes or {}).get("BRAND")
     )
@@ -175,9 +175,25 @@ def package_missing(product):
     return any(getattr(product, field) is None for _, field, _ in PACKAGE)
 
 
-def pictures_of(product):
-    urls = list(product.images.filter(organization_id=product.organization_id).values_list("url", flat=True))
-    return urls or [product.image_url]
+def pictures_of(listed):
+    """A product's pictures in order; a combo has its one picture."""
+    images = getattr(listed, "images", None)
+    urls = list(images.filter(organization_id=listed.organization_id).values_list("url", flat=True)) if images else []
+    return urls or [listed.image_url]
+
+
+def description_of(listed):
+    """The text posted after a regular listing: the combo's own, or the product's model description."""
+    model = getattr(listed, "product_model", None)
+    return ((model.description if model else listed.description) or "").strip()
+
+
+def brand_and_model(listed):
+    """A product's brand and model names; a combo has no brand of its own, so Generic and its title."""
+    model = getattr(listed, "product_model", None)
+    if model is None:
+        return GENERIC_BRAND, listed.title[:255]
+    return model.brand.name, model.name
 
 
 # Sent from their own fields, or never copied from a product's attributes.
@@ -197,10 +213,10 @@ def product_attributes(draft):
 
     Keys are Mercado Libre ids; a product attribute the category doesn't have is not sent.
     """
-    product = draft.product
-    model = product.product_model
+    product = draft.listed()
+    brand, model = brand_and_model(product)
     known = {attribute["id"] for attribute in draft.category_schema or []}
-    values = {"BRAND": model.brand.name, "MODEL": model.name}
+    values = {"BRAND": brand, "MODEL": model}
     if product.gtin:
         values["GTIN"] = product.gtin
     elif "GTIN" in known:
@@ -371,8 +387,15 @@ def _log_refusal(what, draft, error):
     logger.warning("Draft %s %s: %s%s", draft.pk, what, describe_failure(error), codes)
 
 
+def available_for(draft, stock):
+    """Units this draft can sell: the product's Depósito stock, or how many complete combos it makes."""
+    if draft.combo_id:
+        return draft.combo.can_make(stock)
+    return stock.get(draft.product_id, 0)
+
+
 def _stock_problem(draft, stock):
-    available = stock.get(draft.product_id, 0)
+    available = available_for(draft, stock)
     if available < 1:
         return "No stock left in the Depósito."
     if draft.quantity > available:
@@ -384,7 +407,7 @@ def check(organization, draft_ids):
     """Read the catalog product, find the category, and let Mercado Libre validate each draft."""
     drafts = list(
         ListingDraft.objects.filter(organization=organization, pk__in=draft_ids, status=ListingDraft.Status.CHECKING)
-        .select_related("product__product_model__brand")
+        .select_related("product__product_model__brand", "combo")
     )
     if not drafts:
         return
@@ -419,8 +442,8 @@ def _check_one(draft, token, defaults, stock, site, user_products=False):
         if not draft.category_id:
             draft.category_id = _category_for(token, site, product)
     elif not draft.category_id:
-        draft.category_id = draft.product.meli_category_id or _category_for(
-            token, site, {"name": draft.product.title}
+        draft.category_id = draft.listed().meli_category_id or _category_for(
+            token, site, {"name": draft.listed().title}
         )
     if draft.category_id:
         attributes = fetch_category_attributes(token, draft.category_id)
@@ -436,7 +459,7 @@ def _check_one(draft, token, defaults, stock, site, user_products=False):
     if draft.kind != ListingDraft.Kind.CATALOG and not draft.category_id:
         _set(draft, ListingDraft.Status.NEEDS_FIX, "Mercado Libre didn't suggest a category: enter one (MLA…).")
         return
-    if draft.kind != ListingDraft.Kind.CATALOG and package_missing(draft.product):
+    if draft.kind != ListingDraft.Kind.CATALOG and package_missing(draft.listed()):
         _set(
             draft,
             ListingDraft.Status.NEEDS_FIX,
@@ -517,7 +540,7 @@ def publish(organization, draft_ids):
         ).update(status=ListingDraft.Status.PUBLISHING, updated_at=timezone.now())
         if not claimed:
             continue
-        draft = ListingDraft.objects.select_related("product__product_model__brand").get(pk=draft_id)
+        draft = ListingDraft.objects.select_related("product__product_model__brand", "combo").get(pk=draft_id)
         problem = _stock_problem(draft, stock_by_product(organization))
         if problem:
             _set(draft, ListingDraft.Status.FAILED, problem)
@@ -538,7 +561,7 @@ def publish(organization, draft_ids):
         draft.save(update_fields=["item_id", "published_at", "status", "error", "error_details", "updated_at"])
         logger.info("Draft %s posted as %s", draft.pk, draft.item_id)
         notes = []
-        description = draft.product.product_model.description.strip()
+        description = description_of(draft.listed())
         if draft.kind != ListingDraft.Kind.CATALOG and description:
             try:
                 post_item_description(token, draft.item_id, description)
@@ -569,3 +592,35 @@ def _reason(error):
     if isinstance(error, OSError):
         return "Mercado Libre didn't answer. Try again."
     return "Something went wrong. Try again."
+
+
+def refused_attributes(draft):
+    """Category attributes Mercado Libre's last refusal names (UNIT_VOLUME in "Attribute UNIT_VOLUME with value ML…")."""
+    response = (draft.error_details or {}).get("response")
+    if not isinstance(response, dict):
+        return []
+    text = " ".join(
+        f"{cause.get('message', '')} {' '.join(map(str, cause.get('references') or []))}"
+        for cause in response.get("cause") or []
+        if isinstance(cause, dict) and cause.get("type") != "warning"
+    ).upper()
+    named = set(re.findall(r"\b[A-Z0-9_]{3,}\b", text))
+    return [
+        attribute
+        for attribute in draft.category_schema or []
+        if attribute["id"] in named and attribute["id"] not in OWN_ATTRIBUTES and attribute["id"] != "GTIN"
+    ]
+
+
+def attributes_to_fill(draft, body):
+    """What Fill with AI is asked for: missing, refused by the list, named in Mercado Libre's error;
+    else every required attribute, to suggest them again."""
+    current = {attribute["id"]: attribute.get("value_name", "") for attribute in body.get("attributes") or []}
+    asked = {}
+    for item in missing_attributes(draft, body) + invalid_values(draft, body) + refused_attributes(draft):
+        asked.setdefault(item["id"], {**item, "value": item.get("value") or current.get(item["id"], "")})
+    if not asked:
+        for item in draft.category_schema or []:
+            if item.get("required") and item["id"] not in OWN_ATTRIBUTES and item["id"] not in {"BRAND", "MODEL", "GTIN"}:
+                asked[item["id"]] = item
+    return list(asked.values())

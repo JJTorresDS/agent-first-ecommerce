@@ -11,6 +11,7 @@ from .validators import (
     normalize_code,
     validate_attributes,
     validate_brand_code,
+    validate_combo_code,
     validate_category_code,
     validate_currency,
     validate_gtin,
@@ -371,4 +372,126 @@ class ProductImage(TenantModel):
         if self.organization_id is None:
             self.organization_id = self.product.organization_id
         _same_organization(self, "product")
+        super().save(*args, **kwargs)
+
+
+COMBO_WORDS = ("kit", "pack", "combo")
+
+
+class Combo(TenantModel):
+    """Several catalog products sold together as one listing (a Kit, Pack or Combo).
+
+    Its SKU is COMBO-<CODE>, made once and never changed. A sale of its listing takes each
+    component out of stock (inventory.ledger.apply_sale).
+    """
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        ACTIVE = "active", "Active"
+        ARCHIVED = "archived", "Archived"
+
+    code = models.CharField(max_length=10, validators=[validate_combo_code], help_text="Example: 885X2")
+    sku = models.CharField("SKU", max_length=64, blank=True, editable=False)
+    title = models.CharField(max_length=200, help_text="Must say Kit, Pack or Combo: Kit Perfume 885 x2")
+    image_url = models.URLField(
+        max_length=2048,
+        validators=[URLValidator(schemes=["http", "https"])],
+        help_text="The combo's picture. Media is stored outside Vimple.",
+    )
+    list_price = models.DecimalField(
+        max_digits=14, decimal_places=2, null=True, blank=True, validators=[MinValueValidator(0)]
+    )
+    currency = models.CharField(max_length=3, default="ARS", validators=[validate_currency])
+    description = models.TextField(blank=True)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.DRAFT)
+    weight_g = models.PositiveIntegerField("Weight (g)", null=True, blank=True)
+    length_cm = models.DecimalField(
+        "Length (cm)", max_digits=7, decimal_places=1, null=True, blank=True, validators=[MinValueValidator(0)]
+    )
+    width_cm = models.DecimalField(
+        "Width (cm)", max_digits=7, decimal_places=1, null=True, blank=True, validators=[MinValueValidator(0)]
+    )
+    height_cm = models.DecimalField(
+        "Height (cm)", max_digits=7, decimal_places=1, null=True, blank=True, validators=[MinValueValidator(0)]
+    )
+    attributes = models.JSONField(default=dict, blank=True, validators=[validate_attributes])
+    meli_category_id = models.CharField("Mercado Libre category", max_length=32, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "catalog_combo"
+        ordering = ["sku"]
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "sku"], name="uniq_catalog_org_combo_sku"),
+        ]
+
+    def __str__(self):
+        return f"{self.sku} · {self.title}"
+
+    def clean_fields(self, exclude=None):
+        self.code = normalize_code(self.code)
+        super().clean_fields(exclude)
+
+    def _fill(self):
+        self.code = normalize_code(self.code)
+        stored = _stored(self, "code")
+        if stored is None:
+            self.sku = f"COMBO-{self.code}"
+        elif stored != (self.code,):
+            raise ValidationError({"code": "The code makes the SKU, so it can't change. Create a new combo."})
+
+    def clean(self):
+        self._fill()
+        if not any(word in (self.title or "").lower() for word in COMBO_WORDS):
+            raise ValidationError({"title": "Say Kit, Pack or Combo in the title, so buyers know it's several items."})
+        if self.organization_id and MasterProduct.objects.filter(organization_id=self.organization_id, sku=self.sku).exists():
+            raise ValidationError({"code": "A product already has this SKU."})
+        super().clean()
+
+    def save(self, *args, **kwargs):
+        self._fill()
+        super().save(*args, **kwargs)
+
+    @property
+    def gtin(self):
+        """A combo has no barcode of its own, so it lists as brand Generic."""
+        return ""
+
+    def can_make(self, stock):
+        """How many complete combos {product_id: units} allows: the scarcest component decides."""
+        lines = list(self.items.all())
+        if not lines:
+            return 0
+        return max(0, min(stock.get(line.product_id, 0) // line.quantity for line in lines))
+
+
+class ComboItem(TenantModel):
+    """One product in a combo and how many of it each combo holds."""
+
+    combo = models.ForeignKey(Combo, on_delete=models.CASCADE, related_name="items")
+    product = models.ForeignKey(MasterProduct, on_delete=models.PROTECT, related_name="combo_items")
+    quantity = models.PositiveSmallIntegerField(default=1, validators=[MinValueValidator(1)])
+
+    class Meta:
+        db_table = "catalog_combo_item"
+        ordering = ["pk"]
+        constraints = [
+            models.UniqueConstraint(fields=["combo", "product"], name="uniq_catalog_combo_product"),
+        ]
+
+    def __str__(self):
+        return f"{self.quantity} × {self.product.sku}"
+
+    def _check(self):
+        if self.combo_id and self.organization_id is None:
+            self.organization_id = self.combo.organization_id
+        _same_organization(self, "combo", "product")
+
+    def clean(self):
+        self._check()
+        super().clean()
+
+    def save(self, *args, **kwargs):
+        self._check()
         super().save(*args, **kwargs)

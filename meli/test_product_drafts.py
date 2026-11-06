@@ -278,6 +278,46 @@ class ProductDraftTests(DraftTestCase):
         self.assertEqual((draft.kind, draft.catalog_product_id), (ListingDraft.Kind.CATALOG, "MLA46233297"))
 
     @override_settings(MISTRAL_API_KEY="test-key")
+    def test_fill_with_ai_stays_after_a_mercado_libre_refusal_and_asks_about_what_it_named(self):
+        self.create()
+        draft = self.draft()
+        draft.attributes = {"PERFUME_TYPE": "Eau de parfum", "UNIT_VOLUME": "30 mL"}
+        draft.status = ListingDraft.Status.NEEDS_FIX
+        draft.error = "Attribute UNIT_VOLUME with value ML is required and was omitted."
+        draft.error_details = {
+            "call": "POST /items/validate",
+            "response": {"cause": [
+                {"type": "error", "code": "item.attributes.normalizable.invalid",
+                 "message": "Attribute UNIT_VOLUME with value ML is required and was omitted."},
+                {"type": "warning", "code": "x", "message": "PERFUME_TYPE is fine"},
+            ]},
+        }
+        draft.save()
+        page = self.client.get(f"/catalog/meli/new/{draft.pk}/")
+        self.assertContains(page, "Fill with AI")
+        fake = FakeMistral({"UNIT_VOLUME": "30 mL"})
+        with patch("vimple.ai.urlopen", side_effect=fake):
+            self.client.post(
+                f"/catalog/meli/new/{draft.pk}/ai/",
+                {"attr_key": ["PERFUME_TYPE", "UNIT_VOLUME"], "attr_value": ["Eau de parfum", "30 mL"]},
+            )
+        asked = json.loads(fake.asked[0]["messages"][1]["content"])["attributes_to_fill"]
+        self.assertEqual([item["id"] for item in asked], ["UNIT_VOLUME"])
+        self.assertEqual(asked[0]["current_value_refused"], "30 mL")
+
+    @override_settings(MISTRAL_API_KEY="test-key")
+    def test_with_nothing_specific_fill_with_ai_suggests_the_required_attributes_again(self):
+        self.create()
+        draft = self.draft()
+        draft.attributes = {"PERFUME_TYPE": "Eau de parfum"}
+        draft.save()
+        fake = FakeMistral({})
+        with patch("vimple.ai.urlopen", side_effect=fake):
+            self.client.post(f"/catalog/meli/new/{draft.pk}/ai/", {"attr_key": ["PERFUME_TYPE"], "attr_value": ["Eau de parfum"]})
+        asked = [item["id"] for item in json.loads(fake.asked[0]["messages"][1]["content"])["attributes_to_fill"]]
+        self.assertEqual(asked, ["PERFUME_TYPE", "UNIT_VOLUME"])
+
+    @override_settings(MISTRAL_API_KEY="test-key")
     def test_fill_with_ai_also_fixes_a_refused_value_from_the_list(self):
         self.product.gtin = ""
         self.product.save()

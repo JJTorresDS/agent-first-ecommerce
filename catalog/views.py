@@ -2,6 +2,7 @@ import json
 
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
+from django.db import transaction
 from django.db.models import Count, Q
 from django.http import Http404, HttpResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
@@ -12,6 +13,7 @@ from accounts.access import require_app
 from accounts.models import AppAccess, can_edit_products, membership_for, user_can_open
 
 from .forms import (
+    ComboForm,
     BrandForm,
     CategoryForm,
     ProductForm,
@@ -19,9 +21,10 @@ from .forms import (
     VariantForm,
     attribute_rows,
     attributes_from,
+    read_combo_lines,
 )
 from .images import set_images
-from .models import Brand, Category, MasterProduct, ProductModel
+from .models import Brand, Category, Combo, ComboItem, MasterProduct, ProductModel
 from .validators import validate_attributes
 
 PAGE_SIZE = 50
@@ -351,5 +354,73 @@ def codes(request):
             ],
             "can_edit": can_edit,
             "active_tab": "codes",
+        },
+    )
+
+
+def _stock(organization):
+    """{product_id: units in the Depósito}, in one query."""
+    from inventory.ledger import OWN, on_hand_by_product
+
+    return {product_id: max(0, totals.get(OWN, 0)) for product_id, totals in on_hand_by_product(organization).items()}
+
+
+@require_app(AppAccess.App.CATALOG)
+def combos(request):
+    organization, can_edit = _scope(request)
+    rows = list(Combo.objects.filter(organization=organization).prefetch_related("items__product"))
+    stock = _stock(organization)
+    for row in rows:
+        row.can_make_now = row.can_make(stock)
+    return render(request, "catalog/combos.html", {"combos": rows, "can_edit": can_edit, "active_tab": "combos"})
+
+
+@require_app(AppAccess.App.CATALOG)
+def combo_edit(request, pk=None):
+    """A combo and its lines: which products, how many of each. Lines name products by SKU."""
+    organization, can_edit = _scope(request)
+    combo = get_object_or_404(Combo, organization=organization, pk=pk) if pk is not None else None
+    if request.method == "POST" and not can_edit:
+        return HttpResponseForbidden(READ_ONLY)
+    instance = combo or Combo(organization=organization)
+    form = ComboForm(instance=instance)
+    lines = [(item.product, item.quantity) for item in combo.items.select_related("product")] if combo else []
+    line_errors = []
+    if request.method == "POST":
+        form = ComboForm(request.POST, instance=instance)
+        lines, line_errors = read_combo_lines(request.POST, organization)
+        if form.is_valid() and not line_errors:
+            with transaction.atomic():
+                saved = form.save()
+                saved.items.all().delete()
+                ComboItem.objects.bulk_create(
+                    [
+                        ComboItem(organization=organization, combo=saved, product=product, quantity=quantity)
+                        for product, quantity in lines
+                    ]
+                )
+            return redirect(f"{reverse('catalog_combo', args=[saved.pk])}?saved=1")
+    stock = _stock(organization)
+    rows = [{"product": product, "quantity": quantity, "stock": stock.get(product.pk, 0)} for product, quantity in lines]
+    can_make = min((row["stock"] // row["quantity"] for row in rows), default=0) if rows else 0
+    products = (
+        MasterProduct.objects.filter(organization=organization)
+        .exclude(status=MasterProduct.Status.ARCHIVED)
+        .order_by("sku")
+        .only("sku", "title")
+    )
+    return render(
+        request,
+        "catalog/combo.html",
+        {
+            "combo": combo,
+            "form": form,
+            "lines": rows,
+            "line_errors": line_errors,
+            "can_make": can_make,
+            "products": products,
+            "saved": request.GET.get("saved") == "1",
+            "can_edit": can_edit,
+            "active_tab": "combos",
         },
     )

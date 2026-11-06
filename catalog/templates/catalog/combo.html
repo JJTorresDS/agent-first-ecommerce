@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+
+{% block title %}{% if combo %}{{ combo.title }}{% else %}New combo{% endif %}{% endblock %}
+
+{% block content %}
+  {% include "catalog/_tabs.html" %}
+  <div class="page-head">
+    <h1>{% if combo %}{{ combo.title }}{% else %}New combo{% endif %}</h1>
+    {% if combo %}<span class="sku sku-lg">{{ combo.sku }}</span>{% endif %}
+  </div>
+  {% if saved %}<p class="notice">Combo saved.</p>{% endif %}
+
+  <form method="post" id="combo-form">
+    {% csrf_token %}
+    <section class="card">
+      <h2>Combo</h2>
+      {% for error in form.non_field_errors %}<p class="error">{{ error }}</p>{% endfor %}
+      <fieldset class="form-grid"{% if not can_edit %} disabled{% endif %}>
+        {% include "_field.html" with field=form.code %}
+        {% include "_field.html" with field=form.status %}
+        {% include "_field.html" with field=form.title wide=True %}
+        {% include "_field.html" with field=form.image_url wide=True %}
+        {% include "_field.html" with field=form.list_price %}
+        {% include "_field.html" with field=form.currency %}
+        {% include "_field.html" with field=form.description wide=True %}
+        {% include "_field.html" with field=form.meli_category_id %}
+      </fieldset>
+      <h3>Package</h3>
+      <fieldset class="form-grid four"{% if not can_edit %} disabled{% endif %}>
+        {% include "_field.html" with field=form.weight_g %}
+        {% include "_field.html" with field=form.length_cm %}
+        {% include "_field.html" with field=form.width_cm %}
+        {% include "_field.html" with field=form.height_cm %}
+      </fieldset>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>Holds</h2>
+        <p class="muted">Can make <strong id="can-make">{{ can_make }}</strong> from the Depósito stock.</p>
+      </div>
+      {% for error in line_errors %}<p class="error">{{ error }}</p>{% endfor %}
+      <datalist id="combo-products">
+        {% for product in products %}<option value="{{ product.sku }}">{{ product.title }}</option>{% endfor %}
+      </datalist>
+      <fieldset id="combo-lines"{% if not can_edit %} disabled{% endif %}>
+        {% for line in lines %}
+          <div class="attr-row combo-line">
+            <input type="text" name="combo_sku" value="{{ line.product.sku }}" list="combo-products" aria-label="Product SKU">
+            <input type="number" name="combo_quantity" value="{{ line.quantity }}" min="1" max="100" aria-label="Quantity">
+            <span class="muted">{{ line.stock }} in stock</span>
+            {% if can_edit %}<button type="button" class="attr-remove" aria-label="Remove product">×</button>{% endif %}
+          </div>
+        {% endfor %}
+        <template id="combo-line-template">
+          <div class="attr-row combo-line">
+            <input type="text" name="combo_sku" list="combo-products" placeholder="PERF-ONLY-885-30ML" aria-label="Product SKU">
+            <input type="number" name="combo_quantity" value="1" min="1" max="100" aria-label="Quantity">
+            <span class="muted"></span>
+            <button type="button" class="attr-remove" aria-label="Remove product">×</button>
+          </div>
+        </template>
+      </fieldset>
+      {% if can_edit %}<button type="button" id="combo-line-add">Add product</button>{% endif %}
+    </section>
+
+    {% if can_edit %}
+      <div class="actions"><button class="primary" type="submit">{% if combo %}Save combo{% else %}Create combo{% endif %}</button></div>
+    {% endif %}
+  </form>
+
+  {% if combo %}
+    <section class="card">
+      <div class="card-head">
+        <h2>Mercado Libre</h2>
+        <div hx-get="{% url 'meli_combo_actions' combo.pk %}" hx-trigger="load" hx-swap="outerHTML"></div>
+      </div>
+      <p class="muted">A combo is a regular listing with SKU <span class="sku">{{ combo.sku }}</span>. A sale takes each product above out of stock.</p>
+    </section>
+  {% endif %}
+
+  {% if can_edit %}
+    <script>
+      (function () {
+        var box = document.getElementById("combo-lines");
+        var template = document.getElementById("combo-line-template");
+        function add() {
+          var row = template.content.firstElementChild.cloneNode(true);
+          box.appendChild(row);
+          row.querySelector("input").focus();
+        }
+        document.getElementById("combo-line-add").addEventListener("click", add);
+        box.addEventListener("click", function (event) {
+          var remove = event.target.closest(".attr-remove");
+          if (remove) remove.closest(".combo-line").remove();
+        });
+        if (!box.querySelector(".combo-line")) { add(); add(); }
+      })();
+    </script>
+  {% endif %}
+{% endblock %}

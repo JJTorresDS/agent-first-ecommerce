@@ -8,7 +8,14 @@ from accounts.models import AppAccess, can_edit_products, membership_for
 from catalog.forms import attribute_rows, attributes_from
 from catalog.validators import validate_attributes
 
-from .drafts import defaults_for, inventory_started, queue_for_posting, stock_by_product
+from .drafts import (
+    available_for,
+    brand_and_model,
+    defaults_for,
+    inventory_started,
+    queue_for_posting,
+    stock_by_product,
+)
 from .forms import CatalogDraftForm, DraftForm, ListingDefaultsForm
 from .models import ListingDraft, MercadoLibreAccount
 
@@ -65,9 +72,13 @@ def meli_drafts(request):
         queued = queue_for_posting(organization, list(rows.values_list("pk", flat=True)))
         dispatch_drafts(organization, "publish", queued)
         return redirect("meli_drafts")
-    drafts = list(ListingDraft.objects.filter(organization=organization).select_related("product"))
+    drafts = list(
+        ListingDraft.objects.filter(organization=organization).select_related("product", "combo").prefetch_related(
+            "combo__items"
+        )
+    )
     for draft in drafts:
-        draft.stock = stock.get(draft.product_id, 0)
+        draft.stock = available_for(draft, stock)
     context = {
         "drafts": drafts,
         "busy": any(draft.status in ListingDraft.BUSY for draft in drafts),
@@ -91,14 +102,14 @@ def meli_draft(request, pk):
 
     organization, can_edit = _scope(request)
     draft = get_object_or_404(
-        ListingDraft.objects.select_related("product__product_model__brand"), organization=organization, pk=pk
+        ListingDraft.objects.select_related("product__product_model__brand", "combo"), organization=organization, pk=pk
     )
     if request.method == "POST" and not can_edit:
         return HttpResponseForbidden(READ_ONLY)
-    regular = draft.kind == ListingDraft.Kind.PRODUCT
+    regular = draft.regular()
     attributes = dict(draft.attributes or {})
     attributes_error = ""
-    available = stock_by_product(organization).get(draft.product_id, 0)
+    available = available_for(draft, stock_by_product(organization))
     defaults = defaults_for(organization)
     initial = {}
     if draft.use_defaults:
@@ -178,13 +189,19 @@ def _ids(values):
     return ids
 
 
-def _listable(organization, product):
-    """Why this product can't get a listing yet, or "" when it can."""
+def _listable(organization, listed):
+    """Why this product or combo can't get a listing yet, or "" when it can."""
+    from catalog.models import Combo
+
     if not MercadoLibreAccount.objects.filter(organization=organization).exists():
         return "Connect Mercado Libre to list it."
     if not inventory_started(organization):
         return "Count your stock first to list it."
-    if stock_by_product(organization).get(product.pk, 0) < 1:
+    stock = stock_by_product(organization)
+    if isinstance(listed, Combo):
+        if listed.can_make(stock) < 1:
+            return "Not enough stock in the Depósito to make one."
+    elif stock.get(listed.pk, 0) < 1:
         return "No stock in the Depósito to list."
     return ""
 
@@ -253,20 +270,19 @@ def meli_draft_ai(request, pk):
     if not can_edit:
         return HttpResponseForbidden(READ_ONLY)
     draft = get_object_or_404(
-        ListingDraft.objects.select_related("product__product_model__brand"), organization=organization, pk=pk
+        ListingDraft.objects.select_related("product__product_model__brand", "combo"), organization=organization, pk=pk
     )
     if draft.locked():
         return HttpResponseForbidden("Posted drafts can't change.")
     attributes = attributes_from(request.POST)
     draft.attributes = attributes
     missing, wrong = _problems(organization, draft)
-    asked = missing + wrong
+    asked = _to_fill(organization, draft)
     note = ""
     try:
-        product = draft.product
-        filled = fill_attributes(
-            product.title, product.product_model.brand.name, {**product.attributes, **attributes}, asked
-        )
+        listed = draft.listed()
+        brand, _model = brand_and_model(listed)
+        filled = fill_attributes(listed.title, brand, {**listed.attributes, **attributes}, asked)
     except ai.SuggestionFailed:
         filled, note = {}, "The suggestion didn't come through; fill them in yourself."
     if asked and not filled and not note:
@@ -280,11 +296,68 @@ def meli_draft_ai(request, pk):
     )
 
 
+def _to_fill(organization, draft):
+    from .drafts import attributes_to_fill, build_item, settings_of
+
+    if not draft.regular():
+        return []
+    return attributes_to_fill(draft, build_item(draft, settings_of(draft, defaults_for(organization))))
+
+
 def _problems(organization, draft):
     """(missing, wrong) attributes of a regular draft: what Mercado Libre needs, and values not on its list."""
     from .drafts import build_item, invalid_values, missing_attributes, settings_of
 
-    if draft.kind != ListingDraft.Kind.PRODUCT:
+    if not draft.regular():
         return [], []
     body = build_item(draft, settings_of(draft, defaults_for(organization)))
     return missing_attributes(draft, body), invalid_values(draft, body)
+
+
+@require_app(AppAccess.App.CATALOG)
+def meli_combo_actions(request, pk):
+    """The combo page's Mercado Libre button, loaded by htmx so catalog never imports meli."""
+    from catalog.models import Combo
+
+    organization, can_edit = _scope(request)
+    combo = get_object_or_404(Combo, organization=organization, pk=pk)
+    return render(
+        request,
+        "meli/_combo_actions.html",
+        {"combo": combo, "can_edit": can_edit, "reason": _listable(organization, combo)},
+    )
+
+
+@require_app(AppAccess.App.CATALOG)
+@require_POST
+def meli_draft_from_combo(request, pk):
+    """A regular listing draft for one combo, with SELLER_SKU = the combo's SKU."""
+    from catalog.models import Combo
+
+    from .jobs import dispatch_drafts
+
+    organization, can_edit = _scope(request)
+    if not can_edit:
+        return HttpResponseForbidden(READ_ONLY)
+    combo = get_object_or_404(Combo, organization=organization, pk=pk)
+    reason = _listable(organization, combo)
+    if reason:
+        return HttpResponseBadRequest(reason)
+    draft = ListingDraft(
+        organization=organization,
+        kind=ListingDraft.Kind.COMBO,
+        combo=combo,
+        price=combo.list_price or 0,
+        quantity=1,
+        category_id=combo.meli_category_id,
+        created_by=request.user,
+    )
+    if combo.list_price:
+        draft.status = ListingDraft.Status.CHECKING
+        draft.save()
+        dispatch_drafts(organization, "check", [draft.pk])
+    else:
+        draft.status = ListingDraft.Status.NEEDS_FIX
+        draft.error = "Set a price, then Save and check."
+        draft.save()
+    return redirect("meli_draft", pk=draft.pk)

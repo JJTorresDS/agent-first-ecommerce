@@ -263,6 +263,14 @@ class MeliListing(models.Model):
         blank=True,
         related_name="meli_listings",
     )
+    combo = models.ForeignKey(
+        "catalog.Combo",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="meli_listings",
+        help_text="The combo with this SKU, when it isn't a product's. A sale takes each component.",
+    )
     seller_sku = models.CharField(max_length=120, blank=True)
     title = models.CharField(max_length=255, blank=True)
     variation_label = models.CharField(max_length=255, blank=True)
@@ -496,6 +504,7 @@ class ListingDraft(ListingSettings):
     class Kind(models.TextChoices):
         CATALOG = "catalog", "Catalog"
         PRODUCT = "product", "Regular listing"
+        COMBO = "combo", "Combo listing"
 
     class Status(models.TextChoices):
         DRAFT = "draft", "Draft"
@@ -521,6 +530,15 @@ class ListingDraft(ListingSettings):
         "catalog.MasterProduct",
         on_delete=models.PROTECT,
         related_name="listing_drafts",
+        null=True,
+        blank=True,
+    )
+    combo = models.ForeignKey(
+        "catalog.Combo",
+        on_delete=models.PROTECT,
+        related_name="listing_drafts",
+        null=True,
+        blank=True,
     )
     catalog_url = models.URLField(max_length=1024, blank=True)
     catalog_product_id = models.CharField(max_length=32, blank=True)
@@ -567,6 +585,21 @@ class ListingDraft(ListingSettings):
 
     def locked(self):
         return self.status in self.LOCKED
+
+    def regular(self):
+        """A listing Vimple describes itself (product or combo), not one in a catalog product."""
+        return self.kind in (self.Kind.PRODUCT, self.Kind.COMBO)
+
+    def listed(self):
+        """What the listing sells: the combo, else the product."""
+        return self.combo if self.combo_id else self.product
+
+    def listed_url(self):
+        from django.urls import reverse
+
+        if self.combo_id:
+            return reverse("catalog_combo", args=[self.combo_id])
+        return reverse("catalog_product", args=[self.product_id])
 
     def error_details_text(self):
         """error_details as indented JSON, to read on the page and paste elsewhere."""

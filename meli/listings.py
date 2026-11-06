@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 BATCH = 20
 UPDATE_FIELDS = [
     "product",
+    "combo",
     "seller_sku",
     "title",
     "variation_label",
@@ -116,7 +117,7 @@ def store_items(organization, items):
     items maps item_id to the item, or to None for an item Mercado Libre no longer has.
     Variations an item no longer has, and items that are gone, are removed.
     """
-    from catalog.models import MasterProduct
+    from catalog.models import Combo, MasterProduct
 
     now = timezone.now()
     rows = []
@@ -127,10 +128,13 @@ def store_items(organization, items):
     products = dict(
         MasterProduct.objects.filter(organization=organization, sku__in=skus).values_list("sku", "pk")
     )
+    # A SKU no product has may be a combo's (COMBO-…).
+    combos = dict(Combo.objects.filter(organization=organization, sku__in=skus - set(products)).values_list("sku", "pk"))
     listings = [
         MeliListing(
             organization=organization,
             product_id=products.get(row["seller_sku"].strip().upper()),
+            combo_id=combos.get(row["seller_sku"].strip().upper()),
             synced_at=now,
             **row,
         )
@@ -240,6 +244,32 @@ def link_product(product):
 
         apply_pending_sales(product.organization)
     return linked
+
+
+def link_combo(combo):
+    """A new combo takes the unlinked listings that already carry its SKU."""
+    linked = (
+        MeliListing.objects.filter(
+            organization_id=combo.organization_id, product__isnull=True, combo__isnull=True
+        )
+        .filter(seller_sku__iexact=combo.sku)
+        .update(combo=combo)
+    )
+    if linked:
+        from inventory.ledger import apply_pending_sales
+
+        apply_pending_sales(combo.organization)
+    return linked
+
+
+def link_new_combo(sender, instance, created, **kwargs):
+    """post_save on catalog.Combo, registered in meli/apps.py so the catalog stays independent.
+
+    After the commit: the combo page saves its lines in the same transaction, and a waiting
+    sale needs them to take each component.
+    """
+    if created:
+        transaction.on_commit(lambda: link_combo(instance))
 
 
 def link_new_product(sender, instance, created, **kwargs):

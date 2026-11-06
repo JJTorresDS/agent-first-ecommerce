@@ -1,7 +1,7 @@
 """The only place stock changes. Every change is a StockMovement; on-hand is their sum."""
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Sum
+from django.db.models import Q, Sum
 from django.utils import timezone
 
 from .models import InventorySettings, StockLocation, StockMovement
@@ -176,29 +176,48 @@ def receive(purchase, quantities, *, by="", at=None):
 def apply_sale(sale):
     """Take a Mercado Libre sale out of stock, or put it back when it's cancelled.
 
-    Counts only sales after the first stock count, on a listing linked to a product.
+    Counts only sales after the first stock count, on a listing linked to a product or a combo.
+    A combo's sale takes each component (its quantity in the combo times the units sold).
     Each order line is taken once and put back once, whatever arrives how many times.
     """
     listing = sale.listing
     started = settings_for(sale.organization).started_at
-    if listing is None or listing.product_id is None or started is None or sale.sold_at < started:
+    if listing is None or started is None or sale.sold_at < started:
         return False
     units = sale.quantity * max(1, listing.units_per_sale)
+    if listing.product_id is not None:
+        # One movement, keyed as before, so sales already taken keep their key.
+        parts = [(listing.product, units, "")]
+    elif listing.combo_id is not None:
+        parts = [
+            (item.product, units * item.quantity, f":{item.product_id}")
+            for item in listing.combo.items.select_related("product")
+        ]
+    else:
+        return False
+    if not parts:
+        return False
     where = FULL if sale.from_full else OWN
-    key = f"sale:{sale.order_id}:{sale.item_id}:{sale.variation_id}"
-    taken = StockMovement.objects.filter(organization=sale.organization, source_key=key).exists()
-    if sale.counts() and not taken:
-        record(
-            sale.organization, listing.product, Kind.SALE, where, -units,
-            source_key=key, by="Mercado Libre", at=sale.sold_at, note=f"Order {sale.order_id}", meli_sale=sale,
-        )
+    line = f"{sale.order_id}:{sale.item_id}:{sale.variation_id}"
+    taken = StockMovement.objects.filter(
+        organization=sale.organization, source_key=f"sale:{line}{parts[0][2]}"
+    ).exists()
+    if sale.counts():
+        # record skips a key it already has, so a repeat (or a combo cut short) only adds what's missing.
+        for product, quantity, suffix in parts:
+            record(
+                sale.organization, product, Kind.SALE, where, -quantity,
+                source_key=f"sale:{line}{suffix}", by="Mercado Libre", at=sale.sold_at,
+                note=f"Order {sale.order_id}", meli_sale=sale,
+            )
         taken = True
     if sale.cancelled() and taken:
-        record(
-            sale.organization, listing.product, Kind.SALE_CANCEL, where, units,
-            source_key=f"cancel:{sale.order_id}:{sale.item_id}:{sale.variation_id}",
-            by="Mercado Libre", note=f"Order {sale.order_id} cancelled", meli_sale=sale,
-        )
+        for product, quantity, suffix in parts:
+            record(
+                sale.organization, product, Kind.SALE_CANCEL, where, quantity,
+                source_key=f"cancel:{line}{suffix}", by="Mercado Libre",
+                note=f"Order {sale.order_id} cancelled", meli_sale=sale,
+            )
     if taken and not sale.applied:
         sale.applied = True
         sale.save(update_fields=["applied", "updated_at"])
@@ -210,7 +229,9 @@ def apply_pending_sales(organization):
     from meli.models import MeliSale
 
     applied = 0
-    pending = MeliSale.objects.filter(organization=organization, applied=False, listing__product__isnull=False)
+    pending = MeliSale.objects.filter(organization=organization, applied=False).filter(
+        Q(listing__product__isnull=False) | Q(listing__combo__isnull=False)
+    )
     for sale in pending.select_related("listing", "organization"):
         applied += bool(apply_sale(sale))
     return applied

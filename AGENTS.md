@@ -85,6 +85,13 @@ Organization is the tenant. Its UUID does not change. The name can.
 - Purchase lines name products by SKU (purchasing.forms.read_lines), resolved inside the organization; a line id from another purchase is never moved.
 - A + next to a select (category, brand, supplier) opens a dialog outside the page's form. Its view saves with the organization's TenantForm and answers 204 with HX-Trigger select-option-added {select, id, label, dialog}; base.html adds and selects the option. Errors re-render the dialog's form (200).
 
+## Combos
+
+- catalog.Combo sells several products as one Mercado Libre listing. Its SKU is COMBO-<CODE>, built on the first save and never changed (a product SKU has four segments, so the two can't clash; Combo.clean still checks). The title must say Kit, Pack or Combo. ComboItem is one product and its quantity, in the combo's organization; a combo holds at least 2 units. Pages: /catalog/combos/, lines named by SKU (catalog.forms.read_combo_lines).
+- can_make(stock) is how many complete combos the Depósito allows: the scarcest component decides. A combo draft (kind combo) is a regular listing with SELLER_SKU = the combo SKU, quantity capped by can_make, brand Generic and MODEL = its title.
+- The listing sync links a SKU to a product first, else to a combo (MeliListing.combo). A new combo takes unlinked listings with its SKU after its transaction commits, so its lines exist.
+- inventory.ledger.apply_sale on a combo listing writes one movement per component (units × the component's quantity), keyed sale:<order>:<item>:<variation>:<product_id>, and cancel:… to put each back. record skips a key it has, so repeats and a sale cut short are safe. Single-product sales keep their old key.
+
 ## Inventory
 
 - Stock is only ever written as an inventory.StockMovement, through inventory/ledger.py. On-hand is the sum of movements per product and location; never store or edit a stock number.

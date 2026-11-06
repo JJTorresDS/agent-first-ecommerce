@@ -1,7 +1,7 @@
 <div id="draft-attributes" class="wide">
   <div class="card-head">
     <h3>Attributes for this listing</h3>
-    {% if ai and can_edit %}{% if missing or wrong %}
+    {% if ai and can_edit %}{% if draft.category_schema %}
       <button type="button" class="ai-button" hx-post="{% url 'meli_draft_ai' draft.pk %}" hx-include="#draft-form" hx-target="#draft-attributes" hx-swap="outerHTML" hx-sync="this:drop">
         <span class="spinner htmx-indicator" aria-hidden="true"></span>Fill with AI
       </button>

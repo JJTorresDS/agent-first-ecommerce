@@ -4,7 +4,7 @@ from django import forms
 from django.core.exceptions import ValidationError
 from django.db import transaction
 
-from .models import Brand, Category, MasterProduct, ProductModel
+from .models import Brand, Category, Combo, MasterProduct, ProductModel
 from .validators import validate_attributes
 
 
@@ -250,3 +250,56 @@ class ImportForm(forms.Form):
         self.product.save()
         set_images(self.product, self.pictures)
         return self.product
+
+
+class ComboForm(TenantForm):
+    """A combo's own fields. The code makes the SKU, so it's fixed after the first save."""
+
+    checked_fields = ("organization", "sku")
+
+    class Meta:
+        model = Combo
+        fields = [
+            "code", "title", "image_url", "status", "list_price", "currency", "description",
+            "weight_g", "length_cm", "width_cm", "height_cm", "meli_category_id",
+        ]
+        widgets = {"description": forms.Textarea(attrs={"rows": 4})}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance.pk:
+            self.fields["code"].disabled = True
+
+
+MAX_COMBO_UNITS = 100
+
+
+def read_combo_lines(post, organization):
+    """[(product, quantity)] from the combo_sku / combo_quantity rows, and the problems to show.
+
+    Products are found by SKU in this organization only; the same SKU twice adds up.
+    """
+    from collections import OrderedDict
+
+    lines, errors = OrderedDict(), []
+    skus = post.getlist("combo_sku")
+    quantities = post.getlist("combo_quantity")
+    for raw_sku, raw_quantity in zip(skus, quantities):
+        sku = (raw_sku or "").split("·")[0].strip().upper()
+        if not sku:
+            continue
+        try:
+            quantity = int(raw_quantity)
+        except (TypeError, ValueError):
+            quantity = 0
+        if not 1 <= quantity <= MAX_COMBO_UNITS:
+            errors.append(f"{sku}: the quantity must be 1 to {MAX_COMBO_UNITS}.")
+            continue
+        product = MasterProduct.objects.filter(organization=organization, sku=sku).first()
+        if product is None:
+            errors.append(f"{sku}: no product in the catalog has this SKU.")
+            continue
+        lines[product.pk] = (product, lines.get(product.pk, (product, 0))[1] + quantity)
+    if not errors and sum(quantity for _, quantity in lines.values()) < 2:
+        errors.append("A combo holds at least 2 units: two products, or one product twice.")
+    return list(lines.values()), errors

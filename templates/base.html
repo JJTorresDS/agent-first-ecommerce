@@ -503,6 +503,8 @@
     .product-media img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); margin-bottom: 1rem; }
     .product-media h3 { font-size: 0.85rem; color: var(--muted); margin: 1.25rem 0 0.5rem; }
     .attr-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto; gap: 0.5rem; margin-bottom: 0.5rem; }
+    .attr-row.combo-line { grid-template-columns: minmax(0, 1fr) 5rem auto auto; align-items: center; }
+    .combo-line input { width: 100%; padding: 0.5rem 0.6rem; border: 1px solid var(--line-strong); border-radius: 6px; }
     .attr-row input[name="attr_key"] { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; text-transform: uppercase; }
     .attr-remove, .line-remove { width: 2.25rem; padding: 0.4rem 0; line-height: 1; color: var(--muted); }
     kbd { font: inherit; font-size: 0.8em; padding: 0 0.3rem; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--surface); }

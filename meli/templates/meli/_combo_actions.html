@@ -1,0 +1,12 @@
+<div class="listing-actions" id="listing-actions">
+  {% if can_edit %}
+    {% if reason %}
+      <p class="muted">{{ reason }}</p>
+    {% else %}
+      <form method="post" action="{% url 'meli_draft_from_combo' combo.pk %}">
+        {% csrf_token %}
+        <button type="submit" class="primary">Create Mercado Libre listing</button>
+      </form>
+    {% endif %}
+  {% endif %}
+</div>
