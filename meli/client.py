@@ -43,12 +43,16 @@ def exchange_code(code, redirect_uri):
 
 
 class MercadoLibreError(ValueError):
-    """Mercado Libre refused the call. message is its own reason, safe to show."""
+    """Mercado Libre refused the call. message is its own reason, safe to show.
 
-    def __init__(self, message, status=None):
+    payload is its whole answer (parsed JSON, or the text when it isn't JSON), for a closer look.
+    """
+
+    def __init__(self, message, status=None, payload=None):
         super().__init__(message)
         self.message = message
         self.status = status
+        self.payload = payload
 
 
 def describe_failure(error):
@@ -60,11 +64,19 @@ def describe_failure(error):
     return error.__class__.__name__
 
 
-def _error_reason(error):
+def _error_payload(error):
+    """Mercado Libre's answer to a refused call: parsed JSON, else up to 4,000 characters of text."""
     try:
-        payload = json.loads(error.read().decode() or "null")
-    except (OSError, ValueError):
-        payload = None
+        text = error.read().decode(errors="replace")
+    except OSError:
+        return None
+    try:
+        return json.loads(text or "null")
+    except ValueError:
+        return text[:4000]
+
+
+def _error_reason(error, payload=None):
     reason = ""
     if isinstance(payload, dict):
         causes = payload.get("cause")
@@ -93,7 +105,8 @@ def _api_request(access_token, url, payload=None, expect=dict, method=None):
         with urlopen(request, timeout=15) as response:
             parsed = json.loads(response.read().decode() or "null")
     except HTTPError as error:
-        raise MercadoLibreError(_error_reason(error), error.code) from None
+        payload = _error_payload(error)
+        raise MercadoLibreError(_error_reason(error, payload), error.code, payload) from None
     if not isinstance(parsed, expect):
         names = " or ".join(kind.__name__ for kind in (expect if isinstance(expect, tuple) else (expect,)))
         raise ValueError(f"Mercado Libre response was not a {names}.")

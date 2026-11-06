@@ -105,6 +105,7 @@ def meli_draft(request, pk):
             saved = form.save(commit=False)
             saved.status = ListingDraft.Status.CHECKING
             saved.error = ""
+            saved.error_details = {}
             saved.save()
             dispatch_drafts(organization, "check", [saved.pk])
             return redirect("meli_drafts")
@@ -127,7 +128,7 @@ def _recheck(organization, rows):
 
     rows = rows.exclude(status__in=ListingDraft.LOCKED).exclude(status=ListingDraft.Status.CHECKING)
     ids = list(rows.values_list("pk", flat=True))
-    ListingDraft.objects.filter(pk__in=ids).update(status=ListingDraft.Status.CHECKING, error="")
+    ListingDraft.objects.filter(pk__in=ids).update(status=ListingDraft.Status.CHECKING, error="", error_details={})
     dispatch_drafts(organization, "check", ids)
 
 

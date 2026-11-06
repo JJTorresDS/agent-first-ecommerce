@@ -30,11 +30,24 @@ class FakeSellFlow:
         self.validated = []
         self.created = []
         self.refuse = ""
+        self.refuse_text = ""
         self.product_status = "active"
         self.flex_removed = []
 
     def _refused(self, request):
-        body = json.dumps({"message": "Validation error", "error": "validation_error", "cause": [{"message": self.refuse}]})
+        if self.refuse_text:
+            return HTTPError(request.full_url, 502, "Bad Gateway", {}, BytesIO(self.refuse_text.encode()))
+        body = json.dumps(
+            {
+                "message": "Validation error",
+                "error": "validation_error",
+                "status": 400,
+                "cause": [
+                    {"code": "item.shipping.mode.invalid", "message": self.refuse, "references": ["item.shipping.mode"]},
+                    {"code": "item.title.length", "message": "Second cause", "type": "warning"},
+                ],
+            }
+        )
         return HTTPError(request.full_url, 400, "Bad Request", {}, BytesIO(body.encode()))
 
     def __call__(self, request, timeout=15):
@@ -174,6 +187,46 @@ class DraftFlowTests(DraftTestCase):
         draft = self.draft()
         self.assertEqual(draft.status, ListingDraft.Status.NEEDS_FIX)
         self.assertEqual(draft.error, "The price is lower than the minimum allowed.")
+
+    def test_a_refusal_keeps_mercado_libres_whole_answer_and_what_was_sent(self):
+        self.meli.refuse = "User has not mode me1"
+        self.add()
+        draft = self.draft()
+        details = draft.error_details
+        self.assertEqual((details["call"], details["status"]), ("POST /items/validate", 400))
+        self.assertEqual(details["response"]["error"], "validation_error")
+        self.assertEqual([cause["code"] for cause in details["response"]["cause"]], ["item.shipping.mode.invalid", "item.title.length"])
+        self.assertEqual(details["sent"]["shipping"], {"mode": "me2", "local_pick_up": False})
+        self.assertEqual(details["sent"]["catalog_product_id"], CATALOG)
+        for url in ("/catalog/meli/new/", f"/catalog/meli/new/{draft.pk}/"):
+            page = self.client.get(url)
+            self.assertContains(page, "<summary>Details</summary>", html=False)
+            self.assertContains(page, "item.shipping.mode.invalid")
+            self.assertContains(page, f'data-copy-target="error-details-{draft.pk}"')
+        # Checked again and accepted: the details go away.
+        self.meli.refuse = ""
+        self.client.post(
+            f"/catalog/meli/new/{draft.pk}/",
+            {"price": "65000", "quantity": "1", "use_defaults": "on", "condition": "new", "warranty": "seller", "warranty_days": "30"},
+        )
+        draft.refresh_from_db()
+        self.assertEqual((draft.status, draft.error_details), (ListingDraft.Status.READY, {}))
+        self.assertNotContains(self.client.get("/catalog/meli/new/"), "<summary>Details</summary>", html=False)
+
+    def test_an_answer_that_isnt_json_is_kept_as_text(self):
+        self.meli.refuse = "x"
+        self.meli.refuse_text = "<html>Bad gateway</html>"
+        self.add()
+        draft = self.draft()
+        self.assertEqual(draft.error_details["status"], 502)
+        self.assertEqual(draft.error_details["response"], "<html>Bad gateway</html>")
+
+    def test_a_refused_post_keeps_its_details_too(self):
+        self.add()
+        self.meli.refuse = "Item is already listed in this catalog product."
+        self.client.post("/catalog/meli/new/", {"action": "post_all"})
+        details = self.draft().error_details
+        self.assertEqual((details["call"], details["sent"]["available_quantity"]), ("POST /items", 1))
 
     def test_an_inactive_catalog_product_needs_a_fix(self):
         self.meli.product_status = "inactive"

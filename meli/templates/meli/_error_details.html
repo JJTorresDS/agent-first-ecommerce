@@ -1,0 +1,7 @@
+{% if draft.error_details %}
+  <details class="error-details">
+    <summary>Details</summary>
+    <pre id="error-details-{{ draft.pk }}">{{ draft.error_details_text }}</pre>
+    <button type="button" data-copy-target="error-details-{{ draft.pk }}">Copy</button>
+  </details>
+{% endif %}

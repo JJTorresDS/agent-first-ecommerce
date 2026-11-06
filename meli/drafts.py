@@ -136,10 +136,28 @@ def _token(organization):
     return account.fresh_access_token()
 
 
-def _set(draft, status, error=""):
+def _set(draft, status, error="", details=None):
     draft.status = status
     draft.error = (error or "")[:500]
-    draft.save(update_fields=["status", "error", "updated_at"])
+    draft.error_details = details or {}
+    draft.save(update_fields=["status", "error", "error_details", "updated_at"])
+
+
+def _details(call, body, error):
+    """What to show under a refused draft: the call, Mercado Libre's whole answer, and what was sent."""
+    if not isinstance(error, MercadoLibreError):
+        return {}
+    return {"call": call, "status": error.status, "response": error.payload, "sent": body}
+
+
+def _log_refusal(what, draft, error):
+    """One log line with Mercado Libre's error and cause codes, never a token."""
+    payload = getattr(error, "payload", None)
+    codes = ""
+    if isinstance(payload, dict):
+        causes = [cause.get("code") for cause in payload.get("cause") or [] if isinstance(cause, dict)]
+        codes = f" (error={payload.get('error')}, causes={causes})"
+    logger.warning("Draft %s %s: %s%s", draft.pk, what, describe_failure(error), codes)
 
 
 def _stock_problem(draft, stock):
@@ -173,8 +191,8 @@ def check(organization, draft_ids):
         try:
             _check_one(draft, token, defaults, stock, site)
         except Exception as error:
-            logger.warning("Draft %s check failed: %s", draft.pk, describe_failure(error))
-            _set(draft, ListingDraft.Status.NEEDS_FIX, _reason(error))
+            _log_refusal("check failed", draft, error)
+            _set(draft, ListingDraft.Status.NEEDS_FIX, _reason(error), getattr(error, "details", None))
 
 
 def _check_one(draft, token, defaults, stock, site):
@@ -196,7 +214,12 @@ def _check_one(draft, token, defaults, stock, site):
     if problem:
         _set(draft, ListingDraft.Status.NEEDS_FIX, problem)
         return
-    validate_item(token, build_item(draft, settings_of(draft, defaults)))
+    body = build_item(draft, settings_of(draft, defaults))
+    try:
+        validate_item(token, body)
+    except MercadoLibreError as error:
+        error.details = _details("POST /items/validate", body, error)
+        raise
     _set(draft, ListingDraft.Status.READY)
 
 
@@ -224,7 +247,7 @@ def queue_for_posting(organization, draft_ids):
             .values_list("pk", flat=True)
         )
         ListingDraft.objects.filter(pk__in=ids).update(
-            status=ListingDraft.Status.QUEUED, error="", updated_at=timezone.now()
+            status=ListingDraft.Status.QUEUED, error="", error_details={}, updated_at=timezone.now()
         )
     return ids
 
@@ -256,17 +279,19 @@ def publish(organization, draft_ids):
             _set(draft, ListingDraft.Status.FAILED, problem)
             continue
         settings = settings_of(draft, defaults)
+        body = build_item(draft, settings)
         try:
-            item = create_item(token, build_item(draft, settings))
+            item = create_item(token, body)
         except Exception as error:
-            logger.warning("Draft %s could not be posted: %s", draft.pk, describe_failure(error))
-            _set(draft, ListingDraft.Status.FAILED, _reason(error))
+            _log_refusal("could not be posted", draft, error)
+            _set(draft, ListingDraft.Status.FAILED, _reason(error), _details("POST /items", body, error))
             continue
         draft.item_id = str(item.get("id") or "")[:32]
         draft.published_at = timezone.now()
         draft.status = ListingDraft.Status.PUBLISHED
         draft.error = ""
-        draft.save(update_fields=["item_id", "published_at", "status", "error", "updated_at"])
+        draft.error_details = {}
+        draft.save(update_fields=["item_id", "published_at", "status", "error", "error_details", "updated_at"])
         logger.info("Draft %s posted as %s", draft.pk, draft.item_id)
         notes = []
         tags = ((item.get("shipping") or {}).get("tags")) or []

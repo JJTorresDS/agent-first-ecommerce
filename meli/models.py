@@ -532,6 +532,11 @@ class ListingDraft(ListingSettings):
     use_defaults = models.BooleanField(default=True)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.DRAFT)
     error = models.CharField(max_length=500, blank=True)
+    error_details = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Mercado Libre's whole answer to a refused check or post, and the body Vimple sent. Never a token.",
+    )
     item_id = models.CharField(max_length=32, blank=True)
     published_at = models.DateTimeField(null=True, blank=True)
     created_by = models.ForeignKey(
@@ -551,6 +556,14 @@ class ListingDraft(ListingSettings):
 
     def locked(self):
         return self.status in self.LOCKED
+
+    def error_details_text(self):
+        """error_details as indented JSON, to read on the page and paste elsewhere."""
+        if not self.error_details:
+            return ""
+        import json
+
+        return json.dumps(self.error_details, indent=2, ensure_ascii=False, default=str)
 
     def item_url(self):
         return f"https://articulo.mercadolibre.com.ar/{self.item_id[:3]}-{self.item_id[3:]}" if self.item_id else ""

@@ -19,6 +19,7 @@
                 <td>
                   <a href="{{ draft.catalog_url }}" target="_blank" rel="noopener">{{ draft.catalog_name|default:draft.catalog_product_id }}</a>
                   {% if draft.error %}<p class="{% if draft.status == 'published' %}muted{% else %}error{% endif %}">{{ draft.error }}</p>{% endif %}
+                  {% include "meli/_error_details.html" %}
                 </td>
                 <td class="num">ARS {{ draft.price }}</td>
                 <td class="num">{{ draft.quantity }} / {{ draft.stock }}</td>
