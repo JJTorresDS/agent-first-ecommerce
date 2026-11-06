@@ -118,6 +118,7 @@ def build_item(draft, settings, user_products=False):
         "shipping": {"mode": "me2", "local_pick_up": False, "free_shipping": Decimal(draft.price) >= FREE_SHIPPING_FROM},
         "attributes": attributes,
     }
+    attributes.extend(package_attributes(draft.product))
     if draft.kind == ListingDraft.Kind.CATALOG:
         body["catalog_product_id"] = draft.catalog_product_id
         body["catalog_listing"] = True
@@ -135,7 +136,32 @@ def build_item(draft, settings, user_products=False):
         attributes.extend(product_attributes(draft))
     if draft.category_id:
         body["category_id"] = draft.category_id
+    # One value per attribute: the draft's own, added last, wins.
+    body["attributes"] = list({attribute["id"]: attribute for attribute in attributes}.values())
     return body
+
+
+# Mercado Libre's seller package attributes, from the product's Package fields.
+PACKAGE = (
+    ("SELLER_PACKAGE_HEIGHT", "height_cm", "cm"),
+    ("SELLER_PACKAGE_WIDTH", "width_cm", "cm"),
+    ("SELLER_PACKAGE_LENGTH", "length_cm", "cm"),
+    ("SELLER_PACKAGE_WEIGHT", "weight_g", "g"),
+)
+
+
+def package_attributes(product):
+    """"17 cm", "310 g": the formats Mercado Libre's own listings use. Fields left empty are skipped."""
+    attributes = []
+    for attribute_id, field, unit in PACKAGE:
+        value = getattr(product, field)
+        if value is not None:
+            attributes.append({"id": attribute_id, "value_name": f"{_number(value)} {unit}"})
+    return attributes
+
+
+def package_missing(product):
+    return any(getattr(product, field) is None for _, field, _ in PACKAGE)
 
 
 def pictures_of(product):
@@ -144,7 +170,7 @@ def pictures_of(product):
 
 
 # Sent from their own fields, or never copied from a product's attributes.
-OWN_ATTRIBUTES = {"SELLER_SKU", "ITEM_CONDITION", REGULATORY}
+OWN_ATTRIBUTES = {"SELLER_SKU", "ITEM_CONDITION", REGULATORY, *(attribute_id for attribute_id, _, _ in PACKAGE)}
 
 
 def _text(value):
@@ -176,13 +202,28 @@ def product_attributes(draft):
 
 
 def missing_attributes(draft, body):
-    """The category's required attributes the body doesn't have: [{id, name, values}]."""
+    """The category's required attributes the body doesn't have: [{id, name, values}].
+
+    GTIN is required only conditionally: without a barcode, the reason (EMPTY_GTIN_REASON) has to be given.
+    """
+    schema = draft.category_schema or []
     sent = {attribute["id"] for attribute in body.get("attributes") or []}
-    return [
+    missing = [
         attribute
-        for attribute in draft.category_schema or []
+        for attribute in schema
         if attribute.get("required") and attribute["id"] not in sent and attribute["id"] not in OWN_ATTRIBUTES
     ]
+    ids = {attribute["id"] for attribute in schema}
+    if "GTIN" in ids and not sent & {"GTIN", "EMPTY_GTIN_REASON"} and not any(item["id"] == "GTIN" for item in missing):
+        reason = next((attribute for attribute in schema if attribute["id"] == "EMPTY_GTIN_REASON"), {})
+        missing.append(
+            {
+                "id": "EMPTY_GTIN_REASON",
+                "name": "Why it has no GTIN (or add the GTIN to the product)",
+                "values": reason.get("values") or [],
+            }
+        )
+    return missing
 
 
 def schema_of(attributes):
@@ -198,12 +239,13 @@ def schema_of(attributes):
             continue
         required = bool(tags.get("required"))
         values = [str(value.get("name")) for value in attribute.get("values") or [] if isinstance(value, dict) and value.get("name")]
+        keep_values = required or attribute["id"] == "EMPTY_GTIN_REASON"
         schema.append(
             {
                 "id": str(attribute["id"])[:60],
                 "name": str(attribute.get("name") or attribute["id"])[:100],
                 "required": required,
-                "values": values[:60] if required else [],
+                "values": values[:60] if keep_values else [],
             }
         )
     return schema
@@ -326,6 +368,13 @@ def _check_one(draft, token, defaults, stock, site, user_products=False):
         return
     if draft.kind != ListingDraft.Kind.CATALOG and not draft.category_id:
         _set(draft, ListingDraft.Status.NEEDS_FIX, "Mercado Libre didn't suggest a category: enter one (MLA…).")
+        return
+    if draft.kind != ListingDraft.Kind.CATALOG and package_missing(draft.product):
+        _set(
+            draft,
+            ListingDraft.Status.NEEDS_FIX,
+            "Mercado Libre needs the package weight and size: fill in Package on the product, then Save and check.",
+        )
         return
     body = build_item(draft, settings_of(draft, defaults), user_products)
     missing = missing_attributes(draft, body) if draft.kind != ListingDraft.Kind.CATALOG else []

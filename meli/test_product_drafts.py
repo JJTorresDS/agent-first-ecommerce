@@ -24,6 +24,9 @@ PERFUME_ATTRIBUTES = [
     {"id": "OLFACTORY_NOTES", "name": "Notas olfativas", "tags": {}},
     {"id": "155_98_RESOLUTION_FILE_NUMBER", "name": "Legajo", "tags": {"required": True}},
     {"id": "SHIPMENT_PACKING", "name": "Embalaje", "tags": {"read_only": True, "required": True}},
+    {"id": "GTIN", "name": "Código universal de producto", "tags": {"conditional_required": True}},
+    {"id": "EMPTY_GTIN_REASON", "name": "Motivo de GTIN vacío", "tags": {},
+     "values": [{"id": "17055160", "name": "El producto no tiene código registrado"}, {"id": "17055161", "name": "Otra razón"}]},
 ]
 
 
@@ -35,6 +38,10 @@ class ProductDraftTests(DraftTestCase):
         self.product.gtin = "7798123456789"
         self.product.meli_category_id = "MLA1271"
         self.product.attributes = {"UNIT_VOLUME": "30 mL", "OLFACTORY_NOTES": ["Amaderado", "Cítrico"], "FOR_US_ONLY": "x"}
+        self.product.weight_g = 310
+        self.product.height_cm = Decimal("17.0")
+        self.product.width_cm = Decimal("7.5")
+        self.product.length_cm = Decimal("3.0")
         self.product.save()
         model = self.product.product_model
         model.description = "Eau de parfum amaderada de 30 ml."
@@ -66,7 +73,7 @@ class ProductDraftTests(DraftTestCase):
         self.assertEqual(draft.error, "Missing: Tipo de perfume. Add them below.")
         self.assertEqual(self.meli.validated, [])
         page = self.client.get(f"/catalog/meli/new/{draft.pk}/")
-        self.assertContains(page, "<strong>Tipo de perfume</strong> (PERFUME_TYPE)", html=False)
+        self.assertContains(page, '<strong>Tipo de perfume</strong> <span class="mono">PERFUME_TYPE</span>: one of Eau de parfum, Eau de toilette', html=False)
         self.assertContains(page, 'value="PERFUME_TYPE"')
 
     def test_the_body_sends_pictures_brand_model_and_only_attributes_the_category_knows(self):
@@ -86,6 +93,10 @@ class ProductDraftTests(DraftTestCase):
         self.assertEqual(sent["OLFACTORY_NOTES"], "Amaderado, Cítrico")
         self.assertEqual(sent["SELLER_SKU"], self.product.sku)
         self.assertNotIn("FOR_US_ONLY", sent)
+        self.assertEqual(
+            [sent[key] for key in ("SELLER_PACKAGE_HEIGHT", "SELLER_PACKAGE_WIDTH", "SELLER_PACKAGE_LENGTH", "SELLER_PACKAGE_WEIGHT")],
+            ["17 cm", "7.5 cm", "3 cm", "310 g"],
+        )
         self.assertEqual([item["id"] for item in missing_attributes(draft, body)], ["PERFUME_TYPE"])
 
     def test_a_user_products_seller_sends_family_name_instead_of_title(self):
@@ -98,6 +109,37 @@ class ProductDraftTests(DraftTestCase):
         body = build_item(self.draft(), defaults_for(self.organization), uses_user_products(self.organization))
         self.assertEqual(body["family_name"], self.product.title)
         self.assertNotIn("title", body)
+
+    def test_without_the_package_size_the_check_stops_before_mercado_libre(self):
+        self.product.width_cm = None
+        self.product.save()
+        self.create()
+        draft = self.draft()
+        self.assertEqual(draft.status, ListingDraft.Status.NEEDS_FIX)
+        self.assertIn("package weight and size", draft.error)
+        self.assertEqual(self.meli.validated, [])
+
+    def test_without_a_gtin_the_reason_is_asked_for_with_its_choices(self):
+        self.product.gtin = ""
+        self.product.save()
+        self.create()
+        draft = self.draft()
+        self.assertIn("Why it has no GTIN", draft.error)
+        page = self.client.get(f"/catalog/meli/new/{draft.pk}/")
+        self.assertContains(page, "one of El producto no tiene código registrado, Otra razón")
+        self.assertContains(page, 'value="EMPTY_GTIN_REASON"')
+        self.client.post(
+            f"/catalog/meli/new/{draft.pk}/",
+            {
+                "price": "15999", "quantity": "1", "category_id": "MLA1271", "use_defaults": "on",
+                "condition": "new", "warranty": "seller", "warranty_days": "30",
+                "attr_key": ["PERFUME_TYPE", "EMPTY_GTIN_REASON"], "attr_value": ["Eau de parfum", "Otra razón"],
+            },
+        )
+        draft.refresh_from_db()
+        self.assertEqual(draft.status, ListingDraft.Status.READY, draft.error)
+        self.assertIn({"id": "EMPTY_GTIN_REASON", "value_name": "Otra razón"}, self.meli.validated[-1]["attributes"])
+        self.assertNotIn("GTIN", [attribute["id"] for attribute in self.meli.validated[-1]["attributes"]])
 
     def test_read_only_attributes_are_never_asked_for(self):
         ids = [item["id"] for item in schema_of(PERFUME_ATTRIBUTES)]

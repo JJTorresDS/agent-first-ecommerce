@@ -7,7 +7,14 @@
       </button>
     {% endif %}
   </div>
-  {% if missing %}<p class="muted">Mercado Libre needs: {% for item in missing %}<strong>{{ item.name }}</strong> ({{ item.id }}){% if not forloop.last %}, {% endif %}{% endfor %}.</p>{% endif %}
+  {% if missing %}
+    <p class="muted">Mercado Libre needs:</p>
+    <ul class="plain lines missing-attributes">
+      {% for item in missing %}
+        <li><strong>{{ item.name }}</strong> <span class="mono">{{ item.id }}</span>{% if item.values %}: one of {{ item.values|join:", " }}{% endif %}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
   {% if ai_note %}<p class="muted">{{ ai_note }}</p>{% endif %}
   <p class="muted">These win over the product's attributes for this listing only. Brand, model, GTIN and the product's attributes the category knows are sent too.</p>
   {% if attributes_error %}<p class="error">{{ attributes_error }}</p>{% endif %}
