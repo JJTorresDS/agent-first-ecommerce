@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load l10n %}
 
 {% block title %}{% if combo %}{{ combo.title }}{% else %}New combo{% endif %}{% endblock %}
 
@@ -23,14 +24,26 @@
         {% include "_field.html" with field=form.list_price %}
         {% include "_field.html" with field=form.currency %}
         {% include "_field.html" with field=form.description wide=True %}
+        {% if ai %}
+          <div class="wide ai-row">
+            <button type="button" class="ai-button" aria-label="Write the description with AI from the products' own descriptions"
+              hx-post="{% url 'catalog_ai' 'combo_description' %}" hx-include="#combo-form" hx-swap="none" hx-sync="this:drop"
+              data-ai-note="ai-note" data-ai-map='{"description": "id_description"}'>
+              <span class="spinner htmx-indicator" aria-hidden="true"></span><span aria-hidden="true">✨</span> Write with AI
+            </button>
+            <p class="muted" id="ai-note" hidden></p>
+          </div>
+        {% endif %}
         {% include "_field.html" with field=form.meli_category_id %}
+        <div class="category-loader" hx-get="{% url 'meli_categories' %}" hx-trigger="load, input changed delay:600ms from:#id_title" hx-include="#id_title" hx-target="this" hx-swap="innerHTML"></div>
       </fieldset>
-      <h3>Package</h3>
+      <h3 id="package">Package</h3>
+      <p class="{% if package_flags %}warn-note{% else %}muted{% endif %} package-note">Mercado Libre needs the package weight and size to post{% if package_flags %}, so this can't be listed yet{% endif %}. Measure the packed item: wrong values lead to fines, shipping overcharges and buyer claims.</p>
       <fieldset class="form-grid four"{% if not can_edit %} disabled{% endif %}>
-        {% include "_field.html" with field=form.weight_g %}
-        {% include "_field.html" with field=form.length_cm %}
-        {% include "_field.html" with field=form.width_cm %}
-        {% include "_field.html" with field=form.height_cm %}
+        {% include "_field.html" with field=form.weight_g attention=package_flags.weight_g %}
+        {% include "_field.html" with field=form.length_cm attention=package_flags.length_cm %}
+        {% include "_field.html" with field=form.width_cm attention=package_flags.width_cm %}
+        {% include "_field.html" with field=form.height_cm attention=package_flags.height_cm %}
       </fieldset>
     </section>
 
@@ -39,9 +52,14 @@
         <h2>Holds</h2>
         <p class="muted">Can make <strong id="can-make">{{ can_make }}</strong> from the Depósito stock.</p>
       </div>
+      <p class="muted price-suggestion" id="price-suggestion" hidden>
+        Suggested price <strong id="price-suggested"></strong>: the products' list prices minus 15%.
+        {% if can_edit %}<button type="button" class="link-button" id="price-use">Use it</button>{% endif %}
+        <span id="price-missing"></span>
+      </p>
       {% for error in line_errors %}<p class="error">{{ error }}</p>{% endfor %}
       <datalist id="combo-products">
-        {% for product in products %}<option value="{{ product.sku }}">{{ product.title }}</option>{% endfor %}
+        {% for product in products %}<option value="{{ product.sku }}" data-price="{{ product.list_price|default_if_none:''|unlocalize }}">{{ product.title }}</option>{% endfor %}
       </datalist>
       <fieldset id="combo-lines"{% if not can_edit %} disabled{% endif %}>
         {% for line in lines %}
@@ -95,6 +113,45 @@
           if (remove) remove.closest(".combo-line").remove();
         });
         if (!box.querySelector(".combo-line")) { add(); add(); }
+
+        // Suggested price: the products' list prices (times their quantity) minus 15%. It fills the
+        // price while the user hasn't typed their own; "Use it" puts it back. The server never recalculates.
+        var DISCOUNT = 0.15;
+        var price = document.getElementById("id_list_price");
+        var hint = document.getElementById("price-suggestion");
+        var shown = document.getElementById("price-suggested");
+        var missingNote = document.getElementById("price-missing");
+        var products = document.getElementById("combo-products");
+        var touched = !!(price && price.value);
+        var suggested = 0;
+        function listPrice(sku) {
+          var option = Array.prototype.find.call(products.options, function (item) { return item.value === sku; });
+          var value = option ? parseFloat(option.getAttribute("data-price")) : NaN;
+          return isNaN(value) ? null : value;
+        }
+        function suggest() {
+          var total = 0;
+          var missing = [];
+          box.querySelectorAll(".combo-line").forEach(function (row) {
+            var sku = (row.querySelector('[name="combo_sku"]').value || "").split("·")[0].trim().toUpperCase();
+            var quantity = parseInt(row.querySelector('[name="combo_quantity"]').value, 10) || 0;
+            if (!sku || quantity < 1) return;
+            var each = listPrice(sku);
+            if (each === null) { missing.push(sku); return; }
+            total += each * quantity;
+          });
+          suggested = Math.round(total * (1 - DISCOUNT));
+          hint.hidden = !suggested;
+          shown.textContent = "ARS " + suggested.toLocaleString("es-AR");
+          missingNote.textContent = missing.length ? "Left out (no list price): " + missing.join(", ") + "." : "";
+          if (suggested && price && !touched) price.value = suggested;
+        }
+        if (price) price.addEventListener("input", function (event) { if (event.isTrusted) touched = true; });
+        var use = document.getElementById("price-use");
+        if (use) use.addEventListener("click", function () { touched = false; suggest(); });
+        box.addEventListener("input", suggest);
+        box.addEventListener("click", function (event) { if (event.target.closest(".attr-remove")) setTimeout(suggest); });
+        suggest();
       })();
     </script>
   {% endif %}

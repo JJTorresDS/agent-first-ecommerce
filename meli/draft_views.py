@@ -9,6 +9,7 @@ from catalog.forms import attribute_rows, attributes_from
 from catalog.validators import validate_attributes
 
 from .drafts import (
+    package_missing,
     available_for,
     brand_and_model,
     defaults_for,
@@ -189,6 +190,14 @@ def _ids(values):
     return ids
 
 
+PACKAGE_FIRST = "Fill in the package weight and size first."
+
+
+def _actions_context(organization, listed, can_edit, **objects):
+    reason = _listable(organization, listed)
+    return {**objects, "can_edit": can_edit, "reason": reason, "package_first": reason == PACKAGE_FIRST}
+
+
 def _listable(organization, listed):
     """Why this product or combo can't get a listing yet, or "" when it can."""
     from catalog.models import Combo
@@ -197,6 +206,10 @@ def _listable(organization, listed):
         return "Connect Mercado Libre to list it."
     if not inventory_started(organization):
         return "Count your stock first to list it."
+    if not listed.list_price:
+        return "Set a price first."
+    if package_missing(listed):
+        return PACKAGE_FIRST
     stock = stock_by_product(organization)
     if isinstance(listed, Combo):
         if listed.can_make(stock) < 1:
@@ -216,7 +229,7 @@ def meli_product_actions(request, pk):
     return render(
         request,
         "meli/_product_actions.html",
-        {"product": product, "can_edit": can_edit, "reason": _listable(organization, product)},
+        _actions_context(organization, product, can_edit, product=product),
     )
 
 
@@ -240,7 +253,7 @@ def meli_draft_from_product(request, pk):
         organization=organization,
         kind=ListingDraft.Kind.CATALOG if in_catalog else ListingDraft.Kind.PRODUCT,
         product=product,
-        price=product.list_price or 0,
+        price=product.list_price,
         quantity=1,
         category_id=product.meli_category_id,
         created_by=request.user,
@@ -248,14 +261,9 @@ def meli_draft_from_product(request, pk):
     if in_catalog:
         draft.catalog_product_id = product.meli_catalog_product_id
         draft.catalog_url = f"https://www.mercadolibre.com.ar/p/{product.meli_catalog_product_id}"
-    if product.list_price:
-        draft.status = ListingDraft.Status.CHECKING
-        draft.save()
-        dispatch_drafts(organization, "check", [draft.pk])
-    else:
-        draft.status = ListingDraft.Status.NEEDS_FIX
-        draft.error = "Set a price, then Save and check."
-        draft.save()
+    draft.status = ListingDraft.Status.CHECKING
+    draft.save()
+    dispatch_drafts(organization, "check", [draft.pk])
     return redirect("meli_draft", pk=draft.pk)
 
 
@@ -324,7 +332,7 @@ def meli_combo_actions(request, pk):
     return render(
         request,
         "meli/_combo_actions.html",
-        {"combo": combo, "can_edit": can_edit, "reason": _listable(organization, combo)},
+        _actions_context(organization, combo, can_edit, combo=combo),
     )
 
 
@@ -347,17 +355,12 @@ def meli_draft_from_combo(request, pk):
         organization=organization,
         kind=ListingDraft.Kind.COMBO,
         combo=combo,
-        price=combo.list_price or 0,
+        price=combo.list_price,
         quantity=1,
         category_id=combo.meli_category_id,
         created_by=request.user,
     )
-    if combo.list_price:
-        draft.status = ListingDraft.Status.CHECKING
-        draft.save()
-        dispatch_drafts(organization, "check", [draft.pk])
-    else:
-        draft.status = ListingDraft.Status.NEEDS_FIX
-        draft.error = "Set a price, then Save and check."
-        draft.save()
+    draft.status = ListingDraft.Status.CHECKING
+    draft.save()
+    dispatch_drafts(organization, "check", [draft.pk])
     return redirect("meli_draft", pk=draft.pk)

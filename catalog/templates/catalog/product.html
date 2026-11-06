@@ -42,14 +42,16 @@
           {% include "_field.html" with field=form.currency %}
           {% include "_field.html" with field=form.meli_catalog_product_id %}
           {% include "_field.html" with field=form.meli_category_id %}
+          <div class="category-loader" hx-get="{% url 'meli_categories' %}" hx-trigger="load, input changed delay:600ms from:#id_title" hx-include="#id_title" hx-target="this" hx-swap="innerHTML"></div>
         </fieldset>
 
-        <h2>Package</h2>
+        <h2 id="package">Package</h2>
+        <p class="{% if package_flags %}warn-note{% else %}muted{% endif %} package-note">Mercado Libre needs the package weight and size to post{% if package_flags %}, so this can't be listed yet{% endif %}. Measure the packed item: wrong values lead to fines, shipping overcharges and buyer claims.</p>
         <fieldset class="form-grid four"{% if not can_edit %} disabled{% endif %}>
-          {% include "_field.html" with field=form.weight_g %}
-          {% include "_field.html" with field=form.length_cm %}
-          {% include "_field.html" with field=form.width_cm %}
-          {% include "_field.html" with field=form.height_cm %}
+          {% include "_field.html" with field=form.weight_g attention=package_flags.weight_g %}
+          {% include "_field.html" with field=form.length_cm attention=package_flags.length_cm %}
+          {% include "_field.html" with field=form.width_cm attention=package_flags.width_cm %}
+          {% include "_field.html" with field=form.height_cm attention=package_flags.height_cm %}
         </fieldset>
 
         <h2>Attributes</h2>

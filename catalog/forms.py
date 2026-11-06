@@ -1,14 +1,31 @@
 import re
+from decimal import Decimal
 
 from django import forms
 from django.core.exceptions import ValidationError
+from django.core.validators import MinValueValidator
 from django.db import transaction
 
 from .models import Brand, Category, Combo, MasterProduct, ProductModel
-from .validators import validate_attributes
+from .validators import clean_category_id, validate_attributes
 
 
 _NUMBER = re.compile(r"-?(0|[1-9][0-9]*)([.,][0-9]+)?")
+
+
+CATEGORY_INPUT = {"list": "category-suggestions", "autocomplete": "off", "placeholder": "MLA1271"}
+
+
+def _category_field(field):
+    field.widget.attrs.update(CATEGORY_INPUT)
+    field.help_text = "Pick one of Mercado Libre's suggestions; only the code (MLA…) is saved."
+
+
+def _require_price(field):
+    """A price is needed to sell: required and above zero in the form, whatever the column allows."""
+    field.required = True
+    field.validators.append(MinValueValidator(Decimal("0.01")))
+    field.widget.attrs.update({"min": "0.01", "step": "0.01"})
 
 
 class TenantForm(forms.ModelForm):
@@ -71,7 +88,10 @@ class VariantForm(TenantForm):
 
 
 class ProductForm(TenantForm):
-    """Everything about a variant that can change. Model, variant and SKU stay as they are."""
+    """Everything about a variant that can change. Model, variant and SKU stay as they are.
+
+    The list price is required here (a listing needs it); the column stays nullable for older rows.
+    """
 
     class Meta:
         model = MasterProduct
@@ -89,6 +109,14 @@ class ProductForm(TenantForm):
             "meli_catalog_product_id",
             "meli_category_id",
         ]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        _require_price(self.fields["list_price"])
+        _category_field(self.fields["meli_category_id"])
+
+    def clean_meli_category_id(self):
+        return clean_category_id(self.cleaned_data.get("meli_category_id"))
 
 
 LIST_SEPARATOR = ";"
@@ -161,7 +189,7 @@ class ImportForm(forms.Form):
     variant = forms.CharField(max_length=10, help_text="What sets it apart: 30ML, ROJO, XL. UNICO when there is one.")
     title = forms.CharField(max_length=200)
     gtin = forms.CharField(required=False, max_length=14, label="GTIN")
-    list_price = forms.DecimalField(required=False, max_digits=14, decimal_places=2, min_value=0)
+    list_price = forms.DecimalField(max_digits=14, decimal_places=2, min_value=Decimal("0.01"))
     description = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 5}))
 
     def __init__(self, *args, organization, pictures=(), attributes=None, **kwargs):
@@ -267,8 +295,13 @@ class ComboForm(TenantForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        _require_price(self.fields["list_price"])
+        _category_field(self.fields["meli_category_id"])
         if self.instance.pk:
             self.fields["code"].disabled = True
+
+    def clean_meli_category_id(self):
+        return clean_category_id(self.cleaned_data.get("meli_category_id"))
 
 
 MAX_COMBO_UNITS = 100
@@ -295,7 +328,11 @@ def read_combo_lines(post, organization):
         if not 1 <= quantity <= MAX_COMBO_UNITS:
             errors.append(f"{sku}: the quantity must be 1 to {MAX_COMBO_UNITS}.")
             continue
-        product = MasterProduct.objects.filter(organization=organization, sku=sku).first()
+        product = (
+            MasterProduct.objects.filter(organization=organization, sku=sku)
+            .select_related("product_model__brand")
+            .first()
+        )
         if product is None:
             errors.append(f"{sku}: no product in the catalog has this SKU.")
             continue

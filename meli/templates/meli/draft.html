@@ -18,7 +18,10 @@
       <fieldset class="form-grid wide"{% if not can_edit %} disabled{% endif %}>
         {% include "_field.html" with field=form.price %}
         {% include "_field.html" with field=form.quantity %}
-        {% if draft.regular %}{% include "_field.html" with field=form.category_id %}{% endif %}
+        {% if draft.regular %}
+          {% include "_field.html" with field=form.category_id %}
+          <div class="category-loader" hx-get="{% url 'meli_categories' %}" hx-vals='{"title": "{{ draft.listed.title|escapejs }}"}' hx-trigger="load" hx-target="this" hx-swap="innerHTML"></div>
+        {% endif %}
         {% include "meli/_check_field.html" with field=form.use_defaults %}
         {% if draft.regular %}{% include "meli/_draft_attributes.html" %}{% endif %}
         <div class="form-grid wide" id="own-settings"{% if form.use_defaults.value %} hidden{% endif %}>

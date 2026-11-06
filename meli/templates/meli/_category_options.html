@@ -1,0 +1,10 @@
+<div class="category-suggestions" id="category-suggestions-box">
+  <datalist id="category-suggestions">
+    {% for option in options %}<option value="{{ option.id }}">{{ option.label }}</option>{% endfor %}
+  </datalist>
+  {% if options %}
+    <p class="help">Mercado Libre suggests: {% for option in options %}<span class="mono">{{ option.id }}</span> — {{ option.label }}{% if not forloop.last %}; {% endif %}{% endfor %}.</p>
+  {% elif note %}
+    <p class="help">{{ note }}</p>
+  {% endif %}
+</div>

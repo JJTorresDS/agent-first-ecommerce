@@ -1,7 +1,7 @@
 <div class="listing-actions" id="listing-actions">
   {% if can_edit %}
     {% if reason %}
-      <p class="muted">{{ reason }}</p>
+      <p class="{% if package_first %}warn-note{% else %}muted{% endif %}">{{ reason }}{% if package_first %} <a href="#package">Go to Package</a>{% endif %}</p>
     {% else %}
       <form method="post" action="{% url 'meli_draft_from_combo' combo.pk %}">
         {% csrf_token %}

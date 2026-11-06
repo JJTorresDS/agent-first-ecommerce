@@ -129,3 +129,31 @@ def fill_attributes(name, brand, attributes, missing):
             value = match
         filled[item["id"]] = value
     return filled
+
+
+COMBO_DESCRIPTION_PROMPT = (
+    "You write Mercado Libre descriptions in Spanish (Argentina) for a kit the seller sells as one listing.\n"
+    "You get the kit's title and each product in it: how many, its title, brand, its own description and "
+    "attributes. Write 1 to 3 short plain-text paragraphs: say what the kit contains (with quantities), then "
+    "what each product is, using only facts from the given descriptions and attributes. Don't invent "
+    "features, don't mention prices, shipping, warranties, other sellers or stores, no emojis, no ALL CAPS.\n"
+    "Return ONLY a JSON object: {\"description\": \"...\"}."
+)
+
+
+def write_combo_description(title, lines):
+    """A kit's description from its products' own data. lines: [(product, quantity)] of one organization."""
+    components = []
+    for product, quantity in lines:
+        model = product.product_model
+        components.append(
+            {
+                "quantity": quantity,
+                "title": product.title[:200],
+                "brand": model.brand.name[:100],
+                "description": (model.description or "")[:1500],
+                "attributes": product.attributes or {},
+            }
+        )
+    answer = ai.complete_json(COMBO_DESCRIPTION_PROMPT, {"kit_title": (title or "")[:200], "products": components})
+    return str(answer.get("description") or "").strip()[:5000]

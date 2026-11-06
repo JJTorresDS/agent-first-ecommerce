@@ -155,3 +155,54 @@ class SuggestionTests(TestCase):
 
     def test_the_model_page_has_no_ai_buttons(self):
         self.assertNotContains(self.client.get("/catalog/models/new/"), "(AI)")
+
+
+@override_settings(MISTRAL_API_KEY="test-key")
+class ComboSuggestionTests(TestCase):
+    def setUp(self):
+        self.organization = Organization.objects.create(name="Test Seller")
+        self.client.force_login(member(self.organization))
+        self.first = product(self.organization, variant="30ML", list_price="15999.00", attributes={"UNIT_VOLUME": "30 mL"})
+        self.second = product(self.organization, variant="100ML", list_price="30000.00")
+        model = self.first.product_model
+        model.description = "Eau de parfum amaderada."
+        model.save()
+
+    def test_the_combo_page_carries_each_products_list_price_for_the_suggestion(self):
+        page = self.client.get("/catalog/combos/new/")
+        self.assertContains(page, f'<option value="{self.first.sku}" data-price="15999.00">', html=False)
+        self.assertContains(page, "list prices minus 15%")
+        self.assertContains(page, "Write with AI")
+
+    def test_the_wand_writes_from_the_products_own_descriptions(self):
+        fake = FakeMistral({"description": "Kit con dos perfumes."})
+        with patch("vimple.ai.urlopen", side_effect=fake):
+            response = self.client.post(
+                "/catalog/ai/combo_description/",
+                {"title": "Kit 885 x2", "combo_sku": [self.first.sku, self.second.sku], "combo_quantity": ["2", "1"]},
+            )
+        self.assertEqual(json.loads(response["HX-Trigger"])["ai-suggested"]["values"], {"description": "Kit con dos perfumes."})
+        sent = json.loads(fake.asked[0]["messages"][1]["content"])
+        self.assertEqual(sent["kit_title"], "Kit 885 x2")
+        first = sent["products"][0]
+        self.assertEqual((first["quantity"], first["description"], first["attributes"]), (2, "Eau de parfum amaderada.", {"UNIT_VOLUME": "30 mL"}))
+        self.assertEqual(sent["products"][1]["quantity"], 1)
+
+    def test_no_products_no_call_and_another_organizations_products_stay_out(self):
+        fake = FakeMistral({"description": "x"})
+        with patch("vimple.ai.urlopen", side_effect=fake):
+            response = self.client.post("/catalog/ai/combo_description/", {"title": "Kit"})
+        self.assertEqual(json.loads(response["HX-Trigger"])["ai-suggested"]["message"], "Add the products first.")
+        self.assertEqual(fake.asked, [])
+        other = Organization.objects.create(name="Other")
+        theirs = product(other, variant="50ML", code="900")
+        model = theirs.product_model
+        model.description = "SECRETO"
+        model.save()
+        with patch("vimple.ai.urlopen", side_effect=fake):
+            self.client.post("/catalog/ai/combo_description/", {"title": "Kit", "combo_sku": [theirs.sku, self.first.sku], "combo_quantity": ["1", "1"]})
+        self.assertNotIn("SECRETO", json.dumps(fake.asked))
+
+    def test_contributors_cant_ask(self):
+        self.client.force_login(member(self.organization, role=Membership.Role.CONTRIBUTOR, username="bea"))
+        self.assertEqual(self.client.post("/catalog/ai/combo_description/", {}).status_code, 403)

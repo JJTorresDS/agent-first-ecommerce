@@ -92,6 +92,14 @@ Organization is the tenant. Its UUID does not change. The name can.
 - The listing sync links a SKU to a product first, else to a combo (MeliListing.combo). A new combo takes unlinked listings with its SKU after its transaction commits, so its lines exist.
 - inventory.ledger.apply_sale on a combo listing writes one movement per component (units × the component's quantity), keyed sale:<order>:<item>:<variation>:<product_id>, and cancel:… to put each back. record skips a key it has, so repeats and a sale cut short are safe. Single-product sales keep their old key.
 
+## Product and combo forms
+
+- The list price is required on ProductForm, ComboForm and ImportForm (above zero); the columns stay nullable for older rows. Without a price, "Create Mercado Libre listing" says "Set a price first" and no draft is created.
+- Package weight and size are optional to save. The Package card always says Mercado Libre needs them (fines, overcharges, claims), and empty fields are highlighted (catalog.models.package_missing). "Create Mercado Libre listing" is replaced by "Fill in the package weight and size first" (link #package) and a POST is refused (400).
+- The combo page suggests a price: the components' list prices × quantity, minus 15%, computed in the browser. It fills the price only until the user types their own ("Use it" puts it back); the server never recalculates. Products without a list price are left out and named.
+- The combo description wand (catalog_ai combo_description) sends Mistral the kit title and, for each line, quantity, title, brand, model description and attributes, read through read_combo_lines (this organization only).
+- Category fields (product, combo, regular draft) load Mercado Libre's top 2 categories for the title from /catalog/meli/categories/ (domain_discovery, cached 10 min) into <datalist id="category-suggestions">: the value is the code, the label the name. catalog.validators.clean_category_id keeps only the leading code ("MLA1271 (Perfumes)" → MLA1271).
+
 ## Inventory
 
 - Stock is only ever written as an inventory.StockMovement, through inventory/ledger.py. On-hand is the sum of movements per product and location; never store or edit a stock number.

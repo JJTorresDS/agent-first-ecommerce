@@ -170,6 +170,14 @@ class ProductModel(TenantModel):
         super().save(*args, **kwargs)
 
 
+PACKAGE_FIELDS = ("weight_g", "length_cm", "width_cm", "height_cm")
+
+
+def package_missing(row):
+    """The package fields still empty on a product or combo; Mercado Libre needs all four to post."""
+    return [name for name in PACKAGE_FIELDS if getattr(row, name) is None]
+
+
 class MasterProduct(TenantModel):
     """One sellable variant. Its SKU is CATEGORY-BRAND-MODEL-VARIANT, made once and never changed.
 

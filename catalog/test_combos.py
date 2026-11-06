@@ -65,6 +65,18 @@ class ComboPageTests(TestCase):
         data.update(fields)
         return self.client.post(url, data)
 
+    def test_without_the_package_it_saves_but_the_page_warns_and_highlights(self):
+        self.post()
+        row = Combo.objects.get()
+        page = self.client.get(f"/catalog/combos/{row.pk}/")
+        self.assertContains(page, "so this can't be listed yet")
+        self.assertContains(page, "fines, shipping overcharges and buyer claims")
+        self.assertContains(page, '<div class="field needs-attention">', count=4, html=False)
+        self.post(url=f"/catalog/combos/{row.pk}/", weight_g="400", length_cm="8", width_cm="12", height_cm="18")
+        page = self.client.get(f"/catalog/combos/{row.pk}/")
+        self.assertNotContains(page, '<div class="field needs-attention">', html=False)
+        self.assertNotContains(page, "can't be listed yet")
+
     def test_a_combo_is_saved_with_its_lines(self):
         response = self.post()
         row = Combo.objects.get(organization=self.organization)
@@ -78,6 +90,8 @@ class ComboPageTests(TestCase):
         self.assertContains(self.client.get("/catalog/combos/"), "COMBO-885MIX")
 
     def test_problems_are_shown_and_nothing_is_saved(self):
+        self.assertContains(self.post(list_price=""), "This field is required.")
+        self.assertContains(self.post(list_price="0"), "greater than or equal to 0.01")
         self.assertContains(self.post(combo_sku=[self.first.sku], combo_quantity=["1"]), "at least 2 units")
         self.assertContains(self.post(combo_sku=["NOPE-1", self.first.sku]), "NOPE-1: no product in the catalog has this SKU.")
         self.assertContains(self.post(combo_quantity=["0", "1"]), "the quantity must be 1 to 100")

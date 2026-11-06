@@ -101,6 +101,7 @@ class ImportTests(TestCase):
             "variant": "30ml",
             "title": "Perfume Número 885 30 ml",
             "gtin": "7798123456789",
+            "list_price": "15999",
             "description": "Mi descripción.",
             "picture_option": PICTURES,
             "picture": [PICTURES[1]],
@@ -157,6 +158,7 @@ class ImportTests(TestCase):
         self.assertContains(response, "That model has another category or brand.")
 
     def test_problems_are_shown_and_nothing_is_saved(self):
+        self.assertContains(self.save(list_price=""), "This field is required.")
         self.assertContains(self.save(picture=[]), "Pick at least one picture.")
         self.assertContains(self.save(model_code=""), "Pick an existing model or give the new one&#x27;s code and name.")
         self.assertContains(self.save(variant="30 ml!"), "Variant")

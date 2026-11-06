@@ -171,8 +171,10 @@ def listed_as_generic(draft):
     )
 
 
-def package_missing(product):
-    return any(getattr(product, field) is None for _, field, _ in PACKAGE)
+def package_missing(listed):
+    from catalog.models import package_missing as missing
+
+    return bool(missing(listed))
 
 
 def pictures_of(listed):

@@ -1,3 +1,5 @@
+import re
+
 from django.core.exceptions import ValidationError
 from django.utils.deconstruct import deconstructible
 
@@ -76,3 +78,17 @@ validate_brand_code = CodeValidator("Brand code", 2, 8)
 validate_model_code = CodeValidator("Model code", 1, 10)
 validate_variant = CodeValidator("Variant", 1, 10)
 validate_combo_code = CodeValidator("Combo code", 1, 10)
+
+
+_CATEGORY = re.compile(r"^\s*([A-Za-z]{3}\d+)")
+
+
+def clean_category_id(value):
+    """Only the Mercado Libre category code: "MLA1271 (Perfumes)" becomes MLA1271. Empty stays empty."""
+    value = (value or "").strip()
+    if not value:
+        return ""
+    found = _CATEGORY.match(value)
+    if not found:
+        raise ValidationError("Enter a Mercado Libre category code like MLA1271, or pick one of the suggestions.")
+    return found.group(1).upper()

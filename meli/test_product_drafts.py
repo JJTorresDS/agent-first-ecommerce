@@ -110,14 +110,33 @@ class ProductDraftTests(DraftTestCase):
         self.assertEqual(body["family_name"], self.product.title)
         self.assertNotIn("title", body)
 
-    def test_without_the_package_size_the_check_stops_before_mercado_libre(self):
+    def test_without_the_package_size_the_listing_is_refused_and_the_page_says_why(self):
         self.product.width_cm = None
         self.product.save()
+        actions = self.client.get(f"/catalog/meli/products/{self.product.pk}/")
+        self.assertContains(actions, "Fill in the package weight and size first.")
+        self.assertContains(actions, 'href="#package"')
+        self.assertNotContains(actions, "Create Mercado Libre listing")
+        self.assertEqual(self.create().status_code, 400)
+        self.assertFalse(ListingDraft.objects.exists())
+        page = self.client.get(f"/catalog/products/{self.product.pk}/")
+        self.assertContains(page, "so this can't be listed yet")
+        self.assertContains(page, '<div class="field needs-attention">', html=False)
+
+    def test_a_draft_whose_package_was_emptied_later_stops_before_mercado_libre(self):
         self.create()
         draft = self.draft()
-        self.assertEqual(draft.status, ListingDraft.Status.NEEDS_FIX)
+        self.product.width_cm = None
+        self.product.save()
+        draft.status = ListingDraft.Status.CHECKING
+        draft.save()
+        before = len(self.meli.validated)
+        from .drafts import check
+
+        check(self.organization, [draft.pk])
+        draft.refresh_from_db()
         self.assertIn("package weight and size", draft.error)
-        self.assertEqual(self.meli.validated, [])
+        self.assertEqual(len(self.meli.validated), before)
 
     def test_without_a_gtin_the_listing_goes_out_as_brand_generic(self):
         self.product.gtin = ""
@@ -260,13 +279,12 @@ class ProductDraftTests(DraftTestCase):
         self.assertEqual(self.draft().category_id, "MLA9999")
         self.assertEqual(self.meli.categories_read, ["MLA9999"])
 
-    def test_without_a_list_price_the_draft_asks_for_one(self):
+    def test_without_a_list_price_the_listing_is_refused(self):
         self.product.list_price = None
         self.product.save()
-        self.create()
-        draft = self.draft()
-        self.assertEqual((draft.status, draft.error), (ListingDraft.Status.NEEDS_FIX, "Set a price, then Save and check."))
-        self.assertEqual(self.meli.validated, [])
+        self.assertContains(self.client.get(f"/catalog/meli/products/{self.product.pk}/"), "Set a price first.")
+        self.assertEqual(self.create().status_code, 400)
+        self.assertFalse(ListingDraft.objects.exists())
 
     def test_list_in_its_catalog_makes_a_catalog_draft(self):
         self.product.meli_catalog_product_id = "MLA46233297"

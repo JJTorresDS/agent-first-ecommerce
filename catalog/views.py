@@ -23,8 +23,10 @@ from .forms import (
     attributes_from,
     read_combo_lines,
 )
+from vimple.ai import enabled as ai_enabled
+
 from .images import set_images
-from .models import Brand, Category, Combo, ComboItem, MasterProduct, ProductModel
+from .models import Brand, Category, Combo, ComboItem, MasterProduct, ProductModel, package_missing
 from .validators import validate_attributes
 
 PAGE_SIZE = 50
@@ -183,9 +185,9 @@ def ai_suggest(request, kind):
     """
     from vimple import ai
 
-    from .suggest import suggest_codes, write_description
+    from .suggest import suggest_codes, write_combo_description, write_description
 
-    if kind not in {"codes", "description"}:
+    if kind not in {"codes", "description", "combo_description"}:
         raise Http404
     organization, can_edit = _scope(request)
     if not can_edit:
@@ -197,7 +199,13 @@ def ai_suggest(request, kind):
     attributes = attributes_from(post)
     values, message = {}, ""
     try:
-        if kind == "description":
+        if kind == "combo_description":
+            lines, _errors = read_combo_lines(post, organization)
+            if not lines:
+                message = "Add the products first."
+            else:
+                values["description"] = write_combo_description(name, lines)
+        elif kind == "description":
             values["description"] = write_description(name, brand_name, attributes)
         else:
             values = suggest_codes(organization, name, brand_name, attributes)
@@ -307,6 +315,7 @@ def product_detail(request, pk):
             "attributes_error": attributes_error,
             "pictures": pictures,
             "pictures_text": pictures_text,
+            "package_flags": {name: True for name in package_missing(product)},
             "pictures_error": pictures_error,
             "variants": product.variants().order_by("sku"),
             "listings": listings,
@@ -407,7 +416,7 @@ def combo_edit(request, pk=None):
         MasterProduct.objects.filter(organization=organization)
         .exclude(status=MasterProduct.Status.ARCHIVED)
         .order_by("sku")
-        .only("sku", "title")
+        .only("sku", "title", "list_price")
     )
     return render(
         request,
@@ -419,6 +428,8 @@ def combo_edit(request, pk=None):
             "line_errors": line_errors,
             "can_make": can_make,
             "products": products,
+            "package_flags": {name: True for name in package_missing(instance)},
+            "ai": can_edit and ai_enabled(),
             "saved": request.GET.get("saved") == "1",
             "can_edit": can_edit,
             "active_tab": "combos",

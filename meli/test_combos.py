@@ -62,7 +62,7 @@ class ComboStockTests(DraftTestCase):
             response = self.client.post(
                 "/catalog/combos/new/",
                 {"code": "WAIT", "title": "Combo wait", "image_url": "https://img.example/w.jpg", "status": "active",
-                 "currency": "ARS", "combo_sku": [self.other.sku], "combo_quantity": ["2"]},
+                 "currency": "ARS", "list_price": "30000", "combo_sku": [self.other.sku], "combo_quantity": ["2"]},
             )
         self.assertEqual(response.status_code, 302)
         self.assertTrue(MeliSale.objects.get(order_id="3000002").applied)

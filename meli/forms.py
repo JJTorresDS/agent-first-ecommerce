@@ -80,7 +80,10 @@ class DraftForm(forms.ModelForm):
         model = ListingDraft
         fields = ["price", "quantity", "category_id", "use_defaults", *ListingSettings.SETTING_FIELDS]
         labels = {"category_id": "Mercado Libre category"}
-        help_texts = {"category_id": "MLA… Empty: Mercado Libre suggests one from the title."}
+        help_texts = {
+            "category_id": "Pick one of Mercado Libre's suggestions; only the code (MLA…) is saved. "
+            "Empty: Mercado Libre picks one from the title."
+        }
 
     def __init__(self, *args, available, **kwargs):
         super().__init__(*args, **kwargs)
@@ -89,6 +92,14 @@ class DraftForm(forms.ModelForm):
         self.fields["quantity"].min_value = 1
         self.fields["quantity"].widget.attrs.update({"min": 1, "max": max(available, 1)})
         self.fields["use_defaults"].label = "Use the defaults"
+        self.fields["category_id"].widget.attrs.update(
+            {"list": "category-suggestions", "autocomplete": "off", "placeholder": "MLA1271"}
+        )
+
+    def clean_category_id(self):
+        from catalog.validators import clean_category_id
+
+        return clean_category_id(self.cleaned_data.get("category_id"))
 
     def clean_quantity(self):
         quantity = self.cleaned_data["quantity"]
