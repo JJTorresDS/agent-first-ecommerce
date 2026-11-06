@@ -153,9 +153,5 @@ class SuggestionTests(TestCase):
         self.assertIn("didn't come through", self.suggested(response)["message"])
         self.assertEqual(fake.asked, [])
 
-    def test_the_model_page_offers_the_buttons_only_with_a_key(self):
-        page = self.client.get("/catalog/models/new/")
-        self.assertContains(page, "Suggest codes (AI)")
-        self.assertContains(page, "Write description (AI)")
-        with override_settings(MISTRAL_API_KEY=""):
-            self.assertNotContains(self.client.get("/catalog/models/new/"), "(AI)")
+    def test_the_model_page_has_no_ai_buttons(self):
+        self.assertNotContains(self.client.get("/catalog/models/new/"), "(AI)")

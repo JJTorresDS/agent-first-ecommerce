@@ -20,8 +20,6 @@ from .forms import (
     attribute_rows,
     attributes_from,
 )
-from vimple.ai import enabled as ai_enabled
-
 from .images import set_images
 from .models import Brand, Category, MasterProduct, ProductModel
 from .validators import validate_attributes
@@ -130,7 +128,6 @@ def model_edit(request, pk=None):
             "active_tab": "models",
             "codes": _codes(organization),
             "code_dialogs": [_code_dialog(organization, kind) for kind in _KINDS] if can_edit else [],
-            "ai": can_edit and ai_enabled(),
         },
     )
 
