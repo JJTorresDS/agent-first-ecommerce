@@ -35,6 +35,19 @@ DESCRIPTION_PROMPT = (
     "ALL CAPS. Return ONLY a JSON object: {\"description\": \"...\"}."
 )
 
+SELLER_NOTES = (
+    "\nseller_notes, when given, are the seller's wishes for tone or occasion (a holiday, a gift): follow "
+    "them, but still invent no product facts, prices, discounts or shipping promises."
+)
+EXTRA_LIMIT = 500
+
+
+def _notes(extra):
+    """The seller's extra words for a description, trimmed; nothing when empty."""
+    extra = " ".join(str(extra or "").split())[:EXTRA_LIMIT]
+    return {"seller_notes": extra} if extra else {}
+
+
 _CODES = {
     "category_code": validate_category_code,
     "brand_code": validate_brand_code,
@@ -77,8 +90,10 @@ def suggest_codes(organization, name, brand="", attributes=None):
     return values
 
 
-def write_description(name, brand="", attributes=None):
-    answer = ai.complete_json(DESCRIPTION_PROMPT, {"product": _product(name, brand, attributes)})
+def write_description(name, brand="", attributes=None, extra=""):
+    answer = ai.complete_json(
+        DESCRIPTION_PROMPT + SELLER_NOTES, {"product": _product(name, brand, attributes), **_notes(extra)}
+    )
     text = str(answer.get("description") or "").strip()
     return text[:5000]
 
@@ -141,7 +156,7 @@ COMBO_DESCRIPTION_PROMPT = (
 )
 
 
-def write_combo_description(title, lines):
+def write_combo_description(title, lines, extra=""):
     """A kit's description from its products' own data. lines: [(product, quantity)] of one organization."""
     components = []
     for product, quantity in lines:
@@ -155,5 +170,69 @@ def write_combo_description(title, lines):
                 "attributes": product.attributes or {},
             }
         )
-    answer = ai.complete_json(COMBO_DESCRIPTION_PROMPT, {"kit_title": (title or "")[:200], "products": components})
+    answer = ai.complete_json(
+        COMBO_DESCRIPTION_PROMPT + SELLER_NOTES,
+        {"kit_title": (title or "")[:200], "products": components, **_notes(extra)},
+    )
     return str(answer.get("description") or "").strip()[:5000]
+
+
+ADAPT_PROMPT = (
+    "You prepare Mercado Libre listing attributes for a new product, in Spanish (Argentina), by adapting "
+    "the attributes of one of the seller's own listings in the same category.\n"
+    "You get source_listing (its title and attributes), target_product (title, brand, description, "
+    "attributes) and, per attribute id, Mercado Libre's value_type and allowed_values.\n"
+    "For each source attribute decide:\n"
+    "- keep its value when it is true of the target too (gender, product type, concentration, country, "
+    "age group, format);\n"
+    "- rewrite it from the target's own data when it describes the source product itself (its name, line, "
+    "model, volume, color, fragrance);\n"
+    "- drop it when the target data can't support a value.\n"
+    "When allowed_values is not empty, use exactly one of them, copied as written. A number_unit value "
+    "is a number and a unit, like 30 mL. Never invent facts the target data doesn't give.\n"
+    "Return ONLY a JSON object: {\"values\": {attribute id: value}, \"dropped\": {attribute id: short reason}}."
+)
+
+
+def adapt_attributes(source_title, source, target, schema):
+    """Values for a new listing from another listing's attributes: ({id: value}, {id: reason dropped}).
+
+    source: [{id, name, value}] from one of the seller's listings; target: the new product's own data;
+    schema: {id: {type, values}} from Mercado Libre. Only values on its list (in its spelling) are kept.
+    """
+    from meli.drafts import NUMBER_UNIT
+
+    answer = ai.complete_json(
+        ADAPT_PROMPT,
+        {
+            "source_listing": {"title": (source_title or "")[:300], "attributes": source},
+            "target_product": target,
+            "attribute_rules": {
+                item["id"]: {"value_type": schema.get(item["id"], {}).get("type", ""),
+                             "allowed_values": schema.get(item["id"], {}).get("values") or []}
+                for item in source
+            },
+        },
+    )
+    asked = {item["id"] for item in source}
+    values, dropped = {}, {}
+    answered = answer.get("values") if isinstance(answer.get("values"), dict) else {}
+    for key, raw in answered.items():
+        value = " ".join(str(raw or "").split())[:100]
+        if key not in asked or not value:
+            continue
+        rules = schema.get(key, {})
+        allowed = rules.get("values") or []
+        if allowed:
+            value = next((option for option in allowed if option.lower() == value.lower()), None)
+            if value is None:
+                dropped[key] = "not one of Mercado Libre's values"
+                continue
+        elif rules.get("type") == "number_unit" and not NUMBER_UNIT.match(value):
+            dropped[key] = "needs a number and a unit"
+            continue
+        values[key] = value
+    reasons = answer.get("dropped") if isinstance(answer.get("dropped"), dict) else {}
+    for key in asked - set(values) - set(dropped):
+        dropped[key] = " ".join(str(reasons.get(key) or "describes the other product").split())[:120]
+    return values, dropped

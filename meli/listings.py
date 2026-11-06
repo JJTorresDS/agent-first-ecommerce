@@ -157,7 +157,10 @@ def store_items(organization, items):
         stale.delete()
     from inventory.ledger import apply_pending_sales
 
+    from .listing_templates import pause_active
+
     apply_pending_sales(organization)
+    pause_active(organization, items)
     return len(listings)
 
 

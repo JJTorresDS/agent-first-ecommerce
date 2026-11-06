@@ -1,0 +1,22 @@
+<div class="field{% if field.required and not field.value %} needs-attention{% endif %}">
+  <input type="hidden" name="attr_key" value="{{ field.id }}">
+  <label for="ga-{{ field.id }}">{{ field.name }}{% if field.required %} <span class="req" aria-hidden="true">*</span>{% endif %}</label>
+  {% if field.values %}
+    <select name="attr_value" id="ga-{{ field.id }}">
+      <option value="">—</option>
+      {% for option in field.values %}<option value="{{ option }}"{% if option == field.choice %} selected{% endif %}>{{ option }}</option>{% endfor %}
+      {% if field.value and not field.choice %}<option value="{{ field.value }}" selected>{{ field.value }} (not on Mercado Libre's list)</option>{% endif %}
+    </select>
+  {% elif field.type == "number_unit" and field.units %}
+    <div class="number-unit">
+      <input type="text" inputmode="decimal" name="attr_value" id="ga-{{ field.id }}" value="{{ field.number|default:field.value }}" aria-label="{{ field.name }}: number">
+      <select name="unit_{{ field.id }}" aria-label="{{ field.name }}: unit">
+        {% for unit in field.units %}<option value="{{ unit }}"{% if unit == field.unit %} selected{% endif %}>{{ unit }}</option>{% endfor %}
+      </select>
+    </div>
+  {% else %}
+    <input type="text" name="attr_value" id="ga-{{ field.id }}" value="{{ field.value }}"{% if field.type == "number_unit" %} placeholder="30 mL"{% endif %}>
+  {% endif %}
+  {% if field.hint %}<p class="help">{{ field.hint }}</p>{% endif %}
+  {% if field.copied %}<p class="help">From “{{ field.copied }}”</p>{% endif %}
+</div>

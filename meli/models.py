@@ -566,6 +566,10 @@ class ListingDraft(ListingSettings):
         blank=True,
         help_text="Mercado Libre's whole answer to a refused check or post, and the body Vimple sent. Never a token.",
     )
+    template = models.BooleanField(
+        default=False,
+        help_text="Posted as its category's template: quantity 1, paused at once, never for sale.",
+    )
     item_id = models.CharField(max_length=32, blank=True)
     published_at = models.DateTimeField(null=True, blank=True)
     created_by = models.ForeignKey(
@@ -612,3 +616,40 @@ class ListingDraft(ListingSettings):
 
     def item_url(self):
         return f"https://articulo.mercadolibre.com.ar/{self.item_id[:3]}-{self.item_id[3:]}" if self.item_id else ""
+
+
+class ListingTemplate(models.Model):
+    """The listing new drafts in a category copy their attributes from: one per organization and category.
+
+    It is a real Mercado Libre item kept paused, so it never sells. Vimple never activates it, and pauses it
+    again when it finds it active. By item_id, since listing rows are rewritten by the sync.
+    """
+
+    class State(models.TextChoices):
+        PAUSING = "pausing", "Pausing"
+        READY = "ready", "Template"
+        FAILED = "failed", "Failed"
+
+    organization = models.ForeignKey(
+        "accounts.Organization",
+        on_delete=models.CASCADE,
+        related_name="listing_templates",
+    )
+    category_id = models.CharField(max_length=32)
+    item_id = models.CharField(max_length=32)
+    title = models.CharField(max_length=255, blank=True)
+    draft = models.ForeignKey(ListingDraft, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    state = models.CharField(max_length=16, choices=State.choices, default=State.PAUSING)
+    error = models.CharField(max_length=500, blank=True)
+    note = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "meli_listing_template"
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "category_id"], name="uniq_meli_template_org_category"),
+        ]
+
+    def __str__(self):
+        return f"{self.category_id}: {self.item_id}"

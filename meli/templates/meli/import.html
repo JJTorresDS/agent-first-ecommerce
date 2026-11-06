@@ -72,6 +72,7 @@
             </button>
           {% endif %}
         </div>
+        {% if ai %}<div class="ai-row"><input type="text" name="ai_extra" class="ai-extra" maxlength="500" aria-label="Extra for the AI (optional)" placeholder="Extra for the AI (optional). Ej.: Regalo ideal para el Día de la Madre; listo para regalar."></div>{% endif %}
         <p class="muted" id="ai-description-note" hidden></p>
         <p class="muted">Saved on the new model. Write your own rather than copying another seller's text.</p>
         {% include "_field.html" with field=form.description %}

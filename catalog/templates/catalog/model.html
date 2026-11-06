@@ -18,12 +18,12 @@
       <form method="post" id="model-form" class="form-grid">
         {% csrf_token %}
         <input type="hidden" name="action" value="model">
+        {% include "_field.html" with field=form.name wide=True %}
         {% include "catalog/_code_select.html" with field=form.category kind="category" %}
         {% include "catalog/_code_select.html" with field=form.brand kind="brand" %}
-        {% include "_field.html" with field=form.code %}
-        {% include "_field.html" with field=form.condition %}
-        {% include "_field.html" with field=form.name wide=True %}
         {% include "_field.html" with field=form.description wide=True %}
+        {% include "_field.html" with field=form.condition %}
+        {% include "_field.html" with field=form.code %}
         <div class="actions wide">
           <button class="primary" type="submit">{% if model %}Save model{% else %}Create model{% endif %}</button>
         </div>
@@ -112,8 +112,28 @@
         var variant = document.getElementById("id_variant-variant");
         if (sku && variant) sku.textContent = familyCode() + "-" + (clean(variant.value) || "…");
       }
-      document.addEventListener("input", update);
-      document.addEventListener("change", update);
+      // The code follows the name until the user types their own: the first number ("Only 885" → 885),
+      // else the name's letters and digits without the brand ("Liquid Brun" → LIQUIDBRUN).
+      var modelForm = document.getElementById("model-form");
+      var code = modelForm && !modelForm.elements.code.disabled ? modelForm.elements.code : null;
+      if (code && code.value) code.dataset.touched = "1";
+      function suggestCode() {
+        var name = modelForm.elements.name.value || "";
+        var number = name.match(/\d+/);
+        if (number) return number[0].slice(0, 10);
+        var brand = clean((codes.brand_names || {})[modelForm.elements.brand.value]).split(/\s+/);
+        return name.split(/\s+/).filter(function (word) { return brand.indexOf(clean(word)) < 0; })
+          .join("").normalize("NFD").replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 10);
+      }
+      document.addEventListener("input", function (event) {
+        if (code && event.target === code) code.dataset.touched = code.value ? "1" : "";
+        if (code && !code.dataset.touched && (event.target === modelForm.elements.name)) code.value = suggestCode();
+        update();
+      });
+      document.addEventListener("change", function (event) {
+        if (code && !code.dataset.touched && event.target === modelForm.elements.brand && modelForm.elements.name.value) code.value = suggestCode();
+        update();
+      });
       update();
 
       // A category or brand added from its + dialog: base.html adds and selects the option; the preview needs its code.

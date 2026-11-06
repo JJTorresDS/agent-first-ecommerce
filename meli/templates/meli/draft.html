@@ -22,6 +22,7 @@
           {% include "_field.html" with field=form.category_id %}
           <div class="category-loader" hx-get="{% url 'meli_categories' %}" hx-vals='{"title": "{{ draft.listed.title|escapejs }}"}' hx-trigger="load" hx-target="this" hx-swap="innerHTML"></div>
         {% endif %}
+        {% if form.template %}{% include "meli/_check_field.html" with field=form.template %}{% endif %}
         {% include "meli/_check_field.html" with field=form.use_defaults %}
         {% if draft.regular %}{% include "meli/_draft_attributes.html" %}{% endif %}
         <div class="form-grid wide" id="own-settings"{% if form.use_defaults.value %} hidden{% endif %}>
@@ -43,6 +44,25 @@
       var own = document.getElementById("own-settings");
       if (!box || !own) return;
       box.addEventListener("change", function () { own.hidden = box.checked; });
+    })();
+    // The copy dialog's filter narrows the list by title, SKU or item id. Document-level: swaps replace the dialog.
+    document.addEventListener("input", function (event) {
+      if (!event.target.matches || !event.target.matches(".copy-filter")) return;
+      var text = event.target.value.trim().toLowerCase();
+      event.target.closest("dialog").querySelectorAll(".copy-sources li").forEach(function (row) {
+        row.hidden = text && row.getAttribute("data-search").indexOf(text) < 0;
+      });
+    });
+    // A template is filled in by hand: ticking it hides the AI buttons at once.
+    (function () {
+      var box = document.getElementById("id_template");
+      if (!box) return;
+      function apply() {
+        document.querySelectorAll("#draft-attributes .ai-row").forEach(function (row) { row.hidden = box.checked; });
+      }
+      box.addEventListener("change", apply);
+      document.body.addEventListener("htmx:afterSwap", apply);
+      apply();
     })();
   </script>
 {% endblock %}

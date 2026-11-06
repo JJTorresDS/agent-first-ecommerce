@@ -1,3 +1,5 @@
+import re
+
 from django.core.exceptions import ValidationError
 from django.http import HttpResponseBadRequest, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
@@ -123,7 +125,7 @@ def meli_draft(request, pk):
             return redirect("meli_drafts")
         form = DraftForm(request.POST, instance=draft, available=available)
         if regular:
-            attributes = attributes_from(request.POST)
+            attributes = posted_attributes(request.POST)
             try:
                 validate_attributes(attributes)
             except ValidationError as error:
@@ -132,6 +134,8 @@ def meli_draft(request, pk):
             saved = form.save(commit=False)
             if regular:
                 saved.attributes = attributes
+                if draft.product_id and request.POST.get("save_to_product"):
+                    _save_to_product(draft.product, attributes)
             saved.status = ListingDraft.Status.CHECKING
             saved.error = ""
             saved.error_details = {}
@@ -153,21 +157,114 @@ def meli_draft(request, pk):
     )
 
 
-def _attributes_context(organization, draft, attributes, error):
-    """The regular draft's own attributes, with an empty row for each one Mercado Libre still needs."""
+# Sent from the product (brand, model, GTIN) or from their own fields: not asked in the guided form.
+NOT_GUIDED = {"BRAND", "MODEL", "GTIN", "EMPTY_GTIN_REASON"}
+NUMBER_AND_UNIT = re.compile(r"^\s*(\d+(?:[.,]\d+)?)\s*(.*?)\s*$")
+
+
+def posted_attributes(post):
+    """A draft's attributes from its form: the guided fields and the free rows, empty ones left out.
+
+    A number_unit field posts its number as attr_value and its unit as unit_<ID>: "30" + "mL" is "30 mL".
+    """
+    attributes = {}
+    for key, value in attributes_from(post).items():
+        if isinstance(value, str) and not value:
+            continue
+        unit = (post.get(f"unit_{key}") or "").strip()
+        if unit and not isinstance(value, (bool, list)):
+            value = f"{value} {unit}"
+        attributes[key] = value
+    return attributes
+
+
+def guided_fields(draft, attributes):
+    """The category's attributes as form fields: (required, recommended, free rows).
+
+    Each field: the schema item plus its value (the draft's, else the product's), and for number_unit its
+    number and unit. Free rows are the draft's attributes the guided fields don't cover.
+    """
+    from .drafts import OWN_ATTRIBUTES
+
+    listed = draft.listed()
+    product_values = dict(getattr(listed, "attributes", None) or {})
+    required, recommended, guided = [], [], set()
+    for item in draft.category_schema or []:
+        if item.get("hidden") or item["id"] in OWN_ATTRIBUTES or item["id"] in NOT_GUIDED:
+            continue
+        guided.add(item["id"])
+        value = attributes.get(item["id"], product_values.get(item["id"], ""))
+        text = attribute_rows({"value": value})[0][1]
+        field = {**item, "value": text, "number": "", "unit": ""}
+        if item.get("type") == "number_unit" and item.get("units"):
+            match = NUMBER_AND_UNIT.match(text)
+            if match:
+                field["number"] = match.group(1)
+                field["unit"] = next((unit for unit in item["units"] if unit.lower() == match.group(2).lower()), "")
+            field["unit"] = field["unit"] or item.get("default_unit") or item["units"][0]
+        if item.get("values"):
+            field["choice"] = next((option for option in item["values"] if option.lower() == text.lower()), "")
+        (required if item.get("required") else recommended).append(field)
+    free = {key: value for key, value in attributes.items() if key not in guided}
+    return required, recommended, attribute_rows(free)
+
+
+def copy_sources(organization, draft):
+    """This organization's listings in the draft's category to copy from: the template first, then newest."""
+    from .models import ListingTemplate, MeliListing
+
+    if not draft.category_id or not draft.category_schema:
+        return []
+    template = (
+        ListingTemplate.objects.filter(organization=organization, category_id=draft.category_id)
+        .exclude(state=ListingTemplate.State.FAILED)
+        .values_list("item_id", flat=True)
+        .first()
+    )
+    rows = (
+        MeliListing.objects.filter(organization=organization, category_id=draft.category_id)
+        .exclude(item_id=draft.item_id or "-")
+        .only("pk", "item_id", "title", "seller_sku", "status", "thumbnail", "meli_updated_at")
+        .order_by("-meli_updated_at", "item_id")[:60]
+    )
+    sources, seen = [], set()
+    for row in rows:
+        if row.item_id in seen:
+            continue
+        seen.add(row.item_id)
+        row.is_template = row.item_id == template
+        sources.append(row)
+    sources.sort(key=lambda row: not row.is_template)
+    return sources[:30]
+
+
+def _attributes_context(organization, draft, attributes, error, **extra):
+    """The regular draft's attributes: Mercado Libre's own fields for its category, then free rows."""
     from vimple.ai import enabled
 
-    missing, wrong = _problems(organization, draft)
-    rows = {**attributes, **{item["id"]: attributes.get(item["id"], "") for item in missing}}
     from .drafts import listed_as_generic
 
+    if "missing" in extra:
+        missing, wrong = extra.pop("missing"), extra.pop("wrong")
+    else:
+        missing, wrong = _problems(organization, draft)
+    copied = extra.pop("copied", {})
+    required, recommended, free = guided_fields(draft, attributes)
+    for field in required + recommended:
+        if field["id"] in copied:
+            field["copied"] = copied[field["id"]]
+    ai = enabled()
     return {
-        "attributes": attribute_rows(rows),
+        "copy_sources": copy_sources(organization, draft) if ai and not draft.template else [],
+        "attributes": free,
+        "guided_required": required,
+        "guided_recommended": recommended,
         "missing": missing,
         "wrong": wrong,
         "generic": listed_as_generic(draft),
         "attributes_error": error,
-        "ai": enabled(),
+        "ai": ai,
+        **extra,
     }
 
 
@@ -282,7 +379,7 @@ def meli_draft_ai(request, pk):
     )
     if draft.locked():
         return HttpResponseForbidden("Posted drafts can't change.")
-    attributes = attributes_from(request.POST)
+    attributes = posted_attributes(request.POST)
     draft.attributes = attributes
     missing, wrong = _problems(organization, draft)
     asked = _to_fill(organization, draft)
@@ -295,12 +392,12 @@ def meli_draft_ai(request, pk):
         filled, note = {}, "The suggestion didn't come through; fill them in yourself."
     if asked and not filled and not note:
         note = "No confident values: fill them in yourself."
-    rows = {**attributes, **{item["id"]: filled.get(item["id"], attributes.get(item["id"], "")) for item in asked}}
+    rows = {**attributes, **{item["id"]: filled[item["id"]] for item in asked if item["id"] in filled}}
     return render(
         request,
         "meli/_draft_attributes.html",
-        {"draft": draft, "attributes": attribute_rows(rows), "missing": missing, "wrong": wrong, "ai_note": note,
-         "can_edit": True, "ai": True},
+        {"draft": draft, "can_edit": True,
+         **_attributes_context(organization, draft, rows, "", ai_note=note, missing=missing, wrong=wrong)},
     )
 
 
@@ -364,3 +461,88 @@ def meli_draft_from_combo(request, pk):
     draft.save()
     dispatch_drafts(organization, "check", [draft.pk])
     return redirect("meli_draft", pk=draft.pk)
+
+
+def _save_to_product(product, attributes):
+    """The draft's attributes become the product's too, so its next listing starts complete.
+
+    Listing-only values (brand Generic, the GTIN reason, SKU, package) stay on the draft.
+    """
+    from .drafts import OWN_ATTRIBUTES
+
+    kept = {key: value for key, value in attributes.items() if key not in OWN_ATTRIBUTES and key not in NOT_GUIDED}
+    merged = {**(product.attributes or {}), **kept}
+    if merged == product.attributes:
+        return
+    validate_attributes(merged)
+    product.attributes = merged
+    product.save(update_fields=["attributes", "updated_at"])
+
+
+@require_app(AppAccess.App.CATALOG)
+@require_POST
+def meli_draft_copy(request, pk):
+    """Values for the draft's empty attributes, adapted by AI from one of this organization's listings.
+
+    Reads the listing as stored by the sync: no Mercado Libre call. Nothing is saved.
+    """
+    from catalog.suggest import adapt_attributes
+    from vimple import ai
+
+    from .drafts import OWN_ATTRIBUTES
+    from .models import MeliListing
+
+    organization, can_edit = _scope(request)
+    if not can_edit:
+        return HttpResponseForbidden(READ_ONLY)
+    draft = get_object_or_404(
+        ListingDraft.objects.select_related("product__product_model__brand", "combo"), organization=organization, pk=pk
+    )
+    if draft.locked() or not draft.regular():
+        return HttpResponseForbidden("Posted drafts can't change.")
+    source = get_object_or_404(MeliListing, organization=organization, pk=request.POST.get("listing"))
+    attributes = posted_attributes(request.POST)
+    draft.attributes = attributes
+    schema = {item["id"]: item for item in draft.category_schema or []}
+    listed = draft.listed()
+    current = {**(getattr(listed, "attributes", None) or {}), **attributes}
+    offered = []
+    for attribute in source.payload.get("attributes") or []:
+        key = str(attribute.get("id") or "") if isinstance(attribute, dict) else ""
+        value = " ".join(str(attribute.get("value_name") or "").split()) if key else ""
+        # Only what this category asks for and the draft doesn't have yet; never the other item's identity.
+        if (not value or key not in schema or key in OWN_ATTRIBUTES or key in NOT_GUIDED
+                or schema[key].get("hidden") or current.get(key) not in (None, "")):
+            continue
+        offered.append({"id": key, "name": str(attribute.get("name") or schema[key]["name"])[:100], "value": value[:200]})
+    copied, dropped, note = {}, {}, ""
+    if not offered:
+        note = f"Nothing to copy from “{source.title}”: it has no values for the fields still empty here."
+    else:
+        brand, _model = brand_and_model(listed)
+        model = getattr(listed, "product_model", None)
+        target = {
+            "title": listed.title[:300],
+            "brand": brand,
+            "description": ((model.description if model else listed.description) or "")[:1500],
+            "attributes": current,
+        }
+        try:
+            copied, dropped = adapt_attributes(source.title, offered, target, schema)
+        except ai.SuggestionFailed:
+            note = "The copy didn't come through; try again or fill them in yourself."
+    names = {item["id"]: item["name"] for item in offered}
+    rows = {**attributes, **copied}
+    return render(
+        request,
+        "meli/_draft_attributes.html",
+        {
+            "draft": draft,
+            "can_edit": True,
+            "copy_note": note,
+            "copy_dropped": [(names[key], reason) for key, reason in dropped.items() if key in names],
+            "copy_count": len(copied),
+            "copy_source": source.title,
+            **_attributes_context(organization, draft, rows, "", copied={key: source.title for key in copied}),
+        },
+    )

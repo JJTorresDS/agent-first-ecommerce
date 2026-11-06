@@ -30,7 +30,9 @@ PERFUME_ATTRIBUTES = [
 ]
 
 
-class ProductDraftTests(DraftTestCase):
+class PerfumeDraftCase(DraftTestCase):
+    """A perfume with price, GTIN, package and pictures, in a category with perfume attributes."""
+
     def setUp(self):
         super().setUp()
         self.meli.category_attributes = PERFUME_ATTRIBUTES
@@ -50,6 +52,9 @@ class ProductDraftTests(DraftTestCase):
 
     def create(self, kind="product"):
         return self.client.post(f"/catalog/meli/products/{self.product.pk}/draft/", {"kind": kind})
+
+
+class ProductDraftTests(PerfumeDraftCase):
 
     def test_the_product_page_offers_the_buttons_when_it_can_be_listed(self):
         actions = self.client.get(f"/catalog/meli/products/{self.product.pk}/")

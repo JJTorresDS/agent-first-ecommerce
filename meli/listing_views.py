@@ -8,7 +8,7 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from accounts.access import require_app
 from accounts.models import AppAccess, can_edit_products, membership_for
 
-from .models import MercadoLibreAccount, MeliListing, MeliListingSync
+from .models import ListingTemplate, MercadoLibreAccount, MeliListing, MeliListingSync
 
 PAGE_SIZE = 50
 LINK_STATES = (("linked", "Linked"), ("unmatched", "SKU not in catalog"), ("no_sku", "No SKU"))
@@ -29,6 +29,16 @@ def meli_listings(request):
     if request.method == "POST":
         if not can_edit:
             return HttpResponseForbidden("Only owners and admins can sync the listings.")
+        if request.POST.get("action") in ("template", "untemplate"):
+            from .listing_templates import mark
+
+            listing = get_object_or_404(MeliListing, organization=organization, pk=request.POST.get("listing"))
+            if request.POST["action"] == "untemplate":
+                # Only the mark goes: the listing stays paused; Vimple never activates a template.
+                ListingTemplate.objects.filter(organization=organization, item_id=listing.item_id).delete()
+            elif listing.category_id:
+                mark(organization, listing)
+            return redirect(_back(request))
         if request.POST.get("action") == "units":
             # Units one sale takes: 2 for a Kit x2. Past sales keep what they took.
             listing = get_object_or_404(MeliListing, organization=organization, pk=request.POST.get("listing"))
@@ -39,10 +49,7 @@ def meli_listings(request):
             if 1 <= units <= 100:
                 listing.units_per_sale = units
                 listing.save(update_fields=["units_per_sale"])
-            back = request.POST.get("next") or ""
-            if not url_has_allowed_host_and_scheme(back, allowed_hosts={request.get_host()}, require_https=request.is_secure()):
-                back = reverse("meli_listings")
-            return redirect(back)
+            return redirect(_back(request))
         from .jobs import dispatch_listing_sync
 
         if MercadoLibreAccount.objects.filter(organization=organization).exists():
@@ -70,8 +77,17 @@ def meli_listings(request):
     if status in dict(STATUSES):
         rows = rows.filter(status=status)
     page = Paginator(rows.order_by("title", "item_id", "variation_id"), PAGE_SIZE).get_page(request.GET.get("page") or 1)
+    listings = list(page.object_list)
+    templates = {
+        row.item_id: row
+        for row in ListingTemplate.objects.filter(
+            organization=organization, item_id__in={listing.item_id for listing in listings}
+        )
+    }
+    for listing in listings:
+        listing.template = templates.get(listing.item_id)
     context = {
-        "listings": page.object_list,
+        "listings": listings,
         "page_obj": page,
         "record": record,
         "connected": MercadoLibreAccount.objects.filter(organization=organization).exists(),
@@ -85,3 +101,10 @@ def meli_listings(request):
     }
     template = "meli/_listings.html" if request.headers.get("HX-Request") == "true" else "meli/listings.html"
     return render(request, template, context)
+
+
+def _back(request):
+    back = request.POST.get("next") or ""
+    if not url_has_allowed_host_and_scheme(back, allowed_hosts={request.get_host()}, require_https=request.is_secure()):
+        back = reverse("meli_listings")
+    return back

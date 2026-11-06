@@ -323,14 +323,23 @@ def schema_of(attributes):
         kind = str(attribute.get("value_type") or "")
         keep = required or kind in FIXED_TYPES or attribute["id"] == "EMPTY_GTIN_REASON"
         listed = listed[:100] if keep else []
+        units = [
+            str(unit.get("name") or unit.get("id"))
+            for unit in attribute.get("allowed_units") or []
+            if isinstance(unit, dict) and (unit.get("name") or unit.get("id"))
+        ]
         schema.append(
             {
                 "id": str(attribute["id"])[:60],
                 "name": str(attribute.get("name") or attribute["id"])[:100],
                 "required": required,
+                "hidden": hidden,
                 "type": kind,
                 "values": [str(value["name"]) for value in listed],
                 "value_ids": [str(value.get("id") or "") for value in listed],
+                "units": units[:20],
+                "default_unit": str(attribute.get("default_unit") or "")[:20],
+                "hint": str(attribute.get("hint") or attribute.get("tooltip") or "")[:300],
             }
         )
     return schema
@@ -454,7 +463,8 @@ def _check_one(draft, token, defaults, stock, site, user_products=False):
     draft.save(
         update_fields=["catalog_name", "catalog_picture", "category_id", "has_regulatory", "category_schema", "updated_at"]
     )
-    problem = _stock_problem(draft, stock)
+    # A template is posted paused with quantity 1: it never sells, so stock doesn't hold it back.
+    problem = "" if draft.template else _stock_problem(draft, stock)
     if problem:
         _set(draft, ListingDraft.Status.NEEDS_FIX, problem)
         return
@@ -543,7 +553,7 @@ def publish(organization, draft_ids):
         if not claimed:
             continue
         draft = ListingDraft.objects.select_related("product__product_model__brand", "combo").get(pk=draft_id)
-        problem = _stock_problem(draft, stock_by_product(organization))
+        problem = "" if draft.template else _stock_problem(draft, stock_by_product(organization))
         if problem:
             _set(draft, ListingDraft.Status.FAILED, problem)
             continue
@@ -563,6 +573,13 @@ def publish(organization, draft_ids):
         draft.save(update_fields=["item_id", "published_at", "status", "error", "error_details", "updated_at"])
         logger.info("Draft %s posted as %s", draft.pk, draft.item_id)
         notes = []
+        if draft.template:
+            from .listing_templates import posted
+
+            # Paused before anything else: a template must never be for sale.
+            note = posted(organization, draft, token)
+            if note:
+                notes.append(note)
         description = description_of(draft.listed())
         if draft.kind != ListingDraft.Kind.CATALOG and description:
             try:

@@ -672,8 +672,13 @@ def dispatch_drafts(organization, action, draft_ids):
     """Check or post listing drafts in the worker (action check or publish). Never on the reply lane."""
     if not draft_ids:
         return
+    dispatch_drafts_job(organization, action, draft_ids=[int(pk) for pk in draft_ids])
+
+
+def dispatch_drafts_job(organization, action, draft_ids=(), **fields):
+    """A job on the drafts queue: check, publish, or template (pause a listing to make it a template)."""
     payload = json.dumps(
-        {"organization_id": str(organization.pk), "action": action, "draft_ids": [int(pk) for pk in draft_ids]}
+        {"organization_id": str(organization.pk), "action": action, "draft_ids": list(draft_ids), **fields}
     )
     if _under_test():
         _run_drafts_payload(payload)
@@ -708,6 +713,11 @@ def _run_drafts_payload(payload):
     try:
         organization = Organization.objects.filter(pk=job.get("organization_id")).first()
         if organization is None:
+            return
+        if job.get("action") == "template":
+            from .listing_templates import pause_marked
+
+            pause_marked(organization, str(job.get("item_id") or ""))
             return
         run = drafts.publish if job.get("action") == "publish" else drafts.check
         run(organization, job.get("draft_ids") or [])

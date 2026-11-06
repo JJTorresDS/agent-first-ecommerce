@@ -8,7 +8,25 @@
             <tr>
               <td class="thumb-cell">{% if row.thumbnail_url %}<img class="thumb" src="{{ row.thumbnail_url }}" alt="" loading="lazy">{% else %}<span class="thumb"></span>{% endif %}</td>
               <td class="mono">{% if row.listing_url %}<a href="{{ row.listing_url }}" target="_blank" rel="noopener">{{ row.item_id }}</a>{% else %}{{ row.item_id }}{% endif %}{% if row.variation_label %}<br><span class="muted">{{ row.variation_label }}</span>{% endif %}</td>
-              <td>{{ row.title }}</td>
+              <td>
+                {{ row.title }}
+                {% with template=row.template %}
+                  {% if template %}
+                    <br><span class="pill {% if template.state == 'ready' %}active{% endif %}">{% if template.state == 'ready' %}Template · {{ template.category_id }}{% elif template.state == 'pausing' %}Pausing to make it the template…{% else %}Not a template yet{% endif %}</span>
+                    {% if template.error %}<br><span class="error">{{ template.error }}</span>{% endif %}
+                    {% if template.note %}<br><span class="muted">{{ template.note }}</span>{% endif %}
+                  {% endif %}
+                  {% if can_edit and row.category_id %}
+                    <form method="post" action="{% url 'meli_listings' %}" class="inline"{% if not template %} onsubmit="return confirm('This pauses the listing on Mercado Libre so it can\'t sell, and makes it the template for {{ row.category_id }}. Continue?')"{% endif %}>
+                      {% csrf_token %}
+                      <input type="hidden" name="action" value="{% if template %}untemplate{% else %}template{% endif %}">
+                      <input type="hidden" name="listing" value="{{ row.pk }}">
+                      <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                      <br><button type="submit" class="link-button">{% if template %}Stop using as template{% else %}Make template{% endif %}</button>
+                    </form>
+                  {% endif %}
+                {% endwith %}
+              </td>
               <td>
                 {% if row.product %}<a href="{% url 'catalog_product' row.product_id %}" title="Linked to the catalog"><span class="sku">{{ row.product.sku }}</span></a>
                 {% elif row.seller_sku %}<span class="mono">{{ row.seller_sku }}</span><br><span class="pill">Not in catalog</span>

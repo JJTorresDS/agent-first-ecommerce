@@ -59,10 +59,11 @@ class BrandForm(TenantForm):
 class ProductModelForm(TenantForm):
     class Meta:
         model = ProductModel
-        fields = ["category", "brand", "code", "name", "condition", "description"]
-        widgets = {"description": forms.Textarea(attrs={"rows": 4})}
+        # The order people think in: the name first, the code (suggested from it) last.
+        fields = ["name", "category", "brand", "description", "condition", "code"]
+        widgets = {"description": forms.Textarea(attrs={"rows": 4}), "name": forms.TextInput(attrs={"autofocus": True})}
         help_texts = {
-            "code": "Short code, unique within the brand. Example: 885",
+            "code": "Suggested from the name; change it if you like. Unique within the brand, and it can't change once a variant uses it.",
             "name": "The name people read. Example: Only 885 Eau de Parfum",
         }
 

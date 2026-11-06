@@ -38,6 +38,8 @@ class FakeSellFlow:
         self.categories_read = []
         self.descriptions = []
         self.refuse_description = False
+        self.paused = []
+        self.refuse_pause = False
 
     def _refused(self, request):
         if self.refuse_text:
@@ -111,9 +113,16 @@ class FakeSellFlow:
         if url.path == "/sites/MLA/shipping/selfservice/items/MLA900" and method == "DELETE":
             self.flex_removed.append("MLA900")
             return TokenResponse({})
+        if url.path.startswith("/items/") and method == "PUT" and body == {"status": "paused"}:
+            if self.refuse_pause:
+                self.refuse = self.refuse or "Item can't be paused"
+                raise self._refused(request)
+            self.paused.append(url.path.split("/")[2])
+            return TokenResponse({"id": url.path.split("/")[2], "status": "paused"})
         if url.path == "/items" and method == "GET":
             sku = self.created[-1]["attributes"][0]["value_name"]
-            return TokenResponse([{"code": 200, "body": item("MLA900", sku=sku, catalog_listing=True)}])
+            status = "paused" if "MLA900" in self.paused else "active"
+            return TokenResponse([{"code": 200, "body": item("MLA900", sku=sku, status=status, catalog_listing=True)}])
         raise AssertionError(f"{method} {request.full_url}")
 
 

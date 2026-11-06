@@ -204,9 +204,9 @@ def ai_suggest(request, kind):
             if not lines:
                 message = "Add the products first."
             else:
-                values["description"] = write_combo_description(name, lines)
+                values["description"] = write_combo_description(name, lines, post.get("ai_extra"))
         elif kind == "description":
-            values["description"] = write_description(name, brand_name, attributes)
+            values["description"] = write_description(name, brand_name, attributes, post.get("ai_extra"))
         else:
             values = suggest_codes(organization, name, brand_name, attributes)
             notes = []
@@ -251,10 +251,12 @@ def _new_variant(organization, model):
 
 
 def _codes(organization):
-    """Category and brand codes by id, for the live SKU preview."""
+    """Category and brand codes by id, for the live SKU preview; brand names, left out of a suggested model code."""
+    brands = list(Brand.objects.filter(organization=organization).only("code", "name"))
     return {
         "categories": {str(row.pk): row.code for row in Category.objects.filter(organization=organization)},
-        "brands": {str(row.pk): row.code for row in Brand.objects.filter(organization=organization)},
+        "brands": {str(row.pk): row.code for row in brands},
+        "brand_names": {str(row.pk): row.name for row in brands},
     }
 
 

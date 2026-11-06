@@ -309,3 +309,9 @@ class CodeDialogTests(TestCase):
         locked = product(self.organization).product_model
         page = self.client.get(f"/catalog/models/{locked.pk}/")
         self.assertNotContains(page, 'class="add-code"')
+
+    def test_the_new_model_form_starts_with_the_name_and_ends_with_condition_and_code(self):
+        html = self.client.get("/catalog/models/new/").content.decode()
+        order = [html.index(f'name="{name}"') for name in ("name", "category", "brand", "description", "condition", "code")]
+        self.assertEqual(order, sorted(order))
+        self.assertIn('<option value="new" selected>', html)

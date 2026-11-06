@@ -426,6 +426,14 @@ def create_item(access_token, body):
     return _api_request(access_token, "https://api.mercadolibre.com/items", body)
 
 
+def pause_item(access_token, item_id):
+    """Pause one item, so it can't sell. Used for templates."""
+    item = quote(str(item_id), safe="")
+    return _api_request(
+        access_token, f"https://api.mercadolibre.com/items/{item}", {"status": "paused"}, method="PUT"
+    )
+
+
 def remove_flex(access_token, site_id, item_id):
     """Take one item out of Mercado Envíos Flex (the account puts new items in)."""
     site = quote(str(site_id), safe="")

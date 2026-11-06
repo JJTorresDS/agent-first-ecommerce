@@ -206,3 +206,16 @@ class ComboSuggestionTests(TestCase):
     def test_contributors_cant_ask(self):
         self.client.force_login(member(self.organization, role=Membership.Role.CONTRIBUTOR, username="bea"))
         self.assertEqual(self.client.post("/catalog/ai/combo_description/", {}).status_code, 403)
+
+    def test_the_sellers_extra_words_reach_the_prompt_trimmed_and_only_when_given(self):
+        fake = FakeMistral({"description": "Regalo para mamá."})
+        lines = {"title": "Kit", "combo_sku": [self.first.sku], "combo_quantity": ["2"]}
+        with patch("vimple.ai.urlopen", side_effect=fake):
+            self.client.post("/catalog/ai/combo_description/", {**lines, "ai_extra": "  Día de la Madre  " + "x" * 600})
+            self.client.post("/catalog/ai/combo_description/", lines)
+            self.client.post("/catalog/ai/description/", {"title": "Perfume 885", "ai_extra": "Navidad"})
+        first, second, single = (json.loads(asked["messages"][1]["content"]) for asked in fake.asked)
+        self.assertTrue(first["seller_notes"].startswith("Día de la Madre x"))
+        self.assertEqual(len(first["seller_notes"]), 500)
+        self.assertNotIn("seller_notes", second)
+        self.assertEqual(single["seller_notes"], "Navidad")

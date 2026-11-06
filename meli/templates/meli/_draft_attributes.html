@@ -1,12 +1,45 @@
 <div id="draft-attributes" class="wide">
   <div class="card-head">
     <h3>Attributes for this listing</h3>
-    {% if ai and can_edit %}{% if draft.category_schema %}
-      <button type="button" class="ai-button" hx-post="{% url 'meli_draft_ai' draft.pk %}" hx-include="#draft-form" hx-target="#draft-attributes" hx-swap="outerHTML" hx-sync="this:drop">
-        <span class="spinner htmx-indicator" aria-hidden="true"></span>Fill with AI
-      </button>
-    {% endif %}{% endif %}
+    {% if can_edit and draft.category_schema and not draft.template %}
+      <div class="ai-row">
+        {% if ai %}
+          <button type="button" class="ai-button" data-dialog="copy-dialog">Copy from a listing</button>
+          <button type="button" class="ai-button" hx-post="{% url 'meli_draft_ai' draft.pk %}" hx-include="#draft-form" hx-target="#draft-attributes" hx-swap="outerHTML" hx-sync="this:drop">
+            <span class="spinner htmx-indicator" aria-hidden="true"></span>Fill with AI
+          </button>
+        {% endif %}
+      </div>
+    {% endif %}
   </div>
+  {% if ai and can_edit and draft.category_schema and not draft.template %}
+    <dialog class="modal" id="copy-dialog" aria-labelledby="copy-dialog-title">
+      <h2 id="copy-dialog-title">Copy from a listing</h2>
+      <p class="muted">AI keeps what's true of this product too, rewrites what described the other one (name, volume), and leaves out the rest. It only fills empty fields; you review before saving.</p>
+      {% if copy_sources %}
+        <input type="search" class="copy-filter" placeholder="Filter by title or SKU" aria-label="Filter listings">
+        <ul class="plain lines copy-sources">
+          {% for row in copy_sources %}
+            <li data-search="{{ row.title|lower }} {{ row.seller_sku|lower }} {{ row.item_id|lower }}">
+              <button type="button" class="link-button" hx-post="{% url 'meli_draft_copy' draft.pk %}" hx-include="#draft-form" hx-vals='{"listing": "{{ row.pk }}"}' hx-target="#draft-attributes" hx-swap="outerHTML" hx-sync="closest dialog:drop">{{ row.title }}</button>
+              <span class="mono muted">{{ row.item_id }}</span>{% if row.is_template %} <span class="pill active">Template</span>{% endif %}
+              <span class="spinner htmx-indicator" aria-hidden="true"></span>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p>None of your listings is in {{ draft.category_id }} yet. Make one carefully with "Template for this category", or mark one on the <a href="{% url 'meli_listings' %}">Listings</a> page.</p>
+      {% endif %}
+      <div class="actions"><button type="button" data-close-dialog>Close</button></div>
+    </dialog>
+  {% endif %}
+  {% if copy_source %}<p class="muted">Copied {{ copy_count }} value{{ copy_count|pluralize }} from “{{ copy_source }}”. Check them, then Save and check.</p>{% endif %}
+  {% if copy_note %}<p class="muted">{{ copy_note }}</p>{% endif %}
+  {% if copy_dropped %}
+    <p class="muted">Not copied:</p>
+    <ul class="plain lines missing-attributes">{% for name, reason in copy_dropped %}<li><strong>{{ name }}</strong>: {{ reason }}</li>{% endfor %}</ul>
+  {% endif %}
+  {% if draft.template %}<p class="muted">Template listing: fill it in yourself from Mercado Libre's fields below. New listings in this category copy from it.</p>{% endif %}
   {% if missing %}
     <p class="muted">Mercado Libre needs:</p>
     <ul class="plain lines missing-attributes">
@@ -25,7 +58,35 @@
   {% endif %}
   {% if generic %}<p class="muted">This product has no GTIN, so it's listed as brand <strong>Generic</strong> (Mercado Libre refuses a registered brand without a barcode). Add the GTIN on the product to list it under its own brand.</p>{% endif %}
   {% if ai_note %}<p class="muted">{{ ai_note }}</p>{% endif %}
-  <p class="muted">These win over the product's attributes for this listing only. Brand, model, GTIN and the product's attributes the category knows are sent too.</p>
   {% if attributes_error %}<p class="error">{{ attributes_error }}</p>{% endif %}
+  {% if draft.category_schema %}
+    <fieldset class="form-grid guided"{% if not can_edit %} disabled{% endif %}>
+      <legend>Required by Mercado Libre</legend>
+      {% for field in guided_required %}{% include "meli/_guided_field.html" %}{% empty %}<p class="muted wide">Nothing beyond the brand, model and GTIN, which come from the product.</p>{% endfor %}
+    </fieldset>
+    {% if guided_recommended %}
+      <details class="guided-more">
+        <summary>Recommended ({{ guided_recommended|length }}): more details help buyers find and trust the listing</summary>
+        <fieldset class="form-grid guided"{% if not can_edit %} disabled{% endif %}>
+          {% for field in guided_recommended %}{% include "meli/_guided_field.html" %}{% endfor %}
+        </fieldset>
+      </details>
+    {% endif %}
+    <p class="muted">Brand, model and GTIN come from the product. Values here win over the product's for this listing.</p>
+    {% if draft.product_id and can_edit %}
+      <div class="field check-field">
+        <label class="check-label"><input type="checkbox" name="save_to_product" checked> Also save these to the product</label>
+        <p class="help">The next listing of {{ draft.product.sku }} starts with them.</p>
+      </div>
+    {% endif %}
+    <h4>Other attributes</h4>
+  {% else %}
+    {% if draft.status == "checking" %}
+      {# The category's attributes arrive with the first check, in the worker. #}
+      <p class="muted" hx-get="{% url 'meli_draft' draft.pk %}" hx-trigger="every 4s" hx-select="#draft-attributes" hx-target="#draft-attributes" hx-swap="outerHTML">Loading Mercado Libre's attributes for this category…</p>
+    {% else %}
+      <p class="muted">Mercado Libre's attributes show once the draft has a category: enter one and Save and check.</p>
+    {% endif %}
+  {% endif %}
   {% include "catalog/_attributes_editor.html" %}
 </div>

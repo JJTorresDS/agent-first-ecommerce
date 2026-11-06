@@ -26,6 +26,7 @@
         {% include "_field.html" with field=form.description wide=True %}
         {% if ai %}
           <div class="wide ai-row">
+            <input type="text" name="ai_extra" class="ai-extra" maxlength="500" aria-label="Extra for the AI (optional)" placeholder="Extra for the AI (optional). Ej.: Regalo ideal para el Día de la Madre; listo para regalar.">
             <button type="button" class="ai-button" aria-label="Write the description with AI from the products' own descriptions"
               hx-post="{% url 'catalog_ai' 'combo_description' %}" hx-include="#combo-form" hx-swap="none" hx-sync="this:drop"
               data-ai-note="ai-note" data-ai-map='{"description": "id_description"}'>

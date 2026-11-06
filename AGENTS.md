@@ -100,6 +100,16 @@ Organization is the tenant. Its UUID does not change. The name can.
 - The combo description wand (catalog_ai combo_description) sends Mistral the kit title and, for each line, quantity, title, brand, model description and attributes, read through read_combo_lines (this organization only).
 - Category fields (product, combo, regular draft) load Mercado Libre's top 2 categories for the title from /catalog/meli/categories/ (domain_discovery, cached 10 min) into <datalist id="category-suggestions">: the value is the code, the label the name. catalog.validators.clean_category_id keeps only the leading code ("MLA1271 (Perfumes)" → MLA1271).
 
+## Listing templates and attributes
+
+- A regular draft asks for its category's attributes in a guided form built from category_schema (schema_of keeps units, default_unit, hint, hidden): required ones first, the rest under Recommended. A list attribute is a select of Mercado Libre's values; a number_unit one posts its number as attr_value and its unit as unit_<ID>, joined to "30 mL" by posted_attributes. Brand, model, GTIN and their reason come from the product, not from these fields. The form still posts attr_key/attr_value, so the check and build_item read it as before.
+- A template listing (meli.ListingTemplate) is one per organization and category, by item_id (the sync rewrites listing rows). It is a real item kept paused: a draft ticked "Template for this category" posts quantity 1 (stock doesn't hold it back) and is paused right after POST /items, before anything else; a listing marked from the Listings page is paused in the worker (drafts queue, action template) before it counts. A pause that fails is shown (state failed, "The template is live on Mercado Libre: pause it there now"), never silent. store_items pauses a template it finds active again. Vimple never activates a template; "Stop using as template" only removes the mark.
+- A template draft has no AI buttons: it's filled in by hand, on purpose.
+- Copy from a listing (meli_draft_copy) reads one of this organization's listings in the draft's category as synced (MeliListing.payload attributes, no Mercado Libre call), template first. Only attributes the category has and the draft doesn't have yet are offered, never the other item's brand, model, GTIN, SKU or package. Mistral (catalog.suggest.adapt_attributes) keeps, rewrites or drops each one; only values on Mercado Libre's list, or number_unit with a unit, are kept. Nothing is saved until Save and check.
+- "Also save these to the product" (ticked, product drafts only) merges the draft's attributes into MasterProduct.attributes, without listing-only ones (OWN_ATTRIBUTES, BRAND, MODEL, GTIN, EMPTY_GTIN_REASON).
+- The New model form asks Name first, then category and brand, description, and condition (New) and code last. The code follows the name in the browser until typed: the name's first number, else its letters and digits without the brand's words, up to 10.
+- The description wands (combo, import) take an optional "Extra for the AI" line (an occasion such as Día de la Madre), sent as seller_notes, up to 500 characters, never saved.
+
 ## Inventory
 
 - Stock is only ever written as an inventory.StockMovement, through inventory/ledger.py. On-hand is the sum of movements per product and location; never store or edit a stock number.

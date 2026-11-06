@@ -78,8 +78,8 @@ class DraftForm(forms.ModelForm):
 
     class Meta:
         model = ListingDraft
-        fields = ["price", "quantity", "category_id", "use_defaults", *ListingSettings.SETTING_FIELDS]
-        labels = {"category_id": "Mercado Libre category"}
+        fields = ["price", "quantity", "category_id", "template", "use_defaults", *ListingSettings.SETTING_FIELDS]
+        labels = {"category_id": "Mercado Libre category", "template": "Template for this category"}
         help_texts = {
             "category_id": "Pick one of Mercado Libre's suggestions; only the code (MLA…) is saved. "
             "Empty: Mercado Libre picks one from the title."
@@ -92,6 +92,13 @@ class DraftForm(forms.ModelForm):
         self.fields["quantity"].min_value = 1
         self.fields["quantity"].widget.attrs.update({"min": 1, "max": max(available, 1)})
         self.fields["use_defaults"].label = "Use the defaults"
+        if self.instance.regular():
+            self.fields["template"].help_text = (
+                "Posted and paused at once, with quantity 1: never for sale. New listings in this category "
+                "copy its attributes. Fill it in yourself; the AI buttons are off for a template."
+            )
+        else:
+            del self.fields["template"]
         self.fields["category_id"].widget.attrs.update(
             {"list": "category-suggestions", "autocomplete": "off", "placeholder": "MLA1271"}
         )
@@ -102,6 +109,9 @@ class DraftForm(forms.ModelForm):
         return clean_category_id(self.cleaned_data.get("category_id"))
 
     def clean_quantity(self):
+        if self.data.get("template") and "template" in self.fields:
+            # A template sells nothing: one unit, whatever the stock.
+            return 1
         quantity = self.cleaned_data["quantity"]
         if quantity < 1:
             raise forms.ValidationError("At least 1.")
