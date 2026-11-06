@@ -89,8 +89,11 @@ def _number(value):
     return int(value) if value == value.to_integral_value() else float(value)
 
 
-def build_item(draft, settings):
-    """The POST /items body for a draft, as Mercado Libre's own sell flow fills it in."""
+def build_item(draft, settings, user_products=False):
+    """The POST /items body for a draft, as Mercado Libre's own sell flow fills it in.
+
+    user_products: the seller has Mercado Libre's user_product_seller tag (uses_user_products).
+    """
     sale_terms = [{"id": "INVOICE", "value_id": INVOICE[bool(settings.invoice_a)]}]
     if settings.warranty == ListingSettings.Warranty.NONE:
         sale_terms.append({"id": "WARRANTY_TYPE", "value_name": "Sin garantía"})
@@ -122,9 +125,12 @@ def build_item(draft, settings):
         body["title"] = draft.catalog_name
     else:
         product = draft.product
-        # User-products sellers get their title built from family_name; others use title.
-        body["title"] = product.title
-        body["family_name"] = product.title
+        # A user-products seller sends family_name and Mercado Libre builds the title;
+        # any other seller sends title, and family_name is refused as invalid.
+        if user_products:
+            body["family_name"] = product.title
+        else:
+            body["title"] = product.title
         body["pictures"] = [{"source": url} for url in pictures_of(product)]
         attributes.extend(product_attributes(draft))
     if draft.category_id:
@@ -203,6 +209,15 @@ def schema_of(attributes):
     return schema
 
 
+def uses_user_products(organization):
+    """Whether the seller has Mercado Libre's user_product_seller tag, from the stored /users/me answer."""
+    from .models import SellerProfile
+
+    profile = SellerProfile.objects.filter(organization=organization).only("payload").first()
+    tags = (profile.payload or {}).get("tags") if profile else None
+    return isinstance(tags, list) and "user_product_seller" in tags
+
+
 def _site(organization):
     from .models import SellerProfile
 
@@ -274,15 +289,16 @@ def check(organization, draft_ids):
     defaults = defaults_for(organization)
     stock = stock_by_product(organization)
     site = _site(organization)
+    user_products = uses_user_products(organization)
     for draft in drafts:
         try:
-            _check_one(draft, token, defaults, stock, site)
+            _check_one(draft, token, defaults, stock, site, user_products)
         except Exception as error:
             _log_refusal("check failed", draft, error)
             _set(draft, ListingDraft.Status.NEEDS_FIX, _reason(error), getattr(error, "details", None))
 
 
-def _check_one(draft, token, defaults, stock, site):
+def _check_one(draft, token, defaults, stock, site, user_products=False):
     if draft.kind == ListingDraft.Kind.CATALOG:
         product = fetch_catalog_product(token, draft.catalog_product_id)
         if product.get("status") not in (None, "active"):
@@ -311,7 +327,7 @@ def _check_one(draft, token, defaults, stock, site):
     if draft.kind != ListingDraft.Kind.CATALOG and not draft.category_id:
         _set(draft, ListingDraft.Status.NEEDS_FIX, "Mercado Libre didn't suggest a category: enter one (MLA…).")
         return
-    body = build_item(draft, settings_of(draft, defaults))
+    body = build_item(draft, settings_of(draft, defaults), user_products)
     missing = missing_attributes(draft, body) if draft.kind != ListingDraft.Kind.CATALOG else []
     if missing:
         names = ", ".join(attribute["name"] for attribute in missing)
@@ -373,6 +389,7 @@ def publish(organization, draft_ids):
         return
     defaults = defaults_for(organization)
     site = _site(organization)
+    user_products = uses_user_products(organization)
     for draft_id in draft_ids:
         # Claim it: only a queued draft is posted, so a second job for the same one does nothing.
         claimed = ListingDraft.objects.filter(
@@ -386,7 +403,7 @@ def publish(organization, draft_ids):
             _set(draft, ListingDraft.Status.FAILED, problem)
             continue
         settings = settings_of(draft, defaults)
-        body = build_item(draft, settings)
+        body = build_item(draft, settings, user_products)
         try:
             item = create_item(token, body)
         except Exception as error:

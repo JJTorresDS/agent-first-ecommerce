@@ -11,7 +11,7 @@ from catalog.test_views import member
 from catalog.tests import product
 from inventory import ledger
 
-from .drafts import build_item, defaults_for, missing_attributes, schema_of
+from .drafts import build_item, defaults_for, missing_attributes, schema_of, uses_user_products
 from .models import ListingDraft, MeliListing
 from .test_drafts import DraftTestCase
 from .tests import shared_seller
@@ -73,7 +73,8 @@ class ProductDraftTests(DraftTestCase):
         self.create()
         draft = self.draft()
         body = build_item(draft, defaults_for(self.organization))
-        self.assertEqual((body["title"], body["family_name"]), (self.product.title, self.product.title))
+        self.assertEqual(body["title"], self.product.title)
+        self.assertNotIn("family_name", body)
         self.assertEqual(body["pictures"], [{"source": "https://img.example/a.jpg"}, {"source": "https://img.example/b.jpg"}])
         self.assertEqual(body["category_id"], "MLA1271")
         self.assertNotIn("catalog_product_id", body)
@@ -86,6 +87,17 @@ class ProductDraftTests(DraftTestCase):
         self.assertEqual(sent["SELLER_SKU"], self.product.sku)
         self.assertNotIn("FOR_US_ONLY", sent)
         self.assertEqual([item["id"] for item in missing_attributes(draft, body)], ["PERFUME_TYPE"])
+
+    def test_a_user_products_seller_sends_family_name_instead_of_title(self):
+        from .models import SellerProfile
+
+        self.assertFalse(uses_user_products(self.organization))
+        SellerProfile.objects.create(organization=self.organization, payload={"tags": ["normal", "user_product_seller"]})
+        self.assertTrue(uses_user_products(self.organization))
+        self.create()
+        body = build_item(self.draft(), defaults_for(self.organization), uses_user_products(self.organization))
+        self.assertEqual(body["family_name"], self.product.title)
+        self.assertNotIn("title", body)
 
     def test_read_only_attributes_are_never_asked_for(self):
         ids = [item["id"] for item in schema_of(PERFUME_ATTRIBUTES)]
