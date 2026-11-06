@@ -19,7 +19,7 @@
   <tbody>
     {% for movement in movements %}
       <tr>
-        <td>{{ movement.transaction_date|date:"Y-m-d" }}</td>
+        <td><a href="{% url 'cashflow_movement' movement.pk %}">{{ movement.transaction_date|date:"Y-m-d" }}</a></td>
         <td>{{ movement.category }}</td>
         <td>{{ movement.sub_category|default:"" }}</td>
         <td>{{ movement.amount }}</td>

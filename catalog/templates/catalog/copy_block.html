@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+
+{% block title %}{% if block %}{{ block.title }}{% else %}New copy{% endif %}{% endblock %}
+
+{% block content %}
+  {% include "catalog/_tabs.html" %}
+  <div class="page-head">
+    <h1>{% if block %}{{ block.title }}{% else %}New copy{% endif %}</h1>
+    <a href="{% url 'catalog_copy' %}">All copy</a>
+  </div>
+  <section class="card">
+    <form method="post" class="form-grid">
+      {% csrf_token %}
+      {% for error in form.non_field_errors %}<p class="error wide">{{ error }}</p>{% endfor %}
+      {% include "_field.html" with field=form.title wide=True %}
+      {% include "_field.html" with field=form.kind %}
+      {% include "_field.html" with field=form.category %}
+      {% include "_field.html" with field=form.body wide=True %}
+      <p class="muted wide"><span id="body-count">{{ form.body.value|default:""|length }}</span> / 5000 characters. Drafts not posted yet use the new text as soon as you save.</p>
+      <div class="field check-field">
+        <label class="check-label" for="{{ form.default_on.id_for_label }}">{{ form.default_on }} {{ form.default_on.label }}</label>
+        <p class="help">{{ form.default_on.help_text }}</p>
+      </div>
+      {% include "_field.html" with field=form.position %}
+      {% if can_edit %}<div class="actions wide"><span></span><button class="primary" type="submit">Save copy</button></div>{% endif %}
+    </form>
+  </section>
+  {% if delete %}{% include "_delete_card.html" %}{% endif %}
+  <script>
+    (function () {
+      var body = document.getElementById("id_body");
+      var count = document.getElementById("body-count");
+      if (!body || !count) return;
+      body.addEventListener("input", function () { count.textContent = body.value.length; });
+    })();
+  </script>
+{% endblock %}

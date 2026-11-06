@@ -446,6 +446,12 @@
     a.row-link { text-decoration: none; font-weight: 550; }
     .sku-lg { font-size: 0.95rem; padding: 0.3rem 0.65rem; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .link-button.danger-link { color: var(--danger); }
+    .danger-zone { border: 1px solid var(--line); background: transparent; box-shadow: none; }
+    .danger-zone h2 { font-size: 0.95rem; margin: 0 0 0.35rem; }
+    .danger-zone .actions { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+    .delete-dialog ul { margin: 0 0 0.9rem; padding-left: 1.1rem; color: var(--muted); }
+    .delete-dialog .actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
     .notice { background: var(--neon-soft); color: var(--neon-ink); padding: 0.55rem 0.8rem; border-radius: 8px; margin: 0 0 1rem; }
     .crumb { margin: 0 0 0.35rem; font-size: 0.85rem; color: var(--muted); }
     .filters .grow { flex: 1 1 16rem; }
@@ -567,6 +573,28 @@
     .template-pick { border-top: 1px solid var(--line); padding: 0.55rem 0; }
     .template-pick > summary { cursor: pointer; }
     .section-title { margin: 1.5rem 0 0.5rem; }
+    .copy-list li { padding: 0.65rem 1rem; border-top: 1px solid var(--line); }
+    .copy-list p { margin: 0.25rem 0 0; }
+    .card-pad { padding: 0.9rem 1rem 0.2rem; margin: 0; }
+    /* Description composer: chips, the ordered pieces, and the posted text. */
+    .composer-grid { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.4fr) minmax(0, 1.2fr); gap: 1rem; align-items: start; }
+    .chip-list { display: flex; flex-direction: column; gap: 0.35rem; margin: 0.5rem 0; }
+    .copy-chip { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.35rem 0.4rem 0.35rem 0.65rem; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); cursor: grab; }
+    .copy-chip small { font-size: 0.75rem; }
+    .copy-chip.text-chip { border-style: dashed; }
+    .chip-add { border: 0; background: var(--gray-2); border-radius: 6px; width: 1.8rem; height: 1.8rem; font-weight: 700; cursor: pointer; flex: none; }
+    .composer-stack { list-style: none; margin: 0; padding: 0.5rem; min-height: 8rem; border: 1px dashed var(--line-strong); border-radius: 10px; display: flex; flex-direction: column; gap: 0.5rem; }
+    .composer-stack.drop-target { border-color: var(--neon-strong); background: var(--neon-faint); }
+    .composer-stack:empty::before { content: "Drop copy here"; color: var(--muted); margin: auto; }
+    .piece { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 0.45rem 0.6rem; }
+    .piece-head { display: flex; align-items: center; gap: 0.45rem; }
+    .piece-handle { color: var(--muted); cursor: grab; }
+    .piece-tools { margin-left: auto; display: flex; gap: 0.2rem; }
+    .piece-body { margin: 0.3rem 0 0; white-space: pre-wrap; max-height: 6.5rem; overflow: hidden; font-size: 0.85rem; }
+    .piece textarea { width: 100%; margin-top: 0.35rem; }
+    pre.preview { white-space: pre-wrap; overflow-wrap: anywhere; font-family: inherit; font-size: 0.88rem; background: var(--gray-1); border: 1px solid var(--line); border-radius: 8px; padding: 0.75rem; margin: 0.25rem 0; max-height: 28rem; overflow-y: auto; }
+    .warn-list li { color: #8a1f16; font-size: 0.85rem; }
+    @media (max-width: 900px) { .composer-grid { grid-template-columns: minmax(0, 1fr); } }
     dialog.listed-modal { width: min(560px, calc(100vw - 32px)); }
     .listed-list { list-style: none; margin: 0 0 0.75rem; padding: 0; max-height: 60vh; overflow-y: auto; }
     .listed-list li { display: flex; gap: 0.75rem; padding: 0.6rem 0; border-top: 1px solid var(--line); }
@@ -818,6 +846,7 @@
           </div>
         {% endif %}
       </div>
+      {% for note in flash %}<p class="notice" role="status">{{ note }}</p>{% endfor %}
       {% block content %}{% endblock %}
     </main>
   </div>

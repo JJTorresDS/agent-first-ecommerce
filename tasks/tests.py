@@ -1109,3 +1109,57 @@ class CashflowSettingsTests(TestCase):
         with patch("tasks.parser.urlopen", side_effect=AssertionError("network")):
             response = self.client.post("/cashflow/settings/run/")
         self.assertRedirects(response, "/cashflow/settings/?run=nokey", fetch_redirect_response=False)
+
+
+class CashflowMovementPageTests(TestCase):
+    def setUp(self):
+        from catalog.test_views import member
+
+        self.member = member
+        self.organization = Organization.objects.create(name="Vimple")
+        self.client.force_login(member(self.organization, apps=(AppAccess.App.CASHFLOW,)))
+        self.row = movement(organization=self.organization)
+
+    def url(self, row=None):
+        return f"/cashflow/movements/{(row or self.row).pk}/"
+
+    def test_the_list_links_to_it_and_an_owner_corrects_it(self):
+        self.assertContains(self.client.get("/cashflow/"), self.url())
+        data = {
+            "transaction_date": "2026-10-08", "category": "compra", "amount": "-60000", "currency": "ARS",
+            "counterparty_name": "Otro", "description": "Corregido", "document_type": "",
+        }
+        response = self.client.post(self.url(), data)
+        self.assertRedirects(response, self.url() + "?saved=1")
+        self.row.refresh_from_db()
+        self.assertEqual((self.row.amount, self.row.counterparty_name), (Decimal("-60000"), "Otro"))
+
+    def test_deleting_keeps_its_purchase_unlinked(self):
+        from catalog.tests import product
+        from purchasing.models import Purchase, Supplier
+
+        supplier = Supplier.objects.create(organization=self.organization, name="Sur")
+        purchase = Purchase.objects.create(
+            organization=self.organization, supplier=supplier, purchased_on=date(2026, 10, 7), cashflow_movement=self.row
+        )
+        self.assertContains(self.client.get(self.url()), "the next parser run adds it again")
+        response = self.client.post(self.url(), {"action": "delete"})
+        self.assertRedirects(response, "/cashflow/", fetch_redirect_response=False)
+        self.assertFalse(CashflowMovement.objects.exists())
+        purchase.refresh_from_db()
+        self.assertIsNone(purchase.cashflow_movement_id)
+
+    def test_contributors_read_only_and_other_organizations_not_at_all(self):
+        from accounts.models import Membership
+
+        self.client.force_login(
+            self.member(self.organization, role=Membership.Role.CONTRIBUTOR, username="cid", apps=(AppAccess.App.CASHFLOW,))
+        )
+        page = self.client.get(self.url())
+        self.assertContains(page, "disabled")
+        self.assertNotContains(page, 'data-dialog="delete-dialog"')
+        self.assertEqual(self.client.post(self.url(), {"action": "delete"}).status_code, 403)
+        other = Organization.objects.create(name="Other")
+        self.client.force_login(self.member(other, username="bea", apps=(AppAccess.App.CASHFLOW,)))
+        self.assertEqual(self.client.get(self.url()).status_code, 404)
+        self.assertTrue(CashflowMovement.objects.exists())

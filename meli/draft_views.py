@@ -1,5 +1,6 @@
 import re
 
+from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.http import HttpResponseBadRequest, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
@@ -12,7 +13,10 @@ from catalog.forms import attribute_rows, attributes_from
 from catalog.validators import validate_attributes
 from vimple.ai import enabled as ai_enabled
 
+from .description import LIMIT, blocks_for, compose, default_parts, parts_from
+from .description import warnings as description_warnings
 from .drafts import (
+    description_of,
     package_missing,
     available_for,
     brand_and_model,
@@ -70,6 +74,14 @@ def meli_drafts(request):
             )
             dispatch_drafts(organization, "check", [draft.pk])
             return redirect("meli_drafts")
+    elif action == "delete":
+        # Drafts a job is posting right now stay; a posted listing stays on Mercado Libre either way.
+        rows = ListingDraft.objects.filter(organization=organization, pk__in=_ids(request.POST.getlist("draft"))).exclude(
+            status__in=(ListingDraft.Status.QUEUED, ListingDraft.Status.PUBLISHING)
+        )
+        count, _ = rows.delete()
+        messages.success(request, f"{count} draft{'s' if count != 1 else ''} deleted.")
+        return redirect("meli_drafts")
     elif action in {"post", "post_all"}:
         rows = ListingDraft.objects.filter(organization=organization, status=ListingDraft.Status.READY)
         if action == "post":
@@ -125,12 +137,16 @@ def meli_draft(request, pk):
         # Unticking "Use the defaults" starts from them.
         initial = {name: getattr(defaults, name) for name in ListingDraft.SETTING_FIELDS}
     form = DraftForm(instance=draft, initial=initial, available=available)
+    parts = draft.description_parts or [{"product": True}]
     if request.method == "POST" and not draft.locked():
         if request.POST.get("action") == "delete":
             draft.delete()
+            messages.success(request, f"Draft #{pk} deleted.")
             return redirect("meli_drafts")
         form = DraftForm(request.POST, instance=draft, available=available)
         if regular:
+            if request.POST.get("desc_present"):
+                parts = parts_from(request.POST, organization)
             attributes = posted_attributes(request.POST)
             try:
                 validate_attributes(attributes)
@@ -140,6 +156,7 @@ def meli_draft(request, pk):
             saved = form.save(commit=False)
             if regular:
                 saved.attributes = attributes
+                saved.description_parts = parts
                 if draft.product_id and request.POST.get("save_to_product"):
                     _save_to_product(draft.product, attributes)
             saved.status = ListingDraft.Status.CHECKING
@@ -159,9 +176,43 @@ def meli_draft(request, pk):
             "can_edit": can_edit and not draft.locked(),
             **(_attributes_context(organization, draft, attributes, attributes_error, copy_pending=_copy_pending(request))
                if regular else {}),
+            **(_description_context(organization, draft, parts) if regular else {}),
             "active_tab": "meli_new",
         },
     )
+
+
+def _description_context(organization, draft, parts):
+    """The composer: the copy on offer, the pieces in order, and the text they make."""
+    from catalog.models import CopyBlock
+
+    listed = draft.listed()
+    offered = blocks_for(organization, listed)
+    by_id = {row.pk: row for row in offered}
+    missing = [part["block"] for part in parts if "block" in part and part["block"] not in by_id]
+    # A block placed earlier that no longer fits the category still shows; it's this organization's.
+    for row in CopyBlock.objects.filter(organization=organization, pk__in=missing):
+        by_id[row.pk] = row
+    pieces = []
+    for part in parts:
+        if part.get("product"):
+            pieces.append({"type": "product"})
+        elif "block" in part and part["block"] in by_id:
+            pieces.append({"type": "block", "block": by_id[part["block"]]})
+        elif "text" in part:
+            pieces.append({"type": "text", "text": part["text"]})
+    preview = compose(ListingDraft(organization=organization, product=draft.product, combo=draft.combo,
+                                   description_parts=parts or [{"product": True}]), by_id)
+    return {
+        "copy_blocks": offered,
+        "copy_kinds": CopyBlock.Kind.choices,
+        "pieces": pieces,
+        "product_text": description_of(listed),
+        "copy_bodies": {str(row.pk): row.body for row in by_id.values()} | {"product": description_of(listed)},
+        "preview": preview,
+        "description_warnings": description_warnings(preview),
+        "description_limit": LIMIT,
+    }
 
 
 # Sent from the product (brand, model, GTIN) or from their own fields: not asked in the guided form.
@@ -499,6 +550,8 @@ def meli_draft_from_product(request, pk):
         draft.catalog_url = f"https://www.mercadolibre.com.ar/p/{product.meli_catalog_product_id}"
     if template is not None:
         draft.category_id = template.category_id
+    if not in_catalog:
+        draft.description_parts = default_parts(organization, product)
     draft.status = ListingDraft.Status.CHECKING
     draft.save()
     dispatch_drafts(organization, "check", [draft.pk])
@@ -597,6 +650,7 @@ def meli_draft_from_combo(request, pk):
         price=combo.list_price,
         quantity=1,
         category_id=template.category_id if template else combo.meli_category_id,
+        description_parts=default_parts(organization, combo),
         created_by=request.user,
     )
     draft.status = ListingDraft.Status.CHECKING

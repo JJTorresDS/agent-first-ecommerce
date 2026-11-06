@@ -14,6 +14,8 @@ from django.views.decorators.http import require_POST
 from accounts.access import require_app
 from accounts.models import AppAccess, can_edit_products, membership_for, user_can_open
 from catalog.models import MasterProduct
+from vimple import deletion
+from vimple.deletion import counted
 
 from .forms import PurchaseForm, SupplierForm, product_label, read_lines
 from .models import Purchase, PurchaseItem, Supplier
@@ -95,6 +97,8 @@ def purchase_edit(request, pk=None):
         purchase = get_object_or_404(Purchase.objects.select_related("supplier"), organization=organization, pk=pk)
     if request.method == "POST" and not can_edit:
         return HttpResponseForbidden(READ_ONLY)
+    if request.method == "POST" and purchase and request.POST.get("action") == "delete":
+        return deletion.delete(request, purchase, _purchase_blocked(purchase), request.path, "purchases", "Purchase")
     can_link_receipts = user_can_open(request.user, AppAccess.App.CASHFLOW, membership)
     instance = purchase or Purchase(organization=organization)
     form = PurchaseForm(
@@ -156,9 +160,22 @@ def purchase_edit(request, pk=None):
             "can_edit": can_edit,
             "can_link_receipts": can_link_receipts,
             "supplier_form": SupplierForm(prefix="supplier") if can_edit else None,
+            "delete": deletion.card(
+                "This purchase",
+                _purchase_blocked(purchase),
+                ["Its lines go with it.",
+                 "Its cashflow receipt stays in Cashflow, unlinked." if purchase.cashflow_movement_id else ""],
+            ) if can_edit and purchase else None,
             "active_tab": "purchases",
         },
     )
+
+
+def _purchase_blocked(purchase):
+    received = sum(_received_by_line(purchase).values())
+    if received:
+        return f"{received} unit{'s' if received != 1 else ''} were received into the Depósito, and the stock comes from that receipt"
+    return ""
 
 
 def _received_by_line(purchase):
@@ -316,6 +333,9 @@ def supplier_edit(request, pk):
     supplier = get_object_or_404(Supplier, organization=organization, pk=pk)
     if request.method == "POST" and not can_edit:
         return HttpResponseForbidden(READ_ONLY)
+    blocked = counted((supplier.purchases.count(), "purchase is from this supplier", "purchases are from this supplier"))
+    if request.method == "POST" and request.POST.get("action") == "delete":
+        return deletion.delete(request, supplier, blocked, request.path, "suppliers", supplier.name)
     form = SupplierForm(request.POST or None, instance=supplier)
     if request.method == "POST" and form.is_valid():
         form.save()
@@ -334,6 +354,7 @@ def supplier_edit(request, pk):
             "history": history,
             "saved": request.GET.get("saved") == "1",
             "can_edit": can_edit,
+            "delete": deletion.card("This supplier", blocked) if can_edit else None,
             "active_tab": "suppliers",
         },
     )

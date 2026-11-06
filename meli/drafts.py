@@ -554,6 +554,14 @@ def publish(organization, draft_ids):
             continue
         draft = ListingDraft.objects.select_related("product__product_model__brand", "combo").get(pk=draft_id)
         problem = "" if draft.template else _stock_problem(draft, stock_by_product(organization))
+        description = ""
+        if draft.kind != ListingDraft.Kind.CATALOG:
+            from .description import EMPTY, compose
+
+            # Composed now, from the blocks as they read at posting time; kept as sent.
+            description = compose(draft)
+            if draft.description_parts and not description:
+                problem = problem or EMPTY
         if problem:
             _set(draft, ListingDraft.Status.FAILED, problem)
             continue
@@ -580,8 +588,9 @@ def publish(organization, draft_ids):
             note = posted(organization, draft, token)
             if note:
                 notes.append(note)
-        description = description_of(draft.listed())
-        if draft.kind != ListingDraft.Kind.CATALOG and description:
+        if description:
+            draft.posted_description = description
+            draft.save(update_fields=["posted_description", "updated_at"])
             try:
                 post_item_description(token, draft.item_id, description)
             except Exception as error:

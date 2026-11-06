@@ -92,3 +92,10 @@ def _initials(name):
     if len(words) == 1:
         return words[0][:2].upper()
     return (words[0][0] + words[1][0]).upper()
+
+
+def flash(request):
+    """Django messages under their own name: the inbox's context already has "messages" (the chat's)."""
+    from django.contrib.messages import get_messages
+
+    return {"flash": get_messages(request)}

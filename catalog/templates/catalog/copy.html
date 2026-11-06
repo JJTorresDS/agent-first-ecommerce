@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block title %}Copy{% endblock %}
+
+{% block content %}
+  {% include "catalog/_tabs.html" %}
+  <div class="page-head">
+    <h1>Copy</h1>
+    {% if can_edit %}<a class="accent" href="{% url 'catalog_copy_new' %}">New copy</a>{% endif %}
+  </div>
+  <p class="muted">Write it once, use it in every listing: who you are, why buy from you, shipping, warnings. A draft's Description puts the pieces in order and shows exactly what gets posted.</p>
+  {% for label, rows in groups %}
+    <section class="card flush">
+      <h2 class="card-pad">{{ label }}</h2>
+      <ul class="plain copy-list">
+        {% for row in rows %}
+          <li>
+            <a href="{% url 'catalog_copy_block' row.pk %}"><strong>{{ row.title }}</strong></a>
+            <span class="pill">{% if row.category %}{{ row.category.name }}{% else %}Every listing{% endif %}</span>
+            {% if row.default_on %}<span class="pill active">New listings</span>{% endif %}
+            <p class="muted">{{ row.body|truncatechars:160 }}</p>
+          </li>
+        {% endfor %}
+      </ul>
+    </section>
+  {% empty %}
+    <div class="card empty">
+      <p>No copy yet.</p>
+      <p class="muted">Start with what you'd say in every listing, for example "Somos especialistas en perfumes, enviamos a todo el país". Then a block per category, such as the perfume warnings: "No tiene cambio ni devolución una vez abierto".</p>
+      {% if can_edit %}<p><a class="accent" href="{% url 'catalog_copy_new' %}">Write the first one</a></p>{% endif %}
+    </div>
+  {% endfor %}
+{% endblock %}

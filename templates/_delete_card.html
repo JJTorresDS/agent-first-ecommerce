@@ -1,0 +1,26 @@
+{% comment %}
+  An edit page's Delete card. delete = vimple.deletion.card(...). The form posts action=delete to the page's own URL.
+{% endcomment %}
+<section class="card danger-zone">
+  <h2>Delete</h2>
+  {% if delete.blocked %}
+    <p class="muted">{{ delete.name }} can't be deleted: {{ delete.blocked }}.{% if delete.archive %} Archive it instead: it stays in the history but is hidden from lists and new listings.{% endif %}</p>
+    {% if delete.archive %}
+      <form method="post" class="actions">{% csrf_token %}<button type="submit" name="action" value="archive">Archive</button></form>
+    {% endif %}
+  {% else %}
+    <div class="actions">
+      <button type="button" class="danger" data-dialog="delete-dialog">Delete {{ delete.name|lower }}</button>
+    </div>
+    <dialog class="modal delete-dialog" id="delete-dialog" aria-labelledby="delete-dialog-title">
+      <h2 id="delete-dialog-title">Delete {{ delete.name|lower }}?</h2>
+      {% if delete.consequences %}<ul>{% for line in delete.consequences %}<li>{{ line }}</li>{% endfor %}</ul>{% endif %}
+      <p class="muted">This can't be undone.</p>
+      <form method="post" class="actions">
+        {% csrf_token %}
+        <button type="button" data-close-dialog>Cancel</button>
+        <button type="submit" name="action" value="delete" class="danger" formnovalidate>Delete</button>
+      </form>
+    </dialog>
+  {% endif %}
+</section>

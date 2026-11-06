@@ -6,7 +6,7 @@ from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import transaction
 
-from .models import Brand, Category, Combo, MasterProduct, ProductModel
+from .models import Brand, Category, Combo, CopyBlock, MasterProduct, ProductModel
 from .validators import clean_category_id, validate_attributes
 
 
@@ -341,3 +341,22 @@ def read_combo_lines(post, organization):
     if not errors and sum(quantity for _, quantity in lines.values()) < 2:
         errors.append("A combo holds at least 2 units: two products, or one product twice.")
     return list(lines.values()), errors
+
+
+class CopyBlockForm(TenantForm):
+    """A saved piece of listing copy. Categories come from this organization only."""
+
+    class Meta:
+        model = CopyBlock
+        fields = ["title", "kind", "category", "body", "default_on", "position"]
+        widgets = {"body": forms.Textarea(attrs={"rows": 10, "maxlength": CopyBlock.BODY_LIMIT})}
+
+    def __init__(self, *args, organization, **kwargs):
+        super().__init__(*args, **kwargs)
+        field = self.fields["category"]
+        field.queryset = Category.objects.filter(organization=organization).order_by("name")
+        field.empty_label = "Every listing"
+        self.fields["title"].widget.attrs["placeholder"] = "Ej.: Por qué elegirnos"
+        self.fields["body"].widget.attrs["placeholder"] = (
+            "Ej.: Somos especialistas en perfumes. Enviamos a todo el país el mismo día."
+        )

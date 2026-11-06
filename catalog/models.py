@@ -1,3 +1,4 @@
+import re
 import uuid
 
 from django.core.exceptions import ValidationError
@@ -503,3 +504,70 @@ class ComboItem(TenantModel):
     def save(self, *args, **kwargs):
         self._check()
         super().save(*args, **kwargs)
+
+
+class CopyBlock(TenantModel):
+    """A piece of listing copy written once (who we are, why us, warnings) and placed in many descriptions.
+
+    For every listing, or for one category's products. Drafts read the body live until posted.
+    """
+
+    class Kind(models.TextChoices):
+        ABOUT = "about", "About us"
+        WHY_US = "why_us", "Why us"
+        PRODUCT = "product", "About the product"
+        SHIPPING = "shipping", "Shipping"
+        WARNINGS = "warnings", "Warnings and returns"
+        OTHER = "other", "Other"
+
+    # The default layout follows this order, then position.
+    KIND_ORDER = [Kind.PRODUCT, Kind.ABOUT, Kind.WHY_US, Kind.SHIPPING, Kind.WARNINGS, Kind.OTHER]
+    BODY_LIMIT = 5000
+
+    title = models.CharField(max_length=80, help_text="Your name for it, shown on the chip. Not posted.")
+    kind = models.CharField(max_length=16, choices=Kind.choices, default=Kind.OTHER)
+    category = models.ForeignKey(
+        Category,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="copy_blocks",
+        help_text="Leave empty to offer it on every listing.",
+    )
+    body = models.TextField(max_length=BODY_LIMIT, help_text="Plain text: Mercado Libre shows no bold, links or images.")
+    default_on = models.BooleanField(
+        "Add to new listings", default=False, help_text="New drafts start with it in their description."
+    )
+    position = models.PositiveSmallIntegerField(default=0, help_text="Order among blocks of the same kind.")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "catalog_copy_block"
+        ordering = ["kind", "position", "title"]
+        constraints = [
+            models.UniqueConstraint(
+                Lower("title"), "organization", name="uniq_catalog_org_copy_title",
+                violation_error_message="You already have copy with this title.",
+            ),
+        ]
+
+    def __str__(self):
+        return self.title
+
+    def _check(self):
+        self.title = (self.title or "").strip()
+        # Plain text only: tags would show as written.
+        self.body = re.sub(r"<[^>]+>", "", self.body or "").strip()
+        _same_organization(self, "category")
+
+    def clean(self):
+        self._check()
+        super().clean()
+
+    def save(self, *args, **kwargs):
+        self._check()
+        super().save(*args, **kwargs)
+
+    def kind_rank(self):
+        return (self.KIND_ORDER.index(self.kind) if self.kind in self.KIND_ORDER else len(self.KIND_ORDER), self.position)

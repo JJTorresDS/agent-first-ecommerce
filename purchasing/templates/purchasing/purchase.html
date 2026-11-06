@@ -103,6 +103,7 @@
       {% include "purchasing/_supplier_dialog_form.html" %}
     </dialog>
   {% endif %}
+  {% if delete %}{% include "_delete_card.html" %}{% endif %}
 
   <script>
     (function () {

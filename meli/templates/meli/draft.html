@@ -25,18 +25,30 @@
         {% if form.template %}{% include "meli/_check_field.html" with field=form.template %}{% endif %}
         {% include "meli/_check_field.html" with field=form.use_defaults %}
         {% if draft.regular %}{% include "meli/_draft_attributes.html" %}{% endif %}
+        {% if draft.regular %}{% include "meli/_description.html" %}{% endif %}
         <div class="form-grid wide" id="own-settings"{% if form.use_defaults.value %} hidden{% endif %}>
           {% include "meli/_settings_fields.html" %}
         </div>
       </fieldset>
       {% if can_edit %}
         <div class="actions wide">
-          <button type="submit" name="action" value="delete" class="danger" formnovalidate>Delete draft</button>
+          <button type="button" class="link-button danger-link" data-dialog="delete-dialog">Delete draft</button>
           <button class="primary" type="submit">Save and check</button>
         </div>
       {% endif %}
     </form>
   </section>
+  {% if can_edit %}
+    <dialog class="modal delete-dialog" id="delete-dialog" aria-labelledby="delete-dialog-title">
+      <h2 id="delete-dialog-title">Delete draft #{{ draft.pk }}?</h2>
+      <p class="muted">Nothing changes on Mercado Libre. This can't be undone.</p>
+      <form method="post" class="actions">
+        {% csrf_token %}
+        <button type="button" data-close-dialog>Cancel</button>
+        <button type="submit" name="action" value="delete" class="danger" formnovalidate>Delete</button>
+      </form>
+    </dialog>
+  {% endif %}
   <script>
     // Unticking "Use the defaults" shows this listing's own settings, starting from the defaults.
     (function () {
@@ -63,6 +75,128 @@
       box.addEventListener("change", apply);
       document.body.addEventListener("htmx:afterSwap", apply);
       apply();
+    })();
+    // The description composer: chips go into the stack (drag, or tap +), pieces reorder, the preview is the posted text.
+    (function () {
+      var bodies = {};
+      try { bodies = JSON.parse((document.getElementById("copy-bodies") || {}).textContent || "{}"); } catch (error) {}
+      var LINK = /(https?:\/\/|www\.)\S+|\b[\w-]+\.(com|ar|net|org)(\.ar)?\b/i;
+      var EMAIL = /[\w.+-]+@[\w-]+\.[\w.]+/;
+      var PHONE = /(^|[^\d])(\+?\d[\d\s().-]{7,}\d)(?!\d)/;
+      function stack() { return document.getElementById("composer-stack"); }
+      function textOf(piece) {
+        var part = piece.getAttribute("data-part");
+        if (part === "text") return (piece.querySelector("textarea") || {}).value || "";
+        if (part === "product") return bodies.product || "";
+        return bodies[part.slice(6)] || "";
+      }
+      function render() {
+        var list = stack();
+        if (!list) return;
+        var texts = [];
+        list.querySelectorAll(".piece").forEach(function (piece) {
+          var text = textOf(piece).trim();
+          if (text) texts.push(text);
+        });
+        var full = texts.join("\n\n");
+        document.getElementById("description-preview").textContent = full || "Nothing to post yet.";
+        document.getElementById("description-count").textContent = full.length;
+        var found = [];
+        if (!full.trim()) found.push("Write a description first: it's empty.");
+        if (LINK.test(full)) found.push("It has a link: Mercado Libre doesn't allow links in descriptions.");
+        if (EMAIL.test(full)) found.push("It has an email address: Mercado Libre moderates contact details.");
+        if (PHONE.test(full)) found.push("It looks like it has a phone number: Mercado Libre moderates contact details.");
+        var warnings = document.getElementById("description-warnings");
+        warnings.innerHTML = "";
+        found.forEach(function (text) { var li = document.createElement("li"); li.textContent = text; warnings.appendChild(li); });
+        var hasProduct = !!list.querySelector('.piece[data-part="product"]');
+        document.querySelectorAll('.copy-chip[data-part="product"]').forEach(function (chip) { chip.hidden = hasProduct; });
+      }
+      function makePiece(part, title) {
+        var piece = document.createElement("li");
+        piece.className = "piece";
+        piece.draggable = true;
+        piece.setAttribute("data-part", part);
+        var input = document.createElement("input");
+        input.type = "hidden"; input.name = "desc_part"; input.value = part;
+        piece.appendChild(input);
+        var head = document.createElement("div");
+        head.className = "piece-head";
+        head.innerHTML = '<span class="piece-handle" aria-hidden="true">⋮⋮</span><strong></strong><span class="piece-tools">' +
+          '<button type="button" class="link-button piece-up" aria-label="Move up">↑</button>' +
+          '<button type="button" class="link-button piece-down" aria-label="Move down">↓</button>' +
+          '<button type="button" class="link-button piece-remove" aria-label="Remove">✕</button></span>';
+        head.querySelector("strong").textContent = title;
+        piece.appendChild(head);
+        if (part === "text") {
+          var area = document.createElement("textarea");
+          area.name = "desc_text"; area.rows = 3; area.maxLength = 5000;
+          piece.appendChild(area);
+          setTimeout(function () { area.focus(); });
+        } else {
+          var body = document.createElement("p");
+          body.className = "piece-body muted";
+          body.textContent = textOf(piece) || "The product has no description yet.";
+          piece.appendChild(body);
+        }
+        return piece;
+      }
+      var dragged = null;
+      function placeAt(event) {
+        var list = stack();
+        var after = null;
+        list.querySelectorAll(".piece").forEach(function (piece) {
+          var box = piece.getBoundingClientRect();
+          if (after === null && event.clientY < box.top + box.height / 2) after = piece;
+        });
+        return after;
+      }
+      document.addEventListener("click", function (event) {
+        var add = event.target.closest(".chip-add");
+        if (add) {
+          var chip = add.closest(".copy-chip");
+          stack().appendChild(makePiece(chip.getAttribute("data-part"), chip.getAttribute("data-title")));
+          render();
+          return;
+        }
+        var piece = event.target.closest(".piece");
+        if (!piece) return;
+        if (event.target.closest(".piece-remove")) piece.remove();
+        else if (event.target.closest(".piece-up") && piece.previousElementSibling) piece.parentNode.insertBefore(piece, piece.previousElementSibling);
+        else if (event.target.closest(".piece-down") && piece.nextElementSibling) piece.parentNode.insertBefore(piece.nextElementSibling, piece);
+        else return;
+        render();
+      });
+      document.addEventListener("dragstart", function (event) {
+        var item = event.target.closest && event.target.closest(".copy-chip, .piece");
+        if (!item) return;
+        dragged = item;
+        event.dataTransfer.effectAllowed = "copyMove";
+        event.dataTransfer.setData("text/plain", item.getAttribute("data-part"));
+      });
+      document.addEventListener("dragover", function (event) {
+        if (dragged && event.target.closest && event.target.closest("#composer-stack")) {
+          event.preventDefault();
+          stack().classList.add("drop-target");
+        }
+      });
+      document.addEventListener("dragleave", function (event) {
+        if (event.target.id === "composer-stack") stack().classList.remove("drop-target");
+      });
+      document.addEventListener("drop", function (event) {
+        if (!dragged || !event.target.closest || !event.target.closest("#composer-stack")) return;
+        event.preventDefault();
+        var list = stack();
+        list.classList.remove("drop-target");
+        var piece = dragged.classList.contains("piece") ? dragged : makePiece(dragged.getAttribute("data-part"), dragged.getAttribute("data-title"));
+        var after = placeAt(event);
+        if (after !== piece) list.insertBefore(piece, after);
+        dragged = null;
+        render();
+      });
+      document.addEventListener("dragend", function () { dragged = null; var list = stack(); if (list) list.classList.remove("drop-target"); });
+      document.addEventListener("input", function (event) { if (event.target.closest && event.target.closest("#composer-stack")) render(); });
+      render();
     })();
     // Started from a template: once its attributes are copied, a reload must not copy them again.
     document.body.addEventListener("htmx:afterRequest", function (event) {

@@ -570,6 +570,13 @@ class ListingDraft(ListingSettings):
         default=False,
         help_text="Posted as its category's template: quantity 1, paused at once, never for sale.",
     )
+    description_parts = models.JSONField(
+        default=list,
+        blank=True,
+        help_text='The description in order: {"product": true}, {"block": <CopyBlock id>} or {"text": "…"}. '
+        "Empty: the product's or combo's own description.",
+    )
+    posted_description = models.TextField(blank=True, help_text="The description as posted, kept as it was sent.")
     item_id = models.CharField(max_length=32, blank=True)
     published_at = models.DateTimeField(null=True, blank=True)
     created_by = models.ForeignKey(

@@ -27,6 +27,16 @@
                         <details class="inline-edit">
                           <summary>Edit</summary>
                           {% include "catalog/_code_form.html" with form=None row=row row_id=row.pk button="Save" %}
+                          {% if row.model_count %}
+                            <p class="muted">Used by {{ row.model_count }} model{{ row.model_count|pluralize }}, so it can't be deleted.</p>
+                          {% else %}
+                            <form method="post" onsubmit="return confirm('Delete {{ row.name|escapejs }}? This can\'t be undone.')">
+                              {% csrf_token %}
+                              <input type="hidden" name="kind" value="{{ kind }}">
+                              <input type="hidden" name="id" value="{{ row.pk }}">
+                              <button type="submit" name="action" value="delete" class="link-button danger-link">Delete {{ kind }}</button>
+                            </form>
+                          {% endif %}
                         </details>
                       </td>
                     {% endif %}

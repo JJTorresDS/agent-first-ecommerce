@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}Movement {{ movement.transaction_date|date:"Y-m-d" }}{% endblock %}
+
+{% block content %}
+  {% with active_tab="movements" %}{% include "cashflow/_tabs.html" %}{% endwith %}
+  <div class="page-head">
+    <h1>{{ movement.transaction_date|date:"Y-m-d" }} · {{ movement.currency }} {{ movement.amount }}</h1>
+    <a href="{% url 'cashflow' %}">Back to Cashflow</a>
+  </div>
+  <section class="card">
+    {% if saved %}<p class="notice">Saved.</p>{% endif %}
+    <form method="post" class="form-grid">
+      {% csrf_token %}
+      {% include "_field.html" with field=form.transaction_date %}
+      {% include "_field.html" with field=form.document_type %}
+      {% include "_field.html" with field=form.category %}
+      {% include "_field.html" with field=form.sub_category %}
+      {% include "_field.html" with field=form.amount %}
+      {% include "_field.html" with field=form.currency %}
+      {% include "_field.html" with field=form.exchange_rate_at_purchase %}
+      {% include "_field.html" with field=form.counterparty_name %}
+      {% include "_field.html" with field=form.receipt_id %}
+      {% include "_field.html" with field=form.white %}
+      {% include "_field.html" with field=form.description wide=True %}
+      {% if can_edit %}<div class="actions wide"><span></span><button class="primary" type="submit">Save movement</button></div>{% endif %}
+    </form>
+  </section>
+  <section class="card">
+    <h2>From the parser</h2>
+    <ul class="plain lines">
+      <li>Uploaded by {{ movement.uploader_email|default:"—" }}</li>
+      <li>Document: {% if movement.source_file_url %}<a href="{{ movement.source_file_url }}" target="_blank" rel="noopener">open in Drive</a>{% else %}—{% endif %}</li>
+      <li>Amount confidence: {% if movement.amount_parsing_confidence is not None %}{{ movement.amount_parsing_confidence }}{% else %}—{% endif %}</li>
+      {% if movement.parsing_observations_text %}<li>Observations: {{ movement.parsing_observations_text }}</li>{% endif %}
+    </ul>
+  </section>
+  {% if delete %}{% include "_delete_card.html" %}{% endif %}
+{% endblock %}

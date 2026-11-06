@@ -1,5 +1,6 @@
 import json
 
+from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db import transaction
@@ -13,6 +14,7 @@ from accounts.access import require_app
 from accounts.models import AppAccess, can_edit_products, membership_for, user_can_open
 
 from .forms import (
+    CopyBlockForm,
     ComboForm,
     BrandForm,
     CategoryForm,
@@ -23,10 +25,12 @@ from .forms import (
     attributes_from,
     read_combo_lines,
 )
+from vimple import deletion
 from vimple.ai import enabled as ai_enabled
 
+from .deletion import code_blocked, combo_blocked, model_blocked, product_blocked, unlinked
 from .images import set_images
-from .models import Brand, Category, Combo, ComboItem, MasterProduct, ProductModel, package_missing
+from .models import Brand, Category, Combo, ComboItem, CopyBlock, MasterProduct, ProductModel, package_missing
 from .validators import validate_attributes
 
 PAGE_SIZE = 50
@@ -104,6 +108,8 @@ def model_edit(request, pk=None):
         model = get_object_or_404(ProductModel, organization=organization, pk=pk)
     if request.method == "POST" and not can_edit:
         return HttpResponseForbidden(READ_ONLY)
+    if request.method == "POST" and request.POST.get("action") == "delete" and model:
+        return deletion.delete(request, model, model_blocked(model), request.path, "catalog_models", model.name)
     instance = model or ProductModel(organization=organization)
     form = ProductModelForm(organization=organization, instance=instance)
     variant_form = VariantForm(prefix="variant", instance=_new_variant(organization, model))
@@ -130,6 +136,7 @@ def model_edit(request, pk=None):
             "variants": variants,
             "added": request.GET.get("added") or "",
             "can_edit": can_edit,
+            "delete": deletion.card("This model", model_blocked(model)) if can_edit and model else None,
             "active_tab": "models",
             "codes": _codes(organization),
             "code_dialogs": [_code_dialog(organization, kind) for kind in _KINDS] if can_edit else [],
@@ -270,6 +277,13 @@ def product_detail(request, pk):
     )
     if request.method == "POST" and not can_edit:
         return HttpResponseForbidden(READ_ONLY)
+    if request.method == "POST" and request.POST.get("action") == "delete":
+        return deletion.delete(request, product, product_blocked(product), request.path, "catalog", product.sku)
+    if request.method == "POST" and request.POST.get("action") == "archive":
+        product.status = MasterProduct.Status.ARCHIVED
+        product.save(update_fields=["status", "updated_at"])
+        messages.success(request, f"{product.sku} archived.")
+        return redirect("catalog_product", pk=product.pk)
     form = ProductForm(instance=product)
     attributes = attribute_rows(product.attributes)
     attributes_error = ""
@@ -326,6 +340,12 @@ def product_detail(request, pk):
             "lines": lines,
             "saved": request.GET.get("saved") == "1",
             "can_edit": can_edit,
+            "delete": deletion.card(
+                "This product",
+                product_blocked(product),
+                ["Its pictures go with it.", unlinked(product)],
+                archive=product.status != MasterProduct.Status.ARCHIVED,
+            ) if can_edit else None,
             "active_tab": "products",
         },
     )
@@ -339,6 +359,10 @@ def codes(request):
         return HttpResponseForbidden(READ_ONLY)
     forms = {kind: Form(prefix=kind, instance=Model(organization=organization)) for kind, (Model, Form, *_) in _KINDS.items()}
     editing = {}
+    if request.method == "POST" and request.POST.get("kind") in _KINDS and request.POST.get("action") == "delete":
+        Model = _KINDS[request.POST["kind"]][0]
+        row = get_object_or_404(Model, organization=organization, pk=request.POST.get("id"))
+        return deletion.delete(request, row, code_blocked(row), "catalog_codes", "catalog_codes", row.name)
     if request.method == "POST" and request.POST.get("kind") in _KINDS:
         kind = request.POST["kind"]
         Model, Form, *_ = _KINDS[kind]
@@ -393,6 +417,13 @@ def combo_edit(request, pk=None):
     combo = get_object_or_404(Combo, organization=organization, pk=pk) if pk is not None else None
     if request.method == "POST" and not can_edit:
         return HttpResponseForbidden(READ_ONLY)
+    if request.method == "POST" and combo and request.POST.get("action") == "delete":
+        return deletion.delete(request, combo, combo_blocked(combo), request.path, "catalog_combos", combo.sku)
+    if request.method == "POST" and combo and request.POST.get("action") == "archive":
+        combo.status = Combo.Status.ARCHIVED
+        combo.save(update_fields=["status", "updated_at"])
+        messages.success(request, f"{combo.sku} archived.")
+        return redirect("catalog_combo", pk=combo.pk)
     instance = combo or Combo(organization=organization)
     form = ComboForm(instance=instance)
     lines = [(item.product, item.quantity) for item in combo.items.select_related("product")] if combo else []
@@ -434,6 +465,61 @@ def combo_edit(request, pk=None):
             "ai": can_edit and ai_enabled(),
             "saved": request.GET.get("saved") == "1",
             "can_edit": can_edit,
+            "delete": deletion.card(
+                "This combo",
+                combo_blocked(combo),
+                ["Its lines go with it.", unlinked(combo)],
+                archive=combo.status != Combo.Status.ARCHIVED,
+            ) if can_edit and combo else None,
             "active_tab": "combos",
+        },
+    )
+
+
+@require_app(AppAccess.App.CATALOG)
+def copy_blocks(request):
+    """Saved listing copy, grouped by kind: written once, placed in many descriptions."""
+    organization, can_edit = _scope(request)
+    rows = sorted(CopyBlock.objects.filter(organization=organization).select_related("category"), key=CopyBlock.kind_rank)
+    groups = []
+    for kind, label in CopyBlock.Kind.choices:
+        members = [row for row in rows if row.kind == kind]
+        if members:
+            groups.append((label, members))
+    groups.sort(key=lambda group: CopyBlock.KIND_ORDER.index(group[1][0].kind))
+    return render(request, "catalog/copy.html", {"groups": groups, "can_edit": can_edit, "active_tab": "copy"})
+
+
+@require_app(AppAccess.App.CATALOG)
+def copy_block_edit(request, pk=None):
+    organization, can_edit = _scope(request)
+    block = get_object_or_404(CopyBlock, organization=organization, pk=pk) if pk is not None else None
+    if request.method == "POST" and not can_edit:
+        return HttpResponseForbidden(READ_ONLY)
+    if request.method == "POST" and block and request.POST.get("action") == "delete":
+        # Drafts that placed it skip it from now on; posted listings keep the text they were posted with.
+        return deletion.delete(request, block, "", request.path, "catalog_copy", block.title)
+    form = CopyBlockForm(request.POST or None, organization=organization,
+                         instance=block or CopyBlock(organization=organization))
+    if request.method == "POST" and form.is_valid():
+        saved = form.save()
+        messages.success(request, f"“{saved.title}” saved.")
+        return redirect("catalog_copy")
+    if not can_edit:
+        for field in form.fields.values():
+            field.disabled = True
+    return render(
+        request,
+        "catalog/copy_block.html",
+        {
+            "block": block,
+            "form": form,
+            "can_edit": can_edit,
+            "delete": deletion.card(
+                "This copy",
+                consequences=["Drafts not posted yet leave it out of their description.",
+                              "Listings already posted keep their text."],
+            ) if can_edit and block else None,
+            "active_tab": "copy",
         },
     )

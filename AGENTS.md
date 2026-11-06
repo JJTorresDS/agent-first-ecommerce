@@ -127,6 +127,21 @@ Organization is the tenant. Its UUID does not change. The name can.
 - Mercado Libre sales (meli.MeliSale, one per order line) come off stock only after InventorySettings.started_at (the first count), on a listing linked to a product, as quantity x MeliListing.units_per_sale. A Full listing (logistic_type fulfillment) sells out of Full. A cancelled order puts the units back once. Unlinked sales wait and apply when the listing links.
 - orders_v2 webhooks are fetched only for organizations whose inventory has started. Nothing is pushed to Mercado Libre; the stock page compares Vimple with Mercado Libre's numbers.
 
+## Copy blocks and descriptions
+
+- catalog.CopyBlock is listing copy written once (Catalog → Copy, /catalog/copy/): a title (not posted), a kind (product, about, why us, shipping, warnings, other), a body in plain text, and a Vimple category, or none for every listing. Copy is tied to Vimple categories, not Mercado Libre's, so other channels can use it.
+- A regular draft's description is ListingDraft.description_parts in order: {"product": true} (the model's or combo's description), {"block": id} or {"text": "…"}. Empty means the product's description alone (older drafts). meli/description.py compose builds the text (blank line between pieces) and reads block bodies live, this organization's only, skipping deleted ones; publish stores what it sent in posted_description, so editing a block never changes a posted listing.
+- New regular drafts start with default_parts: the product's description, then blocks marked "Add to new listings" for every listing or for the product's category (a combo: the category all its products share), in kind order, then position.
+- The draft page's Description card is the composer: chips to drag or tap +, the ordered pieces (posted as desc_part and desc_text with Save and check), and a preview of the exact plain text with a count. Contact details and links are warned about (Mercado Libre moderates them); an empty description stops the post.
+
+## Deleting
+
+- Every edit page (product, model, combo, purchase, supplier, cashflow movement) ends with templates/_delete_card.html: a confirmation dialog that says what goes with it, or why it can't go. Categories and brands delete from their row's Edit. Owners and admins only; anyone else gets 403.
+- The POST re-checks what blocks a delete (catalog/deletion.py, purchasing _purchase_blocked) through vimple.deletion.delete, never trusting the page. PROTECT stays: a product or combo with history is archived instead (action archive).
+- Drafts delete one at a time or selected from the list, never while queued or publishing. A posted listing stays on Mercado Libre.
+- A deleted cashflow movement comes back if its receipt is still in the Drive folder (the API upserts by source_file_id).
+- Notices after a redirect use Django messages, rendered from the flash context processor: the inbox's context already has "messages".
+
 ## Access and impersonation
 
 - Only a superuser can view Vimple as another user, never as a superuser, themselves or an inactive user. A GET shows a confirmation; only a POST switches. The session keeps the superuser id and where to return (Access page or Django admin), written after login(), which empties the session.

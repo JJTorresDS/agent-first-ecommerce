@@ -6,14 +6,17 @@ from urllib.parse import urlencode
 from django.conf import settings
 from django.core.paginator import Paginator
 from django.http import HttpResponse, HttpResponseForbidden, JsonResponse
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_POST
 
 from accounts.access import require_app
 from accounts.models import AppAccess, can_manage_members, membership_for
 
+from vimple import deletion
+
 from . import drive
+from .forms import CashflowMovementForm
 from .models import FOLDER_SLOTS, CashflowMovement, CashflowParserSettings, folder_id
 from .parser import start_parser
 
@@ -108,6 +111,44 @@ def cashflow_list(request):
         else "cashflow/list.html"
     )
     return render(request, template, context)
+
+
+@require_app(AppAccess.App.CASHFLOW)
+def cashflow_movement(request, pk):
+    """One movement: everyone with Cashflow reads it, owners and admins correct or delete it."""
+    membership = membership_for(request.user)
+    organization = membership.organization
+    can_edit = can_manage_members(membership)
+    movement = get_object_or_404(CashflowMovement, organization=organization, pk=pk)
+    if request.method == "POST" and not can_edit:
+        return HttpResponseForbidden("Only owners and admins can change cashflow movements.")
+    if request.method == "POST" and request.POST.get("action") == "delete":
+        return deletion.delete(request, movement, "", request.path, "cashflow", "The movement")
+    form = CashflowMovementForm(request.POST or None, instance=movement)
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        return redirect(f"{reverse('cashflow_movement', args=[movement.pk])}?saved=1")
+    if not can_edit:
+        for field in form.fields.values():
+            field.disabled = True
+    purchases = list(movement.purchases.filter(organization=organization))
+    return render(
+        request,
+        "cashflow/movement.html",
+        {
+            "movement": movement,
+            "form": form,
+            "can_edit": can_edit,
+            "saved": request.GET.get("saved") == "1",
+            "delete": deletion.card(
+                "This movement",
+                consequences=[
+                    "If its receipt is still in the Drive folder, the next parser run adds it again.",
+                    f"{len(purchases)} purchase{'s' if len(purchases) != 1 else ''} stay, unlinked from it." if purchases else "",
+                ],
+            ) if can_edit else None,
+        },
+    )
 
 
 @require_app(AppAccess.App.CASHFLOW)

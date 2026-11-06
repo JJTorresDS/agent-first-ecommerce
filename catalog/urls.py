@@ -14,4 +14,7 @@ urlpatterns = [
     path("combos/<int:pk>/", views.combo_edit, name="catalog_combo"),
     path("codes/new/<str:kind>/", views.code_new, name="catalog_code_new"),
     path("ai/<str:kind>/", views.ai_suggest, name="catalog_ai"),
+    path("copy/", views.copy_blocks, name="catalog_copy"),
+    path("copy/new/", views.copy_block_edit, name="catalog_copy_new"),
+    path("copy/<int:pk>/", views.copy_block_edit, name="catalog_copy_block"),
 ]

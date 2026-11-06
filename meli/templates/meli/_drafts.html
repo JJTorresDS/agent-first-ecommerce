@@ -13,7 +13,7 @@
           <tbody>
             {% for draft in drafts %}
               <tr>
-                <td class="check-col">{% if can_edit and draft.status == "ready" %}<input type="checkbox" name="draft" value="{{ draft.pk }}" aria-label="Post {{ draft.listed.sku }}">{% endif %}</td>
+                <td class="check-col">{% if can_edit and draft.status != "queued" and draft.status != "publishing" %}<input type="checkbox" name="draft" value="{{ draft.pk }}" aria-label="Select draft #{{ draft.pk }}">{% endif %}</td>
                 <td class="thumb-cell">{% if draft.regular %}<img class="thumb" src="{{ draft.listed.image_url }}" alt="" loading="lazy">{% elif draft.catalog_picture %}<img class="thumb" src="{{ draft.catalog_picture }}" alt="" loading="lazy">{% else %}<span class="thumb"></span>{% endif %}</td>
                 <td><span class="sku">{{ draft.listed.sku }}</span><p class="muted draft-number">Draft #{{ draft.pk }}</p></td>
                 <td>
@@ -39,9 +39,21 @@
       </div>
       {% if can_edit %}
         <div class="actions drafts-actions">
+          <button type="button" class="danger-link link-button" data-dialog="delete-drafts-dialog">Delete selected</button>
           <button type="submit" name="action" value="post"{% if not ready_count %} disabled{% endif %}>Post selected</button>
           <button class="accent" type="submit" name="action" value="post_all"{% if not ready_count %} disabled{% endif %}>Post all ready ({{ ready_count }})</button>
         </div>
+        <dialog class="modal delete-dialog" id="delete-drafts-dialog" aria-labelledby="delete-drafts-title">
+          <h2 id="delete-drafts-title">Delete the selected drafts?</h2>
+          <ul>
+            <li>Only the drafts go: a listing already posted stays on Mercado Libre.</li>
+            <li>Drafts being posted right now are skipped.</li>
+          </ul>
+          <div class="actions">
+            <button type="button" data-close-dialog>Cancel</button>
+            <button type="submit" name="action" value="delete" class="danger">Delete</button>
+          </div>
+        </dialog>
       {% endif %}
     </form>
   {% else %}

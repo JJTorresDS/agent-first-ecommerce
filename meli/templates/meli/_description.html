@@ -1,0 +1,60 @@
+{# The description composer: copy on offer, the pieces in order, and exactly what Mercado Libre receives. #}
+<div id="description-composer" class="wide composer" data-limit="{{ description_limit }}">
+  <h3>Description</h3>
+  <input type="hidden" name="desc_present" value="1">
+  {{ copy_bodies|json_script:"copy-bodies" }}
+  <div class="composer-grid">
+    <div class="composer-chips" aria-label="Copy you can add">
+      <p class="muted">Drag copy into the description, or tap +.</p>
+      <ul class="plain chip-list">
+        <li class="copy-chip" draggable="true" data-part="product" data-title="Product description">
+          <span>Product description</span>
+          <button type="button" class="chip-add" aria-label="Add the product description">+</button>
+        </li>
+        {% for row in copy_blocks %}
+          <li class="copy-chip" draggable="true" data-part="block:{{ row.pk }}" data-title="{{ row.title }}" title="{{ row.body|truncatechars:200 }}">
+            <span>{{ row.title }}<small class="muted"> · {% if row.category %}{{ row.category.name }}{% else %}{{ row.get_kind_display }}{% endif %}</small></span>
+            <button type="button" class="chip-add" aria-label="Add {{ row.title }}">+</button>
+          </li>
+        {% endfor %}
+        <li class="copy-chip text-chip" draggable="true" data-part="text" data-title="Free text">
+          <span>Free text</span>
+          <button type="button" class="chip-add" aria-label="Add free text">+</button>
+        </li>
+      </ul>
+      {% if not copy_blocks %}<p class="muted">No saved copy yet.</p>{% endif %}
+      <p><a href="{% url 'catalog_copy' %}" target="_blank" rel="noopener">Manage copy</a></p>
+    </div>
+
+    <ol class="composer-stack" id="composer-stack" aria-label="Description, in order">
+      {% for piece in pieces %}
+        <li class="piece" draggable="true" data-part="{% if piece.type == 'block' %}block:{{ piece.block.pk }}{% else %}{{ piece.type }}{% endif %}">
+          <input type="hidden" name="desc_part" value="{% if piece.type == 'block' %}block:{{ piece.block.pk }}{% else %}{{ piece.type }}{% endif %}">
+          <div class="piece-head">
+            <span class="piece-handle" aria-hidden="true">⋮⋮</span>
+            <strong>{% if piece.type == 'block' %}{{ piece.block.title }}{% elif piece.type == 'product' %}Product description{% else %}Free text{% endif %}</strong>
+            <span class="piece-tools">
+              <button type="button" class="link-button piece-up" aria-label="Move up">↑</button>
+              <button type="button" class="link-button piece-down" aria-label="Move down">↓</button>
+              <button type="button" class="link-button piece-remove" aria-label="Remove">✕</button>
+            </span>
+          </div>
+          {% if piece.type == 'text' %}
+            <textarea name="desc_text" rows="3" maxlength="5000">{{ piece.text }}</textarea>
+          {% elif piece.type == 'product' %}
+            <p class="piece-body muted">{{ product_text|default:"The product has no description yet." }}</p>
+          {% else %}
+            <p class="piece-body muted">{{ piece.block.body }}</p>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ol>
+
+    <div class="composer-preview">
+      <p class="muted">Preview: what Mercado Libre receives</p>
+      <pre id="description-preview" class="preview">{{ preview|default:"Nothing to post yet." }}</pre>
+      <p class="muted"><span id="description-count">{{ preview|length }}</span> / {{ description_limit }} characters · plain text, no bold, links or images.</p>
+      <ul id="description-warnings" class="plain lines warn-list">{% for warning in description_warnings %}<li>{{ warning }}</li>{% endfor %}</ul>
+    </div>
+  </div>
+</div>

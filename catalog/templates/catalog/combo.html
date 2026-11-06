@@ -97,6 +97,7 @@
       <p class="muted">A combo is a regular listing with SKU <span class="sku">{{ combo.sku }}</span>. A sale takes each product above out of stock.</p>
     </section>
   {% endif %}
+  {% if delete %}{% include "_delete_card.html" %}{% endif %}
 
   {% if can_edit %}
     <script>
