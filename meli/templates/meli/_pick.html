@@ -5,7 +5,7 @@
         {% if row.image_url %}<img class="thumb" src="{{ row.image_url }}" alt="" loading="lazy">{% else %}<span class="thumb"></span>{% endif %}
         <div class="pick-main">
           <a href="{% if row.is_combo %}{% url 'catalog_combo' row.pk %}{% else %}{% url 'catalog_product' row.pk %}{% endif %}">{{ row.title }}</a>
-          <p class="muted"><span class="sku">{{ row.sku }}</span> {% if row.is_combo %}combo · can make {{ row.stock }}{% else %}{{ row.stock }} in stock{% endif %}{% if template and row.meli_category_id and row.meli_category_id != template.category_id %} · category {{ row.meli_category_id }}, not {{ template.category_id }}{% endif %}</p>
+          <p class="muted"><span class="sku">{{ row.sku }}</span> {% if row.is_combo %}combo · can make {{ row.stock }}{% else %}{{ row.stock }} in stock{% endif %} · {% include "meli/_listed_link.html" with summary=row.listing_summary is_combo=row.is_combo pk=row.pk %}{% if template and row.meli_category_id and row.meli_category_id != template.category_id %} · category {{ row.meli_category_id }}, not {{ template.category_id }}{% endif %}</p>
         </div>
         <div class="pick-action">
           {% if row.reason %}

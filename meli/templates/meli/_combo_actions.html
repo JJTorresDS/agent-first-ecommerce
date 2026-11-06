@@ -1,4 +1,6 @@
 <div class="listing-actions" id="listing-actions">
+  <p class="muted">Mercado Libre: {% include "meli/_listed_link.html" with summary=listing_summary pk=listed.pk %}</p>
+  {% include "meli/_listed_dialog.html" %}
   {% if can_edit %}
     {% if reason %}
       <p class="{% if package_first %}warn-note{% else %}muted{% endif %}">{{ reason }}{% if package_first %} <a href="#package">Go to Package</a>{% endif %}</p>

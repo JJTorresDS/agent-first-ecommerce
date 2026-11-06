@@ -1,0 +1,23 @@
+<p class="muted"><span class="sku">{{ listed.sku }}</span> {{ listed.title }}</p>
+{% if rows %}
+  <ul class="listed-list">
+    {% for row in rows %}
+      <li>
+        {% if row.thumbnail_url %}<img class="thumb" src="{{ row.thumbnail_url }}" alt="" loading="lazy">{% else %}<span class="thumb"></span>{% endif %}
+        <div class="listed-main">
+          <p>{% if row.listing_url %}<a class="mono" href="{{ row.listing_url }}" target="_blank" rel="noopener">{{ row.item_id }}</a>{% else %}<span class="mono">{{ row.item_id }}</span>{% endif %}
+            <span class="pill {% if row.status == 'active' %}active{% elif row.status == 'closed' %}archived{% endif %}">{{ row.status|default:"—" }}</span>
+            {% if row.is_template %}<span class="pill">Template</span>{% endif %}
+            {% if row.is_full %}<span class="pill">Full</span>{% endif %}
+          </p>
+          <p>{{ row.title }}{% if row.variation_label %} <span class="muted">· {{ row.variation_label }}</span>{% endif %}</p>
+          <p class="muted">{% if row.price is not None %}{{ row.currency }} {{ row.price }} · {% endif %}{{ row.available_quantity|default_if_none:0 }} available · {{ row.sold_quantity|default_if_none:0 }} sold</p>
+        </div>
+      </li>
+    {% endfor %}
+  </ul>
+  {% if more %}<p class="muted">Showing the first {{ rows|length }}.</p>{% endif %}
+  <p><a href="{% url 'meli_listings' %}?q={{ listed.sku|urlencode }}">See them in Listings</a></p>
+{% else %}
+  <p class="muted">Not listed on Mercado Libre yet.</p>
+{% endif %}

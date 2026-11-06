@@ -309,8 +309,15 @@ def _actions_context(organization, listed, can_edit, **objects):
         template = ListingTemplate.objects.filter(
             organization=organization, category_id=listed.meli_category_id, state=ListingTemplate.State.READY
         ).first()
+    from catalog.models import Combo
+
+    from .listing_views import listing_counts, listing_summary
+
+    is_combo = isinstance(listed, Combo)
+    counts = listing_counts(organization, combos=[listed]) if is_combo else listing_counts(organization, [listed])
     return {**objects, "can_edit": can_edit, "reason": reason, "package_first": reason == PACKAGE_FIRST,
-            "template": template}
+            "template": template, "listed": listed, "is_combo": is_combo,
+            "listing_summary": listing_summary(counts.get(("combo" if is_combo else "product", listed.pk), {}))}
 
 
 def _listable(organization, listed, stock=None, connected=None, started=None):
@@ -375,14 +382,57 @@ def meli_listing_pick(request):
     stock = stock_by_product(organization)
     connected = MercadoLibreAccount.objects.filter(organization=organization).exists()
     started = inventory_started(organization)
+    from .listing_views import listing_counts, listing_summary
+
+    counts = listing_counts(
+        organization,
+        [row for row in rows if not isinstance(row, Combo)],
+        [row for row in rows if isinstance(row, Combo)],
+    )
     for row in rows:
         row.is_combo = isinstance(row, Combo)
+        row.listing_summary = listing_summary(counts.get(("combo" if row.is_combo else "product", row.pk), {}))
         row.reason = _listable(organization, row, stock, connected, started)
         row.stock = row.can_make(stock) if row.is_combo else stock.get(row.pk, 0)
     return render(
         request,
         "meli/_pick.html",
         {"rows": rows, "query": query, "template": template, "can_edit": can_edit, "package_first": PACKAGE_FIRST},
+    )
+
+
+LISTED_LIMIT = 50
+LISTED_ORDER = {"active": 0, "paused": 1}
+
+
+@require_app(AppAccess.App.CATALOG)
+def meli_listed(request):
+    """One product's or combo's Mercado Libre listings, for the dialog behind its "2 active, 1 paused"."""
+    from django.db.models import Case, Value, When
+
+    from catalog.models import Combo, MasterProduct
+
+    organization, _can_edit = _scope(request)
+    if request.GET.get("combo"):
+        listed = get_object_or_404(Combo, organization=organization, pk=request.GET["combo"])
+        rows = MeliListing.objects.filter(organization=organization, combo=listed)
+    else:
+        listed = get_object_or_404(MasterProduct, organization=organization, pk=request.GET.get("product"))
+        rows = MeliListing.objects.filter(organization=organization, product=listed)
+    # Active first, then paused, then the rest.
+    rank = Case(*(When(status=status, then=Value(order)) for status, order in LISTED_ORDER.items()), default=Value(2))
+    rows = list(rows.order_by(rank, "-synced_at", "item_id", "variation_id")[: LISTED_LIMIT + 1])
+    templates = set(
+        ListingTemplate.objects.filter(
+            organization=organization, item_id__in={row.item_id for row in rows}
+        ).values_list("item_id", flat=True)
+    )
+    for row in rows:
+        row.is_template = row.item_id in templates
+    return render(
+        request,
+        "meli/_listed.html",
+        {"listed": listed, "rows": rows[:LISTED_LIMIT], "more": len(rows) > LISTED_LIMIT},
     )
 
 

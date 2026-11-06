@@ -137,3 +137,40 @@ class CatalogLinkTests(PerfumeDraftCase):
         read.assert_called_once()
         self.assertEqual(read.call_args.args[1], URL)
         self.assertContains(page, "Caramel Dream 75 ml")
+
+
+class ListedSummaryTests(PerfumeDraftCase):
+    """How a product is already listed shows where a new listing starts, and opens the listings."""
+
+    def setUp(self):
+        super().setUp()
+        listing(self.organization, "MLA1", self.product, variation_id="11", title="Perfume A", status="active")
+        listing(self.organization, "MLA1", self.product, variation_id="12", title="Perfume A", status="active")
+        listing(self.organization, "MLA2", self.product, title="Perfume B", status="paused")
+        ListingTemplate.objects.create(
+            organization=self.organization, category_id="MLA1271", item_id="MLA2", state=ListingTemplate.State.READY
+        )
+
+    def test_the_picker_counts_items_per_status_and_links_them(self):
+        unlisted = product(self.organization, variant="30ML")
+        page = self.client.get("/catalog/meli/new/pick/")
+        self.assertContains(page, "(1 active, 1 paused)")
+        self.assertContains(page, f"/catalog/meli/listed/?product={self.product.pk}")
+        self.assertContains(page, "Not listed yet")
+        self.assertNotContains(page, f"/catalog/meli/listed/?product={unlisted.pk}")
+
+    def test_the_product_page_shows_the_same_summary(self):
+        actions = self.client.get(f"/catalog/meli/products/{self.product.pk}/")
+        self.assertContains(actions, "(1 active, 1 paused)")
+        self.assertContains(actions, 'id="listed-dialog"')
+
+    def test_the_dialog_lists_this_products_listings_only(self):
+        other = shared_seller("Other")
+        listing(other, "MLA9", product(other, variant="75ML"), title="Someone else's", status="active")
+        page = self.client.get("/catalog/meli/listed/", {"product": self.product.pk})
+        self.assertContains(page, "MLA1", count=2)
+        self.assertContains(page, "Perfume B")
+        self.assertContains(page, '<span class="pill">Template</span>', html=True)
+        self.assertNotContains(page, "Someone else")
+        foreign = product(other, variant="10ML")
+        self.assertEqual(self.client.get("/catalog/meli/listed/", {"product": foreign.pk}).status_code, 404)

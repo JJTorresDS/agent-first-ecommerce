@@ -1,5 +1,5 @@
 from django.core.paginator import Paginator
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.http import HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -24,6 +24,41 @@ STATUSES = (
     ("under_review", "Under review"),
     ("inactive", "Inactive"),
 )
+
+
+# The order a product's listings are summed up in; closed ones only when nothing else is left.
+SUMMARY_ORDER = ("active", "paused", "under_review", "inactive")
+
+
+def listing_counts(organization, products=(), combos=()):
+    """Mercado Libre items per status for these products and combos, in one query.
+
+    Items, not rows: a listing with three variations is one item.
+    """
+    product_ids = [row.pk for row in products]
+    combo_ids = [row.pk for row in combos]
+    if not product_ids and not combo_ids:
+        return {}
+    counts = {}
+    rows = (
+        MeliListing.objects.filter(organization=organization)
+        .filter(Q(product_id__in=product_ids) | Q(combo_id__in=combo_ids))
+        .values("product_id", "combo_id", "status")
+        .annotate(items=Count("item_id", distinct=True))
+    )
+    for row in rows:
+        key = ("product", row["product_id"]) if row["product_id"] else ("combo", row["combo_id"])
+        counts.setdefault(key, {})[row["status"] or "unknown"] = row["items"]
+    return counts
+
+
+def listing_summary(counts):
+    """ "2 active, 1 paused"; "1 closed" when that's all; "" when it was never listed."""
+    labels = dict(STATUSES)
+    parts = [f"{counts[status]} {labels[status].lower()}" for status in SUMMARY_ORDER if counts.get(status)]
+    if not parts and counts:
+        parts = [f"{number} {labels.get(status, status).lower()}" for status, number in counts.items()]
+    return ", ".join(parts)
 
 
 @require_app(AppAccess.App.CATALOG)
