@@ -81,3 +81,39 @@ def write_description(name, brand="", attributes=None):
     answer = ai.complete_json(DESCRIPTION_PROMPT, {"product": _product(name, brand, attributes)})
     text = str(answer.get("description") or "").strip()
     return text[:5000]
+
+
+ATTRIBUTES_PROMPT = (
+    "You fill Mercado Libre listing attributes for a product, in Spanish (Argentina).\n"
+    "You get the product's data and the attributes to fill: id, name, and allowed values when there "
+    "is a list. Use only facts from the product data. When an attribute has allowed values, answer "
+    "with exactly one of them. Skip any attribute you can't fill with confidence; never guess.\n"
+    "Return ONLY a JSON object mapping attribute id to value, for example {\"PERFUME_TYPE\": \"Eau de parfum\"}."
+)
+
+
+def fill_attributes(name, brand, attributes, missing):
+    """Values for missing attributes ([{id, name, values}]): only from the allowed list when there is one."""
+    answer = ai.complete_json(
+        ATTRIBUTES_PROMPT,
+        {
+            "product": _product(name, brand, attributes),
+            "attributes_to_fill": [
+                {"id": item["id"], "name": item.get("name", ""), "allowed_values": item.get("values") or []}
+                for item in missing
+            ],
+        },
+    )
+    filled = {}
+    for item in missing:
+        value = " ".join(str(answer.get(item["id"]) or "").split())[:100]
+        if not value:
+            continue
+        allowed = item.get("values") or []
+        if allowed:
+            match = next((option for option in allowed if option.lower() == value.lower()), None)
+            if match is None:
+                continue
+            value = match
+        filled[item["id"]] = value
+    return filled

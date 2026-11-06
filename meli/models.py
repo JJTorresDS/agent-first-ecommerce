@@ -495,6 +495,7 @@ class ListingDraft(ListingSettings):
 
     class Kind(models.TextChoices):
         CATALOG = "catalog", "Catalog"
+        PRODUCT = "product", "Regular listing"
 
     class Status(models.TextChoices):
         DRAFT = "draft", "Draft"
@@ -527,6 +528,16 @@ class ListingDraft(ListingSettings):
     catalog_picture = models.CharField(max_length=1024, blank=True)
     category_id = models.CharField(max_length=32, blank=True)
     has_regulatory = models.BooleanField(default=False, help_text="The category asks for the 155/98 file number.")
+    category_schema = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="The category's attributes, read in the check: [{id, name, required, values}].",
+    )
+    attributes = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Attributes for this listing only, by Mercado Libre id. They win over the product's.",
+    )
     price = models.DecimalField(max_digits=14, decimal_places=2)
     quantity = models.PositiveIntegerField(default=1)
     use_defaults = models.BooleanField(default=True)

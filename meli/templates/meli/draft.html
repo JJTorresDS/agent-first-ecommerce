@@ -1,15 +1,15 @@
 {% extends "base.html" %}
 
-{% block title %}{{ draft.catalog_name|default:draft.product.sku }}{% endblock %}
+{% block title %}{% if draft.kind == "product" %}{{ draft.product.title }}{% else %}{{ draft.catalog_name|default:draft.product.sku }}{% endif %}{% endblock %}
 
 {% block content %}
   {% include "catalog/_tabs.html" %}
   <div class="page-head">
-    <h1>{{ draft.catalog_name|default:draft.catalog_product_id }}</h1>
+    <h1>{% if draft.kind == "product" %}{{ draft.product.title }}{% else %}{{ draft.catalog_name|default:draft.catalog_product_id }}{% endif %}</h1>
     <span class="sku sku-lg">{{ draft.product.sku }}</span>
   </div>
   <section class="card">
-    <p class="muted"><a href="{{ draft.catalog_url }}" target="_blank" rel="noopener">{{ draft.catalog_product_id }}</a> · {{ available }} in stock in the Depósito · {{ draft.get_status_display }} · Draft #{{ draft.pk }}</p>
+    <p class="muted">{% if draft.kind == "product" %}Regular listing of <a href="{% url 'catalog_product' draft.product.pk %}">{{ draft.product.sku }}</a>{% else %}<a href="{{ draft.catalog_url }}" target="_blank" rel="noopener">{{ draft.catalog_product_id }}</a>{% endif %} · {{ available }} in stock in the Depósito · {{ draft.get_status_display }} · Draft #{{ draft.pk }}</p>
     {% if draft.error %}<p class="{% if draft.status == 'ready' or draft.status == 'published' %}muted{% else %}error{% endif %}">{{ draft.error }}</p>{% endif %}
     {% include "meli/_error_details.html" %}
     {% for error in form.non_field_errors %}<p class="error">{{ error }}</p>{% endfor %}
@@ -18,7 +18,9 @@
       <fieldset class="form-grid wide"{% if not can_edit %} disabled{% endif %}>
         {% include "_field.html" with field=form.price %}
         {% include "_field.html" with field=form.quantity %}
+        {% if draft.kind == "product" %}{% include "_field.html" with field=form.category_id %}{% endif %}
         {% include "meli/_check_field.html" with field=form.use_defaults %}
+        {% if draft.kind == "product" %}{% include "meli/_draft_attributes.html" %}{% endif %}
         <div class="form-grid wide" id="own-settings"{% if form.use_defaults.value %} hidden{% endif %}>
           {% include "meli/_settings_fields.html" %}
         </div>

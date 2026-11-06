@@ -19,6 +19,7 @@ from .client import (
     fetch_catalog_product,
     fetch_category_attributes,
     only_warnings,
+    post_item_description,
     predict_category,
     remove_flex,
     validate_item,
@@ -119,9 +120,87 @@ def build_item(draft, settings):
         body["catalog_listing"] = True
         # Mercado Libre still requires a title: the catalog product's own name, as its sell flow uses.
         body["title"] = draft.catalog_name
+    else:
+        product = draft.product
+        # User-products sellers get their title built from family_name; others use title.
+        body["title"] = product.title
+        body["family_name"] = product.title
+        body["pictures"] = [{"source": url} for url in pictures_of(product)]
+        attributes.extend(product_attributes(draft))
     if draft.category_id:
         body["category_id"] = draft.category_id
     return body
+
+
+def pictures_of(product):
+    urls = list(product.images.filter(organization_id=product.organization_id).values_list("url", flat=True))
+    return urls or [product.image_url]
+
+
+# Sent from their own fields, or never copied from a product's attributes.
+OWN_ATTRIBUTES = {"SELLER_SKU", "ITEM_CONDITION", REGULATORY}
+
+
+def _text(value):
+    if isinstance(value, list):
+        return ", ".join(_text(part) for part in value)
+    if isinstance(value, bool):
+        return "Sí" if value else "No"
+    return str(value).strip()
+
+
+def product_attributes(draft):
+    """Brand, model, GTIN, then the product's attributes the category knows, then the draft's own.
+
+    Keys are Mercado Libre ids; a product attribute the category doesn't have is not sent.
+    """
+    product = draft.product
+    model = product.product_model
+    known = {attribute["id"] for attribute in draft.category_schema or []}
+    values = {"BRAND": model.brand.name, "MODEL": model.name}
+    if product.gtin:
+        values["GTIN"] = product.gtin
+    for key, value in (product.attributes or {}).items():
+        if key in known and key not in OWN_ATTRIBUTES and _text(value):
+            values[key] = _text(value)
+    for key, value in (draft.attributes or {}).items():
+        if key not in OWN_ATTRIBUTES and _text(value):
+            values[key] = _text(value)
+    return [{"id": key, "value_name": value} for key, value in values.items()]
+
+
+def missing_attributes(draft, body):
+    """The category's required attributes the body doesn't have: [{id, name, values}]."""
+    sent = {attribute["id"] for attribute in body.get("attributes") or []}
+    return [
+        attribute
+        for attribute in draft.category_schema or []
+        if attribute.get("required") and attribute["id"] not in sent and attribute["id"] not in OWN_ATTRIBUTES
+    ]
+
+
+def schema_of(attributes):
+    """The parts of /categories/{id}/attributes a draft needs: id, name, required, allowed values."""
+    schema = []
+    for attribute in attributes or []:
+        if not isinstance(attribute, dict) or not attribute.get("id"):
+            continue
+        tags = attribute.get("tags") or {}
+        if isinstance(tags, list):
+            tags = {tag: True for tag in tags}
+        if tags.get("read_only") or tags.get("hidden"):
+            continue
+        required = bool(tags.get("required"))
+        values = [str(value.get("name")) for value in attribute.get("values") or [] if isinstance(value, dict) and value.get("name")]
+        schema.append(
+            {
+                "id": str(attribute["id"])[:60],
+                "name": str(attribute.get("name") or attribute["id"])[:100],
+                "required": required,
+                "values": values[:60] if required else [],
+            }
+        )
+    return schema
 
 
 def _site(organization):
@@ -181,7 +260,7 @@ def check(organization, draft_ids):
     """Read the catalog product, find the category, and let Mercado Libre validate each draft."""
     drafts = list(
         ListingDraft.objects.filter(organization=organization, pk__in=draft_ids, status=ListingDraft.Status.CHECKING)
-        .select_related("product")
+        .select_related("product__product_model__brand")
     )
     if not drafts:
         return
@@ -214,15 +293,30 @@ def _check_one(draft, token, defaults, stock, site):
         draft.catalog_picture = str((pictures[0] or {}).get("url") or "")[:1024] if pictures else ""
         if not draft.category_id:
             draft.category_id = _category_for(token, site, product)
+    elif not draft.category_id:
+        draft.category_id = draft.product.meli_category_id or _category_for(
+            token, site, {"name": draft.product.title}
+        )
     if draft.category_id:
         attributes = fetch_category_attributes(token, draft.category_id)
         draft.has_regulatory = any(attribute.get("id") == REGULATORY for attribute in attributes)
-    draft.save(update_fields=["catalog_name", "catalog_picture", "category_id", "has_regulatory", "updated_at"])
+        draft.category_schema = schema_of(attributes)
+    draft.save(
+        update_fields=["catalog_name", "catalog_picture", "category_id", "has_regulatory", "category_schema", "updated_at"]
+    )
     problem = _stock_problem(draft, stock)
     if problem:
         _set(draft, ListingDraft.Status.NEEDS_FIX, problem)
         return
+    if draft.kind != ListingDraft.Kind.CATALOG and not draft.category_id:
+        _set(draft, ListingDraft.Status.NEEDS_FIX, "Mercado Libre didn't suggest a category: enter one (MLA…).")
+        return
     body = build_item(draft, settings_of(draft, defaults))
+    missing = missing_attributes(draft, body) if draft.kind != ListingDraft.Kind.CATALOG else []
+    if missing:
+        names = ", ".join(attribute["name"] for attribute in missing)
+        _set(draft, ListingDraft.Status.NEEDS_FIX, f"Missing: {names}. Add them below.")
+        return
     try:
         validate_item(token, body)
     except MercadoLibreError as error:
@@ -286,7 +380,7 @@ def publish(organization, draft_ids):
         ).update(status=ListingDraft.Status.PUBLISHING, updated_at=timezone.now())
         if not claimed:
             continue
-        draft = ListingDraft.objects.select_related("product").get(pk=draft_id)
+        draft = ListingDraft.objects.select_related("product__product_model__brand").get(pk=draft_id)
         problem = _stock_problem(draft, stock_by_product(organization))
         if problem:
             _set(draft, ListingDraft.Status.FAILED, problem)
@@ -307,6 +401,13 @@ def publish(organization, draft_ids):
         draft.save(update_fields=["item_id", "published_at", "status", "error", "error_details", "updated_at"])
         logger.info("Draft %s posted as %s", draft.pk, draft.item_id)
         notes = []
+        description = draft.product.product_model.description.strip()
+        if draft.kind != ListingDraft.Kind.CATALOG and description:
+            try:
+                post_item_description(token, draft.item_id, description)
+            except Exception as error:
+                logger.warning("Description of %s wasn't posted: %s", draft.item_id, describe_failure(error))
+                notes.append(f"Posted without its description: {_reason(error)}")
         tags = ((item.get("shipping") or {}).get("tags")) or []
         if not settings.flex and "self_service_in" in tags:
             try:

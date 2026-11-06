@@ -1,8 +1,12 @@
-from django.http import HttpResponseForbidden
+from django.core.exceptions import ValidationError
+from django.http import HttpResponseBadRequest, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
+from django.views.decorators.http import require_POST
 
 from accounts.access import require_app
 from accounts.models import AppAccess, can_edit_products, membership_for
+from catalog.forms import attribute_rows, attributes_from
+from catalog.validators import validate_attributes
 
 from .drafts import defaults_for, inventory_started, queue_for_posting, stock_by_product
 from .forms import CatalogDraftForm, DraftForm, ListingDefaultsForm
@@ -86,9 +90,14 @@ def meli_draft(request, pk):
     from .jobs import dispatch_drafts
 
     organization, can_edit = _scope(request)
-    draft = get_object_or_404(ListingDraft.objects.select_related("product"), organization=organization, pk=pk)
+    draft = get_object_or_404(
+        ListingDraft.objects.select_related("product__product_model__brand"), organization=organization, pk=pk
+    )
     if request.method == "POST" and not can_edit:
         return HttpResponseForbidden(READ_ONLY)
+    regular = draft.kind == ListingDraft.Kind.PRODUCT
+    attributes = dict(draft.attributes or {})
+    attributes_error = ""
     available = stock_by_product(organization).get(draft.product_id, 0)
     defaults = defaults_for(organization)
     initial = {}
@@ -101,8 +110,16 @@ def meli_draft(request, pk):
             draft.delete()
             return redirect("meli_drafts")
         form = DraftForm(request.POST, instance=draft, available=available)
-        if form.is_valid():
+        if regular:
+            attributes = attributes_from(request.POST)
+            try:
+                validate_attributes(attributes)
+            except ValidationError as error:
+                attributes_error = " ".join(error.messages)
+        if form.is_valid() and not attributes_error:
             saved = form.save(commit=False)
+            if regular:
+                saved.attributes = attributes
             saved.status = ListingDraft.Status.CHECKING
             saved.error = ""
             saved.error_details = {}
@@ -118,9 +135,24 @@ def meli_draft(request, pk):
             "defaults": defaults,
             "available": available,
             "can_edit": can_edit and not draft.locked(),
+            **(_attributes_context(organization, draft, attributes, attributes_error) if regular else {}),
             "active_tab": "meli_new",
         },
     )
+
+
+def _attributes_context(organization, draft, attributes, error):
+    """The regular draft's own attributes, with an empty row for each one Mercado Libre still needs."""
+    from vimple.ai import enabled
+
+    missing = _missing(organization, draft)
+    rows = {**attributes, **{item["id"]: attributes.get(item["id"], "") for item in missing}}
+    return {
+        "attributes": attribute_rows(rows),
+        "missing": missing,
+        "attributes_error": error,
+        "ai": enabled(),
+    }
 
 
 def _recheck(organization, rows):
@@ -140,3 +172,112 @@ def _ids(values):
         except (TypeError, ValueError):
             continue
     return ids
+
+
+def _listable(organization, product):
+    """Why this product can't get a listing yet, or "" when it can."""
+    if not MercadoLibreAccount.objects.filter(organization=organization).exists():
+        return "Connect Mercado Libre to list it."
+    if not inventory_started(organization):
+        return "Count your stock first to list it."
+    if stock_by_product(organization).get(product.pk, 0) < 1:
+        return "No stock in the Depósito to list."
+    return ""
+
+
+@require_app(AppAccess.App.CATALOG)
+def meli_product_actions(request, pk):
+    """The product page's Mercado Libre buttons, loaded by htmx so catalog never imports meli."""
+    from catalog.models import MasterProduct
+
+    organization, can_edit = _scope(request)
+    product = get_object_or_404(MasterProduct, organization=organization, pk=pk)
+    return render(
+        request,
+        "meli/_product_actions.html",
+        {"product": product, "can_edit": can_edit, "reason": _listable(organization, product)},
+    )
+
+
+@require_app(AppAccess.App.CATALOG)
+@require_POST
+def meli_draft_from_product(request, pk):
+    """A draft for one product: a regular listing, or in its catalog when it came from one."""
+    from catalog.models import MasterProduct
+
+    from .jobs import dispatch_drafts
+
+    organization, can_edit = _scope(request)
+    if not can_edit:
+        return HttpResponseForbidden(READ_ONLY)
+    product = get_object_or_404(MasterProduct, organization=organization, pk=pk)
+    reason = _listable(organization, product)
+    if reason:
+        return HttpResponseBadRequest(reason)
+    in_catalog = request.POST.get("kind") == "catalog" and product.meli_catalog_product_id
+    draft = ListingDraft(
+        organization=organization,
+        kind=ListingDraft.Kind.CATALOG if in_catalog else ListingDraft.Kind.PRODUCT,
+        product=product,
+        price=product.list_price or 0,
+        quantity=1,
+        category_id=product.meli_category_id,
+        created_by=request.user,
+    )
+    if in_catalog:
+        draft.catalog_product_id = product.meli_catalog_product_id
+        draft.catalog_url = f"https://www.mercadolibre.com.ar/p/{product.meli_catalog_product_id}"
+    if product.list_price:
+        draft.status = ListingDraft.Status.CHECKING
+        draft.save()
+        dispatch_drafts(organization, "check", [draft.pk])
+    else:
+        draft.status = ListingDraft.Status.NEEDS_FIX
+        draft.error = "Set a price, then Save and check."
+        draft.save()
+    return redirect("meli_draft", pk=draft.pk)
+
+
+@require_app(AppAccess.App.CATALOG)
+@require_POST
+def meli_draft_ai(request, pk):
+    """AI values for the attributes a regular draft is missing, shown in its editor. Nothing is saved."""
+    from catalog.suggest import fill_attributes
+    from vimple import ai
+
+    organization, can_edit = _scope(request)
+    if not can_edit:
+        return HttpResponseForbidden(READ_ONLY)
+    draft = get_object_or_404(
+        ListingDraft.objects.select_related("product__product_model__brand"), organization=organization, pk=pk
+    )
+    if draft.locked():
+        return HttpResponseForbidden("Posted drafts can't change.")
+    attributes = attributes_from(request.POST)
+    draft.attributes = attributes
+    missing = _missing(organization, draft)
+    note = ""
+    try:
+        product = draft.product
+        filled = fill_attributes(
+            product.title, product.product_model.brand.name, {**product.attributes, **attributes}, missing
+        )
+    except ai.SuggestionFailed:
+        filled, note = {}, "The suggestion didn't come through; fill them in yourself."
+    if missing and not filled and not note:
+        note = "No confident values: fill them in yourself."
+    rows = {**attributes, **{item["id"]: filled.get(item["id"], attributes.get(item["id"], "")) for item in missing}}
+    return render(
+        request,
+        "meli/_draft_attributes.html",
+        {"draft": draft, "attributes": attribute_rows(rows), "missing": missing, "ai_note": note,
+         "can_edit": True, "ai": True},
+    )
+
+
+def _missing(organization, draft):
+    from .drafts import build_item, missing_attributes, settings_of
+
+    if draft.kind != ListingDraft.Kind.PRODUCT:
+        return []
+    return missing_attributes(draft, build_item(draft, settings_of(draft, defaults_for(organization))))

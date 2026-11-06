@@ -34,6 +34,10 @@ class FakeSellFlow:
         self.warn_only = False
         self.product_status = "active"
         self.flex_removed = []
+        self.category_attributes = [{"id": "BRAND"}, {"id": "155_98_RESOLUTION_FILE_NUMBER"}]
+        self.categories_read = []
+        self.descriptions = []
+        self.refuse_description = False
 
     def _refused(self, request):
         if self.refuse_text:
@@ -86,8 +90,14 @@ class FakeSellFlow:
                     {"domain_id": "MLA-PERFUMES", "category_id": "MLA1271"},
                 ]
             )
-        if url.path == "/categories/MLA1271/attributes":
-            return TokenResponse([{"id": "BRAND"}, {"id": "155_98_RESOLUTION_FILE_NUMBER"}])
+        if url.path.startswith("/categories/") and url.path.endswith("/attributes"):
+            self.categories_read.append(url.path.split("/")[2])
+            return TokenResponse(self.category_attributes)
+        if url.path == "/items/MLA900/description" and method == "POST":
+            self.descriptions.append(body)
+            if self.refuse_description:
+                raise self._refused(request)
+            return TokenResponse({"text": "", "plain_text": body["plain_text"]})
         if url.path == "/items/validate" and method == "POST":
             self.validated.append(body)
             if self.refuse or self.warn_only:

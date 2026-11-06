@@ -78,7 +78,9 @@ class DraftForm(forms.ModelForm):
 
     class Meta:
         model = ListingDraft
-        fields = ["price", "quantity", "use_defaults", *ListingSettings.SETTING_FIELDS]
+        fields = ["price", "quantity", "category_id", "use_defaults", *ListingSettings.SETTING_FIELDS]
+        labels = {"category_id": "Mercado Libre category"}
+        help_texts = {"category_id": "MLA… Empty: Mercado Libre suggests one from the title."}
 
     def __init__(self, *args, available, **kwargs):
         super().__init__(*args, **kwargs)

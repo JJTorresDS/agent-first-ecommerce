@@ -17,7 +17,7 @@ from accounts.views import (
     set_app_access,
 )
 from inbox.views import inbox, inbox_reply
-from meli.draft_views import meli_draft, meli_drafts
+from meli.draft_views import meli_draft, meli_draft_ai, meli_draft_from_product, meli_drafts, meli_product_actions
 from meli.import_views import catalog_import
 from meli.listing_views import meli_listings
 from meli.views import (
@@ -67,6 +67,9 @@ urlpatterns = [
     path("catalog/import/", catalog_import, name="catalog_import"),
     path("catalog/meli/new/", meli_drafts, name="meli_drafts"),
     path("catalog/meli/new/<int:pk>/", meli_draft, name="meli_draft"),
+    path("catalog/meli/new/<int:pk>/ai/", meli_draft_ai, name="meli_draft_ai"),
+    path("catalog/meli/products/<uuid:pk>/", meli_product_actions, name="meli_product_actions"),
+    path("catalog/meli/products/<uuid:pk>/draft/", meli_draft_from_product, name="meli_draft_from_product"),
     path("catalog/", include("catalog.urls")),
     path("purchases/", include("purchasing.urls")),
     path("inventory/", include("inventory.urls")),

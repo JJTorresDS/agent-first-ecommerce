@@ -1,0 +1,15 @@
+<div id="draft-attributes" class="wide">
+  <div class="card-head">
+    <h3>Attributes for this listing</h3>
+    {% if ai and can_edit and missing %}
+      <button type="button" class="ai-button" hx-post="{% url 'meli_draft_ai' draft.pk %}" hx-include="#draft-form" hx-target="#draft-attributes" hx-swap="outerHTML" hx-sync="this:drop">
+        <span class="spinner htmx-indicator" aria-hidden="true"></span>Fill with AI
+      </button>
+    {% endif %}
+  </div>
+  {% if missing %}<p class="muted">Mercado Libre needs: {% for item in missing %}<strong>{{ item.name }}</strong> ({{ item.id }}){% if not forloop.last %}, {% endif %}{% endfor %}.</p>{% endif %}
+  {% if ai_note %}<p class="muted">{{ ai_note }}</p>{% endif %}
+  <p class="muted">These win over the product's attributes for this listing only. Brand, model, GTIN and the product's attributes the category knows are sent too.</p>
+  {% if attributes_error %}<p class="error">{{ attributes_error }}</p>{% endif %}
+  {% include "catalog/_attributes_editor.html" %}
+</div>

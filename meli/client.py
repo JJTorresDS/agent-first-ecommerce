@@ -448,3 +448,13 @@ def fetch_item_description(access_token, item_id):
             return ""
         raise
     return str(body.get("plain_text") or "")
+
+
+def post_item_description(access_token, item_id, text):
+    item = quote(str(item_id), safe="")
+    _api_request(
+        access_token,
+        f"https://api.mercadolibre.com/items/{item}/description",
+        {"plain_text": text},
+        expect=(dict, type(None)),
+    )
