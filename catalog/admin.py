@@ -2,7 +2,7 @@ from django.contrib import admin
 
 from purchasing.models import PurchaseItem
 
-from .models import Brand, Category, MasterProduct, ProductModel
+from .models import Brand, Category, Combo, ComboItem, MasterProduct, ProductModel
 
 
 @admin.register(Category)
@@ -82,7 +82,7 @@ class MasterProductAdmin(admin.ModelAdmin):
     inlines = [PurchaseLineInline]
     fieldsets = (
         (None, {"fields": ("organization", "product_model", "variant", "sku", "title", "status", "image_url")}),
-        ("Listing", {"fields": ("gtin",)}),
+        ("Listing", {"fields": ("gtin", "meli_catalog_product_id", "meli_category_id")}),
         ("Price", {"fields": ("list_price", "currency")}),
         ("Package", {"fields": ("weight_g", "length_cm", "width_cm", "height_cm")}),
         ("Secondary attributes", {"fields": ("attributes",)}),
@@ -101,3 +101,23 @@ class MasterProductAdmin(admin.ModelAdmin):
     @admin.display(ordering="product_model__category__name")
     def category(self, obj):
         return obj.product_model.category
+
+
+class ComboItemInline(admin.TabularInline):
+    model = ComboItem
+    fields = ("product", "quantity")
+    autocomplete_fields = ("product",)
+    extra = 0
+
+
+@admin.register(Combo)
+class ComboAdmin(admin.ModelAdmin):
+    list_display = ("sku", "title", "organization", "status", "list_price", "updated_at")
+    list_filter = ("status", "organization")
+    search_fields = ("sku", "title", "code")
+    readonly_fields = ("sku", "created_at", "updated_at")
+    inlines = [ComboItemInline]
+
+    def get_readonly_fields(self, request, obj=None):
+        # The code makes the SKU, so it's fixed once saved.
+        return self.readonly_fields + (("code", "organization") if obj else ())
