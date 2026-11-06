@@ -81,10 +81,11 @@ def _error_reason(error, payload=None):
     if isinstance(payload, dict):
         causes = payload.get("cause")
         if isinstance(causes, list):
-            for cause in causes:
-                if isinstance(cause, dict) and cause.get("message"):
-                    reason = str(cause["message"])
-                    break
+            # An error is the reason; a warning only when there is nothing else.
+            messages = [cause for cause in causes if isinstance(cause, dict) and cause.get("message")]
+            errors = [cause for cause in messages if cause.get("type") != "warning"]
+            if errors or messages:
+                reason = str((errors or messages)[0]["message"])
         reason = reason or str(payload.get("message") or payload.get("error") or "")
     reason = " ".join(reason.split())[:300]
     return reason or f"HTTP {error.code}"
@@ -405,6 +406,15 @@ def fetch_category_attributes(access_token, category_id):
         f"https://api.mercadolibre.com/categories/{category}/attributes",
         expect=list,
     )
+
+
+def only_warnings(error):
+    """True when Mercado Libre's refusal lists causes and every one is a warning, which doesn't block a listing."""
+    payload = getattr(error, "payload", None)
+    causes = payload.get("cause") if isinstance(payload, dict) else None
+    if not isinstance(causes, list) or not causes:
+        return False
+    return all(isinstance(cause, dict) and cause.get("type") == "warning" for cause in causes)
 
 
 def validate_item(access_token, body):

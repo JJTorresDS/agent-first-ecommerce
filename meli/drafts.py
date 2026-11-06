@@ -18,6 +18,7 @@ from .client import (
     describe_failure,
     fetch_catalog_product,
     fetch_category_attributes,
+    only_warnings,
     predict_category,
     remove_flex,
     validate_item,
@@ -34,6 +35,9 @@ WARRANTY_TYPE = {
     ListingSettings.Warranty.FACTORY: "2230279",
 }
 CONDITION_NEW = "2230284"
+# Mercado Libre requires free shipping from this price (ARS); below it, saying no avoids its
+# "free shipping costs exceed the sale" warning. The vimple-publisher scripts use the same line.
+FREE_SHIPPING_FROM = Decimal("33000")
 REGULATORY = "155_98_RESOLUTION_FILE_NUMBER"
 NOT_APPLICABLE = "-1"
 CATALOG_URL = re.compile(r"/p/(MLA\d+)", re.IGNORECASE)
@@ -107,7 +111,7 @@ def build_item(draft, settings):
         "listing_type_id": LISTING_TYPE[bool(settings.installments)],
         "condition": settings.condition,
         "sale_terms": sale_terms,
-        "shipping": {"mode": "me2", "local_pick_up": False},
+        "shipping": {"mode": "me2", "local_pick_up": False, "free_shipping": Decimal(draft.price) >= FREE_SHIPPING_FROM},
         "attributes": attributes,
     }
     if draft.kind == ListingDraft.Kind.CATALOG:
@@ -148,6 +152,10 @@ def _details(call, body, error):
     if not isinstance(error, MercadoLibreError):
         return {}
     return {"call": call, "status": error.status, "response": error.payload, "sent": body}
+
+
+def _warnings(error):
+    return "; ".join(str(cause.get("message")) for cause in error.payload["cause"] if cause.get("message"))
 
 
 def _log_refusal(what, draft, error):
@@ -218,7 +226,12 @@ def _check_one(draft, token, defaults, stock, site):
     try:
         validate_item(token, body)
     except MercadoLibreError as error:
-        error.details = _details("POST /items/validate", body, error)
+        details = _details("POST /items/validate", body, error)
+        if only_warnings(error):
+            # Warnings don't block a listing: it's ready, and they stay visible.
+            _set(draft, ListingDraft.Status.READY, f"Mercado Libre warns: {_warnings(error)}", details)
+            return
+        error.details = details
         raise
     _set(draft, ListingDraft.Status.READY)
 

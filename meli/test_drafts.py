@@ -31,20 +31,34 @@ class FakeSellFlow:
         self.created = []
         self.refuse = ""
         self.refuse_text = ""
+        self.warn_only = False
         self.product_status = "active"
         self.flex_removed = []
 
     def _refused(self, request):
         if self.refuse_text:
             return HTTPError(request.full_url, 502, "Bad Gateway", {}, BytesIO(self.refuse_text.encode()))
+        if self.warn_only:
+            body = json.dumps(
+                {
+                    "error": "validation_error",
+                    "status": 400,
+                    "message": "Validation error",
+                    "cause": [
+                        {"code": "shipping.lost_me1_by_user", "type": "warning", "message": "User has not mode me1"},
+                        {"code": "shipping.free_shipping.cost_exceeded", "type": "warning", "message": "Free shipping costs exceeds sale"},
+                    ],
+                }
+            )
+            return HTTPError(request.full_url, 400, "Bad Request", {}, BytesIO(body.encode()))
         body = json.dumps(
             {
                 "message": "Validation error",
                 "error": "validation_error",
                 "status": 400,
                 "cause": [
-                    {"code": "item.shipping.mode.invalid", "message": self.refuse, "references": ["item.shipping.mode"]},
-                    {"code": "item.title.length", "message": "Second cause", "type": "warning"},
+                    {"code": "item.title.length", "message": "A warning first", "type": "warning"},
+                    {"code": "item.shipping.mode.invalid", "message": self.refuse, "type": "error", "references": ["item.shipping.mode"]},
                 ],
             }
         )
@@ -76,7 +90,7 @@ class FakeSellFlow:
             return TokenResponse([{"id": "BRAND"}, {"id": "155_98_RESOLUTION_FILE_NUMBER"}])
         if url.path == "/items/validate" and method == "POST":
             self.validated.append(body)
-            if self.refuse:
+            if self.refuse or self.warn_only:
                 raise self._refused(request)
             return TokenResponse(None)
         if url.path == "/items" and method == "POST":
@@ -140,7 +154,11 @@ class BodyTests(DraftTestCase):
         self.assertIs(body["catalog_listing"], True)
         self.assertEqual((body["price"], body["currency_id"], body["available_quantity"]), (65000, "ARS", 2))
         self.assertEqual(body["listing_type_id"], "gold_special")
-        self.assertEqual(body["shipping"], {"mode": "me2", "local_pick_up": False})
+        self.assertEqual(body["shipping"], {"mode": "me2", "local_pick_up": False, "free_shipping": True})
+        draft.price = Decimal("15999")
+        self.assertIs(build_item(draft, defaults_for(self.organization))["shipping"]["free_shipping"], False)
+        draft.price = Decimal("33000")
+        self.assertIs(build_item(draft, defaults_for(self.organization))["shipping"]["free_shipping"], True)
         self.assertIn({"id": "INVOICE", "value_id": "6891888"}, body["sale_terms"])
         self.assertIn({"id": "WARRANTY_TYPE", "value_id": "2230280"}, body["sale_terms"])
         self.assertIn({"id": "WARRANTY_TIME", "value_name": "30 días"}, body["sale_terms"])
@@ -195,8 +213,10 @@ class DraftFlowTests(DraftTestCase):
         details = draft.error_details
         self.assertEqual((details["call"], details["status"]), ("POST /items/validate", 400))
         self.assertEqual(details["response"]["error"], "validation_error")
-        self.assertEqual([cause["code"] for cause in details["response"]["cause"]], ["item.shipping.mode.invalid", "item.title.length"])
-        self.assertEqual(details["sent"]["shipping"], {"mode": "me2", "local_pick_up": False})
+        self.assertEqual([cause["code"] for cause in details["response"]["cause"]], ["item.title.length", "item.shipping.mode.invalid"])
+        self.assertEqual(details["sent"]["shipping"], {"mode": "me2", "local_pick_up": False, "free_shipping": True})
+        # The error is the reason, not the warning listed after it.
+        self.assertEqual(draft.error, "User has not mode me1")
         self.assertEqual(details["sent"]["catalog_product_id"], CATALOG)
         for url in ("/catalog/meli/new/", f"/catalog/meli/new/{draft.pk}/"):
             page = self.client.get(url)
@@ -212,6 +232,28 @@ class DraftFlowTests(DraftTestCase):
         draft.refresh_from_db()
         self.assertEqual((draft.status, draft.error_details), (ListingDraft.Status.READY, {}))
         self.assertNotContains(self.client.get("/catalog/meli/new/"), "<summary>Details</summary>", html=False)
+
+    def test_warnings_alone_dont_block_the_draft(self):
+        self.meli.warn_only = True
+        self.add()
+        draft = self.draft()
+        self.assertEqual(draft.status, ListingDraft.Status.READY)
+        self.assertEqual(draft.error, "Mercado Libre warns: User has not mode me1; Free shipping costs exceeds sale")
+        self.assertEqual(draft.error_details["response"]["cause"][0]["code"], "shipping.lost_me1_by_user")
+        page = self.client.get("/catalog/meli/new/")
+        self.assertContains(page, '<p class="muted">Mercado Libre warns:')
+        self.assertContains(page, "Post all ready (1)")
+        self.client.post("/catalog/meli/new/", {"action": "post_all"})
+        draft.refresh_from_db()
+        self.assertEqual((draft.status, draft.error_details), (ListingDraft.Status.PUBLISHED, {}))
+
+    def test_the_draft_number_shows_and_heads_the_copied_details(self):
+        self.meli.refuse = "Nope"
+        self.add()
+        draft = self.draft()
+        self.assertTrue(draft.error_details_text().startswith('{\n  "draft": %d,' % draft.pk))
+        self.assertContains(self.client.get("/catalog/meli/new/"), f"Draft #{draft.pk}")
+        self.assertContains(self.client.get(f"/catalog/meli/new/{draft.pk}/"), f"Draft #{draft.pk}")
 
     def test_an_answer_that_isnt_json_is_kept_as_text(self):
         self.meli.refuse = "x"

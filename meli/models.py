@@ -563,7 +563,8 @@ class ListingDraft(ListingSettings):
             return ""
         import json
 
-        return json.dumps(self.error_details, indent=2, ensure_ascii=False, default=str)
+        # The draft number first, so a pasted copy says which draft it came from.
+        return json.dumps({"draft": self.pk, **self.error_details}, indent=2, ensure_ascii=False, default=str)
 
     def item_url(self):
         return f"https://articulo.mercadolibre.com.ar/{self.item_id[:3]}-{self.item_id[3:]}" if self.item_id else ""

@@ -15,10 +15,10 @@
               <tr>
                 <td class="check-col">{% if can_edit and draft.status == "ready" %}<input type="checkbox" name="draft" value="{{ draft.pk }}" aria-label="Post {{ draft.product.sku }}">{% endif %}</td>
                 <td class="thumb-cell">{% if draft.catalog_picture %}<img class="thumb" src="{{ draft.catalog_picture }}" alt="" loading="lazy">{% else %}<span class="thumb"></span>{% endif %}</td>
-                <td><span class="sku">{{ draft.product.sku }}</span></td>
+                <td><span class="sku">{{ draft.product.sku }}</span><p class="muted draft-number">Draft #{{ draft.pk }}</p></td>
                 <td>
                   <a href="{{ draft.catalog_url }}" target="_blank" rel="noopener">{{ draft.catalog_name|default:draft.catalog_product_id }}</a>
-                  {% if draft.error %}<p class="{% if draft.status == 'published' %}muted{% else %}error{% endif %}">{{ draft.error }}</p>{% endif %}
+                  {% if draft.error %}<p class="{% if draft.status == 'published' or draft.status == 'ready' %}muted{% else %}error{% endif %}">{{ draft.error }}</p>{% endif %}
                   {% include "meli/_error_details.html" %}
                 </td>
                 <td class="num">ARS {{ draft.price }}</td>

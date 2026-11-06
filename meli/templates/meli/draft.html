@@ -9,8 +9,8 @@
     <span class="sku sku-lg">{{ draft.product.sku }}</span>
   </div>
   <section class="card">
-    <p class="muted"><a href="{{ draft.catalog_url }}" target="_blank" rel="noopener">{{ draft.catalog_product_id }}</a> · {{ available }} in stock in the Depósito · {{ draft.get_status_display }}</p>
-    {% if draft.error %}<p class="error">{{ draft.error }}</p>{% endif %}
+    <p class="muted"><a href="{{ draft.catalog_url }}" target="_blank" rel="noopener">{{ draft.catalog_product_id }}</a> · {{ available }} in stock in the Depósito · {{ draft.get_status_display }} · Draft #{{ draft.pk }}</p>
+    {% if draft.error %}<p class="{% if draft.status == 'ready' or draft.status == 'published' %}muted{% else %}error{% endif %}">{{ draft.error }}</p>{% endif %}
     {% include "meli/_error_details.html" %}
     {% for error in form.non_field_errors %}<p class="error">{{ error }}</p>{% endfor %}
     <form method="post" class="form-grid" id="draft-form">
