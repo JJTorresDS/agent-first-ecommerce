@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+
+{% block title %}Import from Mercado Libre{% endblock %}
+
+{% block content %}
+  {% include "catalog/_tabs.html" %}
+  <div class="page-head">
+    <h1>Import from Mercado Libre</h1>
+  </div>
+
+  {% if not can_edit %}
+    <div class="card empty"><p>Only owners and admins can import products.</p></div>
+  {% elif not connected %}
+    <div class="card empty">
+      <p>Mercado Libre isn't connected for this organization.</p>
+      <p><a href="{% url 'mercadolibre_settings' %}">Connect Mercado Libre</a> to read products from it.</p>
+    </div>
+  {% elif not form %}
+    <section class="card">
+      <p class="muted">Paste the link of a product you'd like to sell: its catalog page (…/p/MLA…) or a listing. Vimple reads it from Mercado Libre and shows a new catalog product to review. Nothing is saved until you do.</p>
+      {% if error %}<p class="error">{{ error }}</p>{% endif %}
+      <form method="post" class="form-grid">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="read">
+        <div class="field wide">
+          <label for="id_url">Mercado Libre link</label>
+          <input type="url" id="id_url" name="url" value="{{ url }}" required placeholder="https://www.mercadolibre.com.ar/…/p/MLA46233297">
+        </div>
+        <div class="actions wide"><span></span><button class="primary" type="submit">Read product</button></div>
+      </form>
+    </section>
+  {% else %}
+    <form method="post" id="import-form">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="save">
+      {{ form.url }}{{ form.brand_hint }}{{ form.meli_catalog_product_id }}{{ form.meli_category_id }}
+      {% for error in form.non_field_errors %}<p class="error">{{ error }}</p>{% endfor %}
+
+      <section class="card">
+        <div class="card-head">
+          <h2>Product</h2>
+          {% if ai %}
+            <button type="button" class="ai-button" hx-post="{% url 'catalog_ai' 'codes' %}" hx-include="#import-form" hx-swap="none" hx-sync="this:drop"
+              data-ai-note="ai-note"
+              data-ai-map='{"category": "id_category", "brand": "id_brand", "category_code": "id_category-code", "category_name": "id_category-name", "brand_code": "id_brand-code", "brand_name": "id_brand-name", "model_code": "id_model_code", "model_name": "id_model_name", "variant": "id_variant"}'>
+              <span class="spinner htmx-indicator" aria-hidden="true"></span>Suggest codes (AI)
+            </button>
+          {% endif %}
+        </div>
+        <p class="muted" id="ai-note" hidden></p>
+        {% if form.brand_hint.value %}<p class="muted">Mercado Libre's brand: <strong>{{ form.brand_hint.value }}</strong></p>{% endif %}
+        <div class="form-grid">
+          {% include "catalog/_code_select.html" with field=form.category kind="category" %}
+          {% include "catalog/_code_select.html" with field=form.brand kind="brand" %}
+          {% include "_field.html" with field=form.product_model wide=True %}
+          {% include "_field.html" with field=form.model_code %}
+          {% include "_field.html" with field=form.model_name %}
+          {% include "_field.html" with field=form.variant %}
+          {% include "_field.html" with field=form.gtin %}
+          {% include "_field.html" with field=form.title wide=True %}
+          {% include "_field.html" with field=form.list_price %}
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>Description</h2>
+          {% if ai %}
+            <button type="button" class="ai-button" hx-post="{% url 'catalog_ai' 'description' %}" hx-include="#import-form" hx-swap="none" hx-sync="this:drop"
+              data-ai-note="ai-description-note" data-ai-map='{"description": "id_description"}'>
+              <span class="spinner htmx-indicator" aria-hidden="true"></span>Write my own (AI)
+            </button>
+          {% endif %}
+        </div>
+        <p class="muted" id="ai-description-note" hidden></p>
+        <p class="muted">Saved on the new model. Write your own rather than copying another seller's text.</p>
+        {% include "_field.html" with field=form.description %}
+      </section>
+
+      <section class="card">
+        <h2>Pictures</h2>
+        <p class="muted">The first ticked one is the main picture. You can replace them later.</p>
+        <div class="picture-picks">
+          {% for url, checked in pictures %}
+            <label class="picture-pick">
+              <input type="hidden" name="picture_option" value="{{ url }}">
+              <input type="checkbox" name="picture" value="{{ url }}"{% if checked %} checked{% endif %}>
+              <img class="thumb" src="{{ url }}" alt="Picture {{ forloop.counter }}" loading="lazy">
+            </label>
+          {% empty %}
+            <p class="muted">Mercado Libre has no pictures for it.</p>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Attributes</h2>
+        <p class="muted">From Mercado Libre, with its own ids, so a listing can send them back. Remove what doesn't apply.</p>
+        {% include "catalog/_attributes_editor.html" %}
+      </section>
+
+      <div class="actions"><button class="primary" type="submit">Save to the catalog</button></div>
+    </form>
+    {% for dialog in code_dialogs %}
+      <dialog class="modal" id="code-dialog-{{ dialog.kind }}" aria-labelledby="code-dialog-{{ dialog.kind }}-title">
+        <h2 id="code-dialog-{{ dialog.kind }}-title">New {{ dialog.label }}</h2>
+        {% include "catalog/_code_dialog_form.html" %}
+      </dialog>
+    {% endfor %}
+  {% endif %}
+{% endblock %}

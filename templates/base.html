@@ -465,6 +465,19 @@
     .draft-number { margin: 0.3rem 0 0; font-size: 0.75rem; }
     .error-details summary { cursor: pointer; font-size: 0.82rem; color: var(--muted); }
     .error-details pre { max-height: 18rem; overflow: auto; white-space: pre-wrap; word-break: break-word; font-size: 0.75rem; background: var(--gray-1); border: 1px solid var(--line); border-radius: 6px; padding: 0.6rem; margin: 0.4rem 0; }
+    a.button { display: inline-block; border: 1px solid var(--line-strong); background: var(--surface); color: var(--text); border-radius: 6px; padding: 0.45rem 0.8rem; text-decoration: none; }
+    a.button:active { background: var(--gray-2); }
+    .head-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    .card-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
+    .card-head h2 { margin: 0; }
+    .ai-button { display: inline-flex; align-items: center; gap: 0.4rem; }
+    .ai-button .htmx-indicator { display: none; width: 0.8rem; height: 0.8rem; }
+    .ai-button.htmx-request .htmx-indicator { display: inline-block; }
+    .picture-picks { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+    .picture-pick { display: flex; flex-direction: column; align-items: center; gap: 0.25rem; cursor: pointer; }
+    .picture-pick .thumb { width: 72px; height: 72px; }
+    .picture-strip { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.75rem; }
+    .picture-strip .thumb { width: 56px; height: 56px; }
     .select-add { display: flex; gap: 0.4rem; align-items: stretch; }
     .select-add select { flex: 1; min-width: 0; }
     button.add-code { flex: none; width: 2.4rem; padding: 0; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); color: var(--ink); font-size: 1.15rem; line-height: 1; cursor: pointer; }
@@ -817,14 +830,40 @@
         if (opener) {
           var dialog = document.getElementById(opener.getAttribute("data-dialog"));
           if (!dialog) return;
-          clearDialog(dialog);
+          // Old errors go; typed or AI-suggested values stay until the row is added or Cancel.
+          dialog.querySelectorAll("p.error").forEach(function (error) { error.remove(); });
           dialog.showModal();
           var first = dialog.querySelector("input:not([type=hidden])");
           if (first) first.focus();
           return;
         }
         var closer = event.target.closest("[data-close-dialog]");
-        if (closer) closer.closest("dialog").close();
+        if (closer) {
+          var open = closer.closest("dialog");
+          open.close();
+          clearDialog(open);
+        }
+      });
+      // AI suggestions (catalog_ai): the button that asked maps each suggested value to a field id
+      // (data-ai-map, JSON) and shows the message in data-ai-note. Nothing is saved until the form is.
+      document.body.addEventListener("ai-suggested", function (event) {
+        var button = event.target.closest ? event.target.closest("[data-ai-map]") : null;
+        if (!button) return;
+        var map = JSON.parse(button.getAttribute("data-ai-map") || "{}");
+        var values = event.detail.values || {};
+        Object.keys(values).forEach(function (key) {
+          var field = map[key] && document.getElementById(map[key]);
+          if (!field) return;
+          if (field.tagName === "SELECT" && !field.querySelector('option[value="' + values[key] + '"]')) return;
+          field.value = values[key];
+          field.dispatchEvent(new Event("input", { bubbles: true }));
+          field.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+        var note = document.getElementById(button.getAttribute("data-ai-note") || "");
+        if (note) {
+          note.textContent = event.detail.message || "";
+          note.hidden = !event.detail.message;
+        }
       });
       // A [data-copy-target] button copies that element's text, such as Mercado Libre's answer on a draft.
       document.addEventListener("click", function (event) {

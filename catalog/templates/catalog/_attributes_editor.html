@@ -1,0 +1,34 @@
+<fieldset id="attributes"{% if not can_edit %} disabled{% endif %}>
+  {% for key, value in attributes %}
+    <div class="attr-row">
+      <input type="text" name="attr_key" value="{{ key }}" aria-label="Attribute">
+      <input type="text" name="attr_value" value="{{ value }}" aria-label="Value">
+      {% if can_edit %}<button type="button" class="attr-remove" aria-label="Remove attribute">×</button>{% endif %}
+    </div>
+  {% endfor %}
+  <template id="attr-template">
+    <div class="attr-row">
+      <input type="text" name="attr_key" placeholder="COLOR" aria-label="Attribute">
+      <input type="text" name="attr_value" placeholder="Rojo" aria-label="Value">
+      <button type="button" class="attr-remove" aria-label="Remove attribute">×</button>
+    </div>
+  </template>
+</fieldset>
+{% if can_edit %}
+  <button type="button" id="attr-add">Add attribute</button>
+  <script>
+    (function () {
+      var box = document.getElementById("attributes");
+      var template = document.getElementById("attr-template");
+      document.getElementById("attr-add").addEventListener("click", function () {
+        var row = template.content.firstElementChild.cloneNode(true);
+        box.appendChild(row);
+        row.querySelector("input").focus();
+      });
+      box.addEventListener("click", function (event) {
+        var remove = event.target.closest(".attr-remove");
+        if (remove) remove.closest(".attr-row").remove();
+      });
+    })();
+  </script>
+{% endif %}

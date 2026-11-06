@@ -51,6 +51,9 @@ MELI_AUTH_URL = os.environ.get(
 )
 MELI_TOKEN_URL = "https://api.mercadolibre.com/oauth/token"
 MELI_WEBHOOK_SECRET = os.environ.get("MELI_WEBHOOK_SECRET", "")
+# Mistral writes suggestions the user reviews (vimple/ai.py). Empty hides the AI buttons; tests never call it.
+MISTRAL_API_KEY = "" if sys.argv[1:2] == ["test"] else os.environ.get("MISTRAL_API_KEY", "").strip()
+MISTRAL_MODEL = os.environ.get("MISTRAL_MODEL", "").strip() or "mistral-small-latest"
 # Google Picker for choosing receipt folders. Empty hides the Drive buttons.
 GOOGLE_PICKER_API_KEY = os.environ.get("GOOGLE_PICKER_API_KEY", "")
 GOOGLE_CLOUD_PROJECT_NUMBER = os.environ.get("GOOGLE_CLOUD_PROJECT_NUMBER", "")

@@ -1,8 +1,11 @@
 import re
 
 from django import forms
+from django.core.exceptions import ValidationError
+from django.db import transaction
 
 from .models import Brand, Category, MasterProduct, ProductModel
+from .validators import validate_attributes
 
 
 _NUMBER = re.compile(r"-?(0|[1-9][0-9]*)([.,][0-9]+)?")
@@ -83,6 +86,8 @@ class ProductForm(TenantForm):
             "length_cm",
             "width_cm",
             "height_cm",
+            "meli_catalog_product_id",
+            "meli_category_id",
         ]
 
 
@@ -130,3 +135,118 @@ def _scalar(value):
         return value
     value = value.replace(",", ".")
     return float(value) if "." in value else int(value)
+
+
+class ImportForm(forms.Form):
+    """A new product from values read on Mercado Libre, reviewed by the user.
+
+    It makes the model too unless an existing one is picked. Every select is limited to the
+    organization, and the model and product are checked like typed ones before anything is saved.
+    """
+
+    url = forms.CharField(widget=forms.HiddenInput, required=False, max_length=1024)
+    brand_hint = forms.CharField(widget=forms.HiddenInput, required=False, max_length=100)
+    meli_catalog_product_id = forms.CharField(widget=forms.HiddenInput, required=False, max_length=32)
+    meli_category_id = forms.CharField(widget=forms.HiddenInput, required=False, max_length=32)
+    category = forms.ModelChoiceField(queryset=Category.objects.none())
+    brand = forms.ModelChoiceField(queryset=Brand.objects.none())
+    product_model = forms.ModelChoiceField(
+        queryset=ProductModel.objects.none(),
+        required=False,
+        label="Existing model",
+        help_text="Or leave empty and give the new model's code and name.",
+    )
+    model_code = forms.CharField(required=False, max_length=10, label="New model code", help_text="Example: 885")
+    model_name = forms.CharField(required=False, max_length=200, label="New model name")
+    variant = forms.CharField(max_length=10, help_text="What sets it apart: 30ML, ROJO, XL. UNICO when there is one.")
+    title = forms.CharField(max_length=200)
+    gtin = forms.CharField(required=False, max_length=14, label="GTIN")
+    list_price = forms.DecimalField(required=False, max_digits=14, decimal_places=2, min_value=0)
+    description = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows": 5}))
+
+    def __init__(self, *args, organization, pictures=(), attributes=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.organization = organization
+        self.pictures = list(pictures)
+        self.attributes = attributes or {}
+        self.fields["category"].queryset = Category.objects.filter(organization=organization)
+        self.fields["brand"].queryset = Brand.objects.filter(organization=organization)
+        self.fields["product_model"].queryset = ProductModel.objects.filter(organization=organization).select_related(
+            "brand"
+        )
+
+    def clean(self):
+        cleaned = super().clean()
+        category, brand, model = cleaned.get("category"), cleaned.get("brand"), cleaned.get("product_model")
+        if not self.pictures:
+            self.add_error(None, "Pick at least one picture.")
+        try:
+            validate_attributes(self.attributes)
+        except ValidationError as error:
+            self.add_error(None, error)
+        if category is None or brand is None:
+            return cleaned
+        if model is not None:
+            if (model.category_id, model.brand_id) != (category.pk, brand.pk):
+                self.add_error("product_model", "That model has another category or brand.")
+                return cleaned
+            self.new_model = None
+        else:
+            if not cleaned.get("model_code") or not cleaned.get("model_name"):
+                self.add_error("model_code", "Pick an existing model or give the new one's code and name.")
+                return cleaned
+            model = ProductModel(
+                organization=self.organization,
+                category=category,
+                brand=brand,
+                code=cleaned["model_code"],
+                name=cleaned["model_name"],
+                description=cleaned.get("description") or "",
+            )
+            try:
+                model.full_clean()
+            except ValidationError as error:
+                self._add_model_errors(error, {"code": "model_code", "name": "model_name"})
+                return cleaned
+            self.new_model = model
+        product = MasterProduct(
+            organization=self.organization,
+            variant=cleaned.get("variant") or "",
+            title=cleaned.get("title") or "",
+            gtin=cleaned.get("gtin") or "",
+            list_price=cleaned.get("list_price"),
+            image_url=self.pictures[0] if self.pictures else "",
+            attributes=self.attributes,
+            meli_catalog_product_id=cleaned.get("meli_catalog_product_id") or "",
+            meli_category_id=cleaned.get("meli_category_id") or "",
+        )
+        if self.new_model is None:
+            product.product_model = model
+        try:
+            # A new model isn't saved yet: its products can't clash on (model, variant).
+            product.full_clean(exclude=["product_model"] if self.new_model else None)
+        except ValidationError as error:
+            self._add_model_errors(error, {"variant": "variant", "gtin": "gtin", "title": "title"})
+            return cleaned
+        self.product = product
+        return cleaned
+
+    def _add_model_errors(self, error, fields):
+        for field, messages in getattr(error, "message_dict", {"__all__": error.messages}).items():
+            target = fields.get(field)
+            for message in messages:
+                self.add_error(target if target in self.fields else None, message)
+
+    @transaction.atomic
+    def save(self):
+        from .images import set_images
+
+        if self.new_model is not None:
+            self.new_model.save()
+            self.product.product_model = self.new_model
+        elif self.cleaned_data.get("description") and not self.product.product_model.description:
+            self.product.product_model.description = self.cleaned_data["description"]
+            self.product.product_model.save(update_fields=["description", "updated_at"])
+        self.product.save()
+        set_images(self.product, self.pictures)
+        return self.product

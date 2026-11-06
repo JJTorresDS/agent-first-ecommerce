@@ -436,3 +436,15 @@ def remove_flex(access_token, site_id, item_id):
         method="DELETE",
         expect=(dict, list, type(None)),
     )
+
+
+def fetch_item_description(access_token, item_id):
+    """A listing's description text, or "" when it has none."""
+    item = quote(str(item_id), safe="")
+    try:
+        body = _api_request(access_token, f"https://api.mercadolibre.com/items/{item}/description")
+    except MercadoLibreError as error:
+        if error.status == 404:
+            return ""
+        raise
+    return str(body.get("plain_text") or "")

@@ -10,7 +10,25 @@
   </div>
 
   <section class="card">
-    <h2>Model</h2>
+    <div class="card-head">
+      <h2>Model</h2>
+      {% if ai %}
+        <div class="head-actions">
+          {% if not form.locked %}
+            <button type="button" class="ai-button" hx-post="{% url 'catalog_ai' 'codes' %}" hx-include="#model-form" hx-swap="none" hx-sync="this:drop"
+              data-ai-note="ai-note"
+              data-ai-map='{"category": "id_category", "brand": "id_brand", "category_code": "id_category-code", "category_name": "id_category-name", "brand_code": "id_brand-code", "brand_name": "id_brand-name", "model_code": "id_code", "model_name": "id_name"}'>
+              <span class="spinner htmx-indicator" aria-hidden="true"></span>Suggest codes (AI)
+            </button>
+          {% endif %}
+          <button type="button" class="ai-button" hx-post="{% url 'catalog_ai' 'description' %}" hx-include="#model-form" hx-swap="none" hx-sync="this:drop"
+            data-ai-note="ai-note" data-ai-map='{"description": "id_description"}'>
+            <span class="spinner htmx-indicator" aria-hidden="true"></span>Write description (AI)
+          </button>
+        </div>
+      {% endif %}
+    </div>
+    <p class="muted" id="ai-note" hidden></p>
     {% if form.locked %}<p class="muted">Variants use this model's category, brand and code in their SKUs, so those stay as they are.</p>{% endif %}
     {% for error in form.non_field_errors %}<p class="error">{{ error }}</p>{% endfor %}
     {% if can_edit %}

@@ -40,6 +40,8 @@
           {% include "_field.html" with field=form.gtin %}
           {% include "_field.html" with field=form.list_price %}
           {% include "_field.html" with field=form.currency %}
+          {% include "_field.html" with field=form.meli_catalog_product_id %}
+          {% include "_field.html" with field=form.meli_category_id %}
         </fieldset>
 
         <h2>Package</h2>
@@ -53,30 +55,35 @@
         <h2>Attributes</h2>
         <p class="muted">Secondary details such as COLOR, VOLUME_ML or FRAGRANCE_NOTES. Numbers stay numbers; separate several values with <kbd>;</kbd> (vainilla; caramelo).</p>
         {% if attributes_error %}<p class="error">{{ attributes_error }}</p>{% endif %}
-        <fieldset id="attributes"{% if not can_edit %} disabled{% endif %}>
-          {% for key, value in attributes %}
-            <div class="attr-row">
-              <input type="text" name="attr_key" value="{{ key }}" aria-label="Attribute">
-              <input type="text" name="attr_value" value="{{ value }}" aria-label="Value">
-              {% if can_edit %}<button type="button" class="attr-remove" aria-label="Remove attribute">×</button>{% endif %}
-            </div>
-          {% endfor %}
-          <template id="attr-template">
-            <div class="attr-row">
-              <input type="text" name="attr_key" placeholder="COLOR" aria-label="Attribute">
-              <input type="text" name="attr_value" placeholder="Rojo" aria-label="Value">
-              <button type="button" class="attr-remove" aria-label="Remove attribute">×</button>
-            </div>
-          </template>
-        </fieldset>
+        {% include "catalog/_attributes_editor.html" %}
         {% if can_edit %}
-          <button type="button" id="attr-add">Add attribute</button>
           <div class="actions"><button class="primary" type="submit">Save product</button></div>
         {% else %}
           {% if not attributes %}<p class="muted">No attributes.</p>{% endif %}
           <p class="muted">Only owners and admins can change the catalog.</p>
         {% endif %}
       </form>
+
+      <section class="card" id="pictures">
+        <h2>Pictures</h2>
+        {% if pictures %}
+          <div class="picture-strip">
+            {% for url in pictures %}<img class="thumb" src="{{ url }}" alt="Picture {{ forloop.counter }}" loading="lazy">{% endfor %}
+          </div>
+        {% endif %}
+        {% if pictures_error %}<p class="error">{{ pictures_error }}</p>{% endif %}
+        {% if can_edit %}
+          <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="pictures">
+            <div class="field">
+              <label for="id_pictures">Picture URLs, one per line. The first is the main picture; up to 10.</label>
+              <textarea id="id_pictures" name="pictures" rows="4">{{ pictures_text }}</textarea>
+            </div>
+            <div class="actions"><button class="primary" type="submit">Save pictures</button></div>
+          </form>
+        {% endif %}
+      </section>
 
       <div hx-get="{% url 'inventory_product' product.pk %}" hx-trigger="load" hx-swap="outerHTML">
         <section class="card" id="stock-card"><h2 id="stock">Stock</h2><p class="muted"><span class="spinner" aria-hidden="true"></span> Loading…</p></section>
@@ -138,21 +145,4 @@
     </div>
   </div>
 
-  {% if can_edit %}
-    <script>
-      (function () {
-        var box = document.getElementById("attributes");
-        var template = document.getElementById("attr-template");
-        document.getElementById("attr-add").addEventListener("click", function () {
-          var row = template.content.firstElementChild.cloneNode(true);
-          box.appendChild(row);
-          row.querySelector("input").focus();
-        });
-        box.addEventListener("click", function (event) {
-          var remove = event.target.closest(".attr-remove");
-          if (remove) remove.closest(".attr-row").remove();
-        });
-      })();
-    </script>
-  {% endif %}
 {% endblock %}

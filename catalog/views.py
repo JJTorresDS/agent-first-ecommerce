@@ -20,6 +20,9 @@ from .forms import (
     attribute_rows,
     attributes_from,
 )
+from vimple.ai import enabled as ai_enabled
+
+from .images import set_images
 from .models import Brand, Category, MasterProduct, ProductModel
 from .validators import validate_attributes
 
@@ -127,6 +130,7 @@ def model_edit(request, pk=None):
             "active_tab": "models",
             "codes": _codes(organization),
             "code_dialogs": [_code_dialog(organization, kind) for kind in _KINDS] if can_edit else [],
+            "ai": can_edit and ai_enabled(),
         },
     )
 
@@ -166,6 +170,63 @@ def code_new(request, kind):
     return response
 
 
+AI_FAILED = "The suggestion didn't come through; fill it in yourself."
+
+
+@require_app(AppAccess.App.CATALOG)
+@require_POST
+def ai_suggest(request, kind):
+    """AI codes or description for the form that asked, sent as an ai-suggested event. Nothing is saved.
+
+    The form's own fields are the input: title or model name, the chosen brand (or brand_hint),
+    and the attribute rows. A code the organization already has selects that category or brand.
+    """
+    from vimple import ai
+
+    from .suggest import suggest_codes, write_description
+
+    if kind not in {"codes", "description"}:
+        raise Http404
+    organization, can_edit = _scope(request)
+    if not can_edit:
+        return HttpResponseForbidden(READ_ONLY)
+    post = request.POST
+    name = (post.get("title") or post.get("model_name") or post.get("name") or "").strip()
+    brand = Brand.objects.filter(organization=organization, pk=_int(post.get("brand"))).first()
+    brand_name = brand.name if brand else (post.get("brand_hint") or "").strip()
+    attributes = attributes_from(post)
+    values, message = {}, ""
+    try:
+        if kind == "description":
+            values["description"] = write_description(name, brand_name, attributes)
+        else:
+            values = suggest_codes(organization, name, brand_name, attributes)
+            notes = []
+            for field, Model, label in (("category", Category, "category"), ("brand", Brand, "brand")):
+                code = values.get(f"{field}_code")
+                if not code:
+                    continue
+                row = Model.objects.filter(organization=organization, code=code).first()
+                if row is not None:
+                    values[field] = str(row.pk)
+                else:
+                    notes.append(f"new {label} {code} · {values.get(f'{field}_name', '')} (add it with +)")
+            if notes:
+                message = "Suggested " + "; ".join(notes) + "."
+    except ai.SuggestionFailed:
+        values, message = {}, AI_FAILED
+    response = HttpResponse(status=204)
+    response["HX-Trigger"] = json.dumps({"ai-suggested": {"values": values, "message": message}})
+    return response
+
+
+def _int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _code_dialog(organization, kind, data=None):
     Model, Form, example_name, example_code = _KINDS[kind]
     return {
@@ -202,7 +263,18 @@ def product_detail(request, pk):
     form = ProductForm(instance=product)
     attributes = attribute_rows(product.attributes)
     attributes_error = ""
-    if request.method == "POST":
+    pictures_error = ""
+    pictures = list(product.images.filter(organization=organization).values_list("url", flat=True))
+    pictures_text = "\n".join(pictures or [product.image_url])
+    if request.method == "POST" and request.POST.get("action") == "pictures":
+        pictures_text = request.POST.get("pictures") or ""
+        try:
+            set_images(product, pictures_text.splitlines())
+        except ValidationError as error:
+            pictures_error = " ".join(error.messages)
+        else:
+            return redirect(f"{reverse('catalog_product', args=[product.pk])}?saved=1")
+    elif request.method == "POST":
         form = ProductForm(request.POST, instance=product)
         submitted = attributes_from(request.POST)
         attributes = attribute_rows(submitted)
@@ -233,6 +305,9 @@ def product_detail(request, pk):
             "form": form,
             "attributes": attributes,
             "attributes_error": attributes_error,
+            "pictures": pictures,
+            "pictures_text": pictures_text,
+            "pictures_error": pictures_error,
             "variants": product.variants().order_by("sku"),
             "listings": listings,
             "can_see_costs": can_see_costs,

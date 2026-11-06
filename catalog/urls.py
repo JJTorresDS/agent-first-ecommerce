@@ -10,4 +10,5 @@ urlpatterns = [
     path("products/<uuid:pk>/", views.product_detail, name="catalog_product"),
     path("codes/", views.codes, name="catalog_codes"),
     path("codes/new/<str:kind>/", views.code_new, name="catalog_code_new"),
+    path("ai/<str:kind>/", views.ai_suggest, name="catalog_ai"),
 ]

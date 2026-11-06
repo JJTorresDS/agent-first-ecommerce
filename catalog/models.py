@@ -212,7 +212,7 @@ class MasterProduct(TenantModel):
     image_url = models.URLField(
         max_length=2048,
         validators=[URLValidator(schemes=["http", "https"])],
-        help_text="The product image. Media is stored outside Vimple.",
+        help_text="The main picture: the first of its pictures. Media is stored outside Vimple.",
     )
     list_price = models.DecimalField(
         max_digits=14,
@@ -236,6 +236,13 @@ class MasterProduct(TenantModel):
         validators=[MinValueValidator(0)],
     )
     attributes = models.JSONField(default=dict, blank=True, validators=[validate_attributes])
+    meli_catalog_product_id = models.CharField(
+        "Mercado Libre catalog product",
+        max_length=32,
+        blank=True,
+        help_text="The catalog product it was imported from (MLA…), to list it in that catalog.",
+    )
+    meli_category_id = models.CharField("Mercado Libre category", max_length=32, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -328,3 +335,40 @@ class MasterProduct(TenantModel):
                 "purchase_id": line.purchase_id,
             }
         return list(latest.values())
+
+
+MAX_IMAGES = 10
+
+
+class ProductImage(TenantModel):
+    """One picture of a product, by URL. Position 0 is the main one, also kept in MasterProduct.image_url.
+
+    Write them through catalog.images.set_images, which keeps the two in step.
+    """
+
+    product = models.ForeignKey(MasterProduct, on_delete=models.CASCADE, related_name="images")
+    url = models.URLField(max_length=1024, validators=[URLValidator(schemes=["http", "https"])])
+    position = models.PositiveSmallIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "catalog_product_image"
+        ordering = ["position"]
+        constraints = [
+            models.UniqueConstraint(fields=["product", "position"], name="uniq_catalog_image_position"),
+        ]
+
+    def __str__(self):
+        return self.url
+
+    def clean(self):
+        if self.product_id and self.organization_id is None:
+            self.organization_id = self.product.organization_id
+        _same_organization(self, "product")
+        super().clean()
+
+    def save(self, *args, **kwargs):
+        if self.organization_id is None:
+            self.organization_id = self.product.organization_id
+        _same_organization(self, "product")
+        super().save(*args, **kwargs)
