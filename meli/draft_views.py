@@ -147,10 +147,13 @@ def _attributes_context(organization, draft, attributes, error):
 
     missing, wrong = _problems(organization, draft)
     rows = {**attributes, **{item["id"]: attributes.get(item["id"], "") for item in missing}}
+    from .drafts import listed_as_generic
+
     return {
         "attributes": attribute_rows(rows),
         "missing": missing,
         "wrong": wrong,
+        "generic": listed_as_generic(draft),
         "attributes_error": error,
         "ai": enabled(),
     }

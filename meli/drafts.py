@@ -160,6 +160,17 @@ def package_attributes(product):
     return attributes
 
 
+def listed_as_generic(draft):
+    """A regular draft whose product has no GTIN goes out as brand Generic, unless the draft names a brand."""
+    known = {attribute["id"] for attribute in draft.category_schema or []}
+    return (
+        draft.kind == ListingDraft.Kind.PRODUCT
+        and not draft.product.gtin
+        and "GTIN" in known
+        and not (draft.attributes or {}).get("BRAND")
+    )
+
+
 def package_missing(product):
     return any(getattr(product, field) is None for _, field, _ in PACKAGE)
 
@@ -193,8 +204,9 @@ def product_attributes(draft):
     if product.gtin:
         values["GTIN"] = product.gtin
     elif "GTIN" in known:
-        # No barcode: Mercado Libre needs the reason, and "Otra razón" fits every case Vimple has.
-        values["EMPTY_GTIN_REASON"] = NO_GTIN_REASON
+        # No barcode: a registered brand (Onlyou) is refused even with a reason, so the listing
+        # goes out as brand Generic, as Mercado Libre accepts it. The draft says so.
+        values["BRAND"] = GENERIC_BRAND
     for key, value in (product.attributes or {}).items():
         if key in known and key not in OWN_ATTRIBUTES and _text(value):
             values[key] = _text(value)
@@ -208,13 +220,19 @@ def product_attributes(draft):
         if not value_id and key == "EMPTY_GTIN_REASON" and value.lower() == NO_GTIN_REASON.lower():
             # Sent as text, Mercado Libre still asks for the GTIN; its listings carry this id.
             value_id = NO_GTIN_REASON_ID
+        if not value_id and key == "BRAND" and value.lower() == GENERIC_BRAND.lower():
+            value_id = GENERIC_BRAND_ID
         # A value from Mercado Libre's own list goes by its id, which is what it checks.
         attributes.append({"id": key, "value_id": value_id} if value_id else {"id": key, "value_name": value})
     return attributes
 
 
+NUMBER_UNIT = re.compile(r"^\s*\d+([.,]\d+)?\s*[^\d\s].*$")
 NO_GTIN_REASON = "Otra razón"
 NO_GTIN_REASON_ID = "17055161"
+# The brand Mercado Libre accepts without a barcode (id from a perfume listing it took).
+GENERIC_BRAND = "Generic"
+GENERIC_BRAND_ID = "35977846"
 
 # Attribute types whose values must come from Mercado Libre's list; others only suggest values.
 FIXED_TYPES = {"list", "boolean"}
@@ -236,17 +254,20 @@ def invalid_values(draft, body):
     wrong = []
     for attribute in body.get("attributes") or []:
         known = schema.get(attribute["id"])
-        if not known or known.get("type") not in FIXED_TYPES or not known.get("values") or "value_name" not in attribute:
+        if not known or "value_name" not in attribute or attribute["id"] in OWN_ATTRIBUTES:
             continue
-        if attribute["id"] in OWN_ATTRIBUTES:
-            continue
-        wrong.append({**known, "value": attribute["value_name"]})
+        if known.get("type") == "number_unit" and not NUMBER_UNIT.match(attribute["value_name"]):
+            # "ML" or "treinta": Mercado Libre wants "30 mL".
+            wrong.append({**known, "values": [], "value": attribute["value_name"]})
+        elif known.get("type") in FIXED_TYPES and known.get("values"):
+            wrong.append({**known, "value": attribute["value_name"]})
     return wrong
 
 
 def invalid_message(items):
     return "; ".join(
-        f"{item['name']} ({item['id']}): “{item['value']}” isn't one of {', '.join(item['values'][:12])}"
+        f"{item['name']} ({item['id']}): “{item['value']}” "
+        + (f"isn't one of {', '.join(item['values'][:12])}" if item.get("values") else "needs a number and a unit, like 30 mL")
         for item in items
     ) + "."
 
@@ -254,7 +275,7 @@ def invalid_message(items):
 def missing_attributes(draft, body):
     """The category's required attributes the body doesn't have: [{id, name, values}].
 
-    GTIN is only conditionally required, and product_attributes always sends it or its reason.
+    GTIN is only conditionally required: without one, product_attributes sends brand Generic.
     """
     schema = draft.category_schema or []
     sent = {attribute["id"] for attribute in body.get("attributes") or []}

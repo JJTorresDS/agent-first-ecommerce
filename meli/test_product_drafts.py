@@ -20,7 +20,7 @@ PERFUME_ATTRIBUTES = [
     {"id": "BRAND", "name": "Marca", "tags": {"required": True}},
     {"id": "PERFUME_TYPE", "name": "Tipo de perfume", "tags": {"required": True}, "value_type": "list",
      "values": [{"id": "1", "name": "Eau de parfum"}, {"id": "2", "name": "Eau de toilette"}]},
-    {"id": "UNIT_VOLUME", "name": "Volumen de la unidad", "tags": {"required": True}},
+    {"id": "UNIT_VOLUME", "name": "Volumen de la unidad", "tags": {"required": True}, "value_type": "number_unit"},
     {"id": "OLFACTORY_NOTES", "name": "Notas olfativas", "tags": {}},
     {"id": "155_98_RESOLUTION_FILE_NUMBER", "name": "Legajo", "tags": {"required": True}},
     {"id": "SHIPMENT_PACKING", "name": "Embalaje", "tags": {"read_only": True, "required": True}},
@@ -119,11 +119,13 @@ class ProductDraftTests(DraftTestCase):
         self.assertIn("package weight and size", draft.error)
         self.assertEqual(self.meli.validated, [])
 
-    def test_without_a_gtin_otra_razon_is_sent_by_rule(self):
+    def test_without_a_gtin_the_listing_goes_out_as_brand_generic(self):
         self.product.gtin = ""
         self.product.save()
         self.create()
         draft = self.draft()
+        page = self.client.get(f"/catalog/meli/new/{draft.pk}/")
+        self.assertContains(page, "listed as brand <strong>Generic</strong>", html=False)
         self.client.post(
             f"/catalog/meli/new/{draft.pk}/",
             {
@@ -135,10 +137,16 @@ class ProductDraftTests(DraftTestCase):
         draft.refresh_from_db()
         self.assertEqual(draft.status, ListingDraft.Status.READY, draft.error)
         sent = self.meli.validated[-1]["attributes"]
-        self.assertIn({"id": "EMPTY_GTIN_REASON", "value_id": "17055161"}, sent)
-        self.assertNotIn("GTIN", [attribute["id"] for attribute in sent])
+        self.assertIn({"id": "BRAND", "value_id": "35977846"}, sent)
+        ids = [attribute["id"] for attribute in sent]
+        self.assertNotIn("GTIN", ids)
+        self.assertNotIn("EMPTY_GTIN_REASON", ids)
+        # A brand typed on the draft wins.
+        draft.attributes = {"PERFUME_TYPE": "Eau de parfum", "BRAND": "Onlyou"}
+        body = build_item(draft, defaults_for(self.organization))
+        self.assertIn({"id": "BRAND", "value_name": "Onlyou"}, body["attributes"])
 
-    def test_a_hidden_or_unlisted_gtin_reason_still_goes_by_its_id(self):
+    def test_a_typed_gtin_reason_hidden_or_unlisted_still_goes_by_its_id(self):
         self.product.gtin = ""
         self.product.save()
         hidden = [dict(attribute) for attribute in PERFUME_ATTRIBUTES]
@@ -156,6 +164,26 @@ class ProductDraftTests(DraftTestCase):
         draft.attributes = {"EMPTY_GTIN_REASON": "Otra Razón"}
         body = build_item(draft, defaults_for(self.organization))
         self.assertIn({"id": "EMPTY_GTIN_REASON", "value_id": "17055161"}, body["attributes"])
+
+    def test_a_unit_without_a_number_stops_the_check(self):
+        self.create()
+        draft = self.draft()
+        draft.attributes = {"PERFUME_TYPE": "Eau de parfum", "UNIT_VOLUME": "ML"}
+        draft.status = ListingDraft.Status.CHECKING
+        draft.save()
+        from .drafts import check
+
+        check(self.organization, [draft.pk])
+        draft.refresh_from_db()
+        self.assertEqual(draft.status, ListingDraft.Status.NEEDS_FIX)
+        self.assertEqual(draft.error, "Volumen de la unidad (UNIT_VOLUME): “ML” needs a number and a unit, like 30 mL.")
+        self.assertEqual(self.meli.validated, [])
+        for good in ("30 mL", "30ml", "7,5 cm"):
+            draft.attributes = {"PERFUME_TYPE": "Eau de parfum", "UNIT_VOLUME": good}
+            body = build_item(draft, defaults_for(self.organization))
+            from .drafts import invalid_values
+
+            self.assertEqual(invalid_values(draft, body), [], good)
 
     def test_with_a_gtin_no_reason_is_sent(self):
         self.create()

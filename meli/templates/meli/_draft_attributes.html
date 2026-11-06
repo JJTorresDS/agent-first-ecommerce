@@ -16,13 +16,14 @@
     </ul>
   {% endif %}
   {% if wrong %}
-    <p class="muted">Not on Mercado Libre's list:</p>
+    <p class="muted">Mercado Libre won't take these values:</p>
     <ul class="plain lines missing-attributes">
       {% for item in wrong %}
-        <li><strong>{{ item.name }}</strong> <span class="mono">{{ item.id }}</span>: “{{ item.value }}” isn't allowed; one of {{ item.values|join:", " }}</li>
+        <li><strong>{{ item.name }}</strong> <span class="mono">{{ item.id }}</span>: “{{ item.value }}” {% if item.values %}isn't allowed; one of {{ item.values|join:", " }}{% else %}needs a number and a unit, like 30 mL{% endif %}</li>
       {% endfor %}
     </ul>
   {% endif %}
+  {% if generic %}<p class="muted">This product has no GTIN, so it's listed as brand <strong>Generic</strong> (Mercado Libre refuses a registered brand without a barcode). Add the GTIN on the product to list it under its own brand.</p>{% endif %}
   {% if ai_note %}<p class="muted">{{ ai_note }}</p>{% endif %}
   <p class="muted">These win over the product's attributes for this listing only. Brand, model, GTIN and the product's attributes the category knows are sent too.</p>
   {% if attributes_error %}<p class="error">{{ attributes_error }}</p>{% endif %}
