@@ -36,6 +36,21 @@ class SectionTests(PerfumeDraftCase):
         self.assertNotContains(page, 'href="/catalog/meli/"')
 
 
+class StartTabsTests(PerfumeDraftCase):
+    """One way to start shows at a time; a refused catalog link stays on its tab."""
+
+    def test_only_the_chosen_way_shows(self):
+        page = self.client.get("/catalog/meli/new/")
+        self.assertContains(page, 'id="pick-products"')
+        self.assertNotContains(page, 'name="add-url"')
+        self.assertNotContains(page, "No templates yet")
+        page = self.client.get("/catalog/meli/new/", {"start": "link"})
+        self.assertContains(page, 'name="add-url"')
+        self.assertNotContains(page, 'id="pick-products"')
+        self.assertContains(self.client.get("/catalog/meli/new/", {"start": "template"}), "No templates yet")
+        self.assertContains(self.add(product="", url="https://example.com/x"), 'name="add-url"')
+
+
 class PickTests(PerfumeDraftCase):
     def pick(self, **params):
         return self.client.get("/catalog/meli/new/pick/", params)
@@ -82,7 +97,7 @@ class TemplateStartTests(PerfumeDraftCase):
     def test_a_draft_from_a_template_takes_its_category_and_copies_once_loaded(self):
         self.product.meli_category_id = ""
         self.product.save()
-        self.assertContains(self.client.get("/catalog/meli/new/"), "Perfume template")
+        self.assertContains(self.client.get("/catalog/meli/new/", {"start": "template"}), "Perfume template")
         response = self.client.post(f"/catalog/meli/products/{self.product.pk}/draft/", {"template": self.template.pk})
         draft = ListingDraft.objects.get()
         self.assertRedirects(response, f"/catalog/meli/new/{draft.pk}/?copy={self.source.pk}", fetch_redirect_response=False)

@@ -109,6 +109,10 @@ def meli_drafts(request):
             organization=organization, state=ListingTemplate.State.READY
         ).order_by("category_id"),
         "ai": ai_enabled(),
+        # One way to start at a time: the other forms stay behind their tabs.
+        "start": "link" if action == "add" else (
+            request.GET.get("start") if request.GET.get("start") in {"product", "template", "link"} else "product"
+        ),
         "active_tab": "meli_new",
     }
     if request.GET.get("poll") == "drafts" and request.headers.get("HX-Request") == "true":

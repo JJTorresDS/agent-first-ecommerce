@@ -8,7 +8,7 @@
     <h1>Copy</h1>
     {% if can_edit %}<a class="accent" href="{% url 'catalog_copy_new' %}">New copy</a>{% endif %}
   </div>
-  <p class="muted">Write it once, use it in every listing: who you are, why buy from you, shipping, warnings. A draft's Description puts the pieces in order and shows exactly what gets posted.</p>
+  <p class="page-lead">Write copy once and reuse it in listing descriptions: who you are, why buy from you, shipping, warnings.</p>
   {% for label, rows in groups %}
     <section class="card flush">
       <h2 class="card-pad">{{ label }}</h2>

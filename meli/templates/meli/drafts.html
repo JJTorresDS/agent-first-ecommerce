@@ -7,6 +7,7 @@
   <div class="page-head">
     <h1>Create a Mercado Libre listing</h1>
   </div>
+  <p class="page-lead">Start a draft from a product, a template or a catalog link, then check and post it below.</p>
 
   {% if not connected %}
     <div class="card empty">
@@ -19,19 +20,14 @@
       <p><a href="{% url 'inventory_count' %}">Start the inventory</a></p>
     </div>
   {% elif can_edit %}
-    <p class="muted">Pick where the listing starts from. Each way opens a draft you check and post from here.</p>
-
+    <nav class="segmented" aria-label="Start from">
+      <a class="{% if start == 'product' %}active{% endif %}" href="?start=product"{% if start == 'product' %} aria-current="page"{% endif %}>From a Vimple product</a>
+      <a class="{% if start == 'template' %}active{% endif %}" href="?start=template"{% if start == 'template' %} aria-current="page"{% endif %}>From a template</a>
+      <a class="{% if start == 'link' %}active{% endif %}" href="?start=link"{% if start == 'link' %} aria-current="page"{% endif %}>From a catalog link</a>
+    </nav>
     <section class="card create-start">
-      <h2>From a Vimple product</h2>
-      <p class="muted">A regular listing with the product's title, pictures, attributes and package. Search by title or SKU.</p>
-      <input type="search" name="q" class="pick-search" placeholder="Search products and combos" aria-label="Search products and combos"
-             hx-get="{% url 'meli_listing_pick' %}" hx-trigger="load, input changed delay:300ms, search" hx-target="#pick-products">
-      <div id="pick-products" class="pick-results" aria-live="polite"></div>
-    </section>
-
-    <section class="card create-start">
-      <h2>From a template</h2>
-      <p class="muted">A template is one carefully filled listing per category, kept paused so it never sells. New listings copy its attributes{% if ai %}, adapted to the product by AI,{% endif %} so Mercado Libre doesn't ask for them again.</p>
+      {% if start == 'template' %}
+      <p class="muted">Copies the attributes of your paused example listing for the category{% if ai %}, adapted to the product{% endif %}.</p>
       {% if templates %}
         {% if not ai %}<p class="muted">Copying needs the AI, which isn't set up: the draft starts in the template's category and you fill the attributes.</p>{% endif %}
         <ul class="template-list">
@@ -47,15 +43,12 @@
           {% endfor %}
         </ul>
       {% else %}
-        <p>No templates yet. Make one by ticking <strong>Template for this category</strong> on a draft, or with <strong>Make template</strong> on a listing in <a href="{% url 'meli_listings' %}">Listings</a>.</p>
+        <p>No templates yet. A template is one listing per category, filled in carefully and kept paused, that new listings copy from. Make one with <strong>Make template</strong> on a listing in <a href="{% url 'meli_listings' %}">Listings</a>, or tick <strong>Template for this category</strong> on a draft.</p>
       {% endif %}
-    </section>
-
-    <section class="card create-start">
-      <h2>From a Mercado Libre catalog link</h2>
-      <p class="muted">On Mercado Libre, open the catalog product (the page with "Vender uno igual") and paste its URL. The listing competes for that product, with the Vimple product's SKU and stock.</p>
+      {% elif start == 'link' %}
+      <p class="muted">Paste the URL of a Mercado Libre catalog page (the one with "Vender uno igual") to compete for that product.</p>
       {% for error in add_form.non_field_errors %}<p class="error">{{ error }}</p>{% endfor %}
-      <form method="post" class="form-grid">
+      <form method="post" action="?start=link" class="form-grid">
         {% csrf_token %}
         <input type="hidden" name="action" value="add">
         {% include "_field.html" with field=add_form.url wide=True %}
@@ -63,10 +56,16 @@
         {% include "_field.html" with field=add_form.price %}
         {% include "_field.html" with field=add_form.quantity %}
         <div class="actions wide">
-          <p class="muted">{% if not add_form.product.field.queryset.exists %}No product has stock in the Depósito yet. {% endif %}Not in Vimple yet? <a href="{% url 'catalog_import' %}{% if add_form.import_url %}?url={{ add_form.import_url|urlencode }}{% endif %}" id="import-link">Import it as a new product</a>, then list it from here once it has stock.</p>
+          <p class="muted">{% if not add_form.product.field.queryset.exists %}No product has stock in the Depósito yet. {% endif %}Not in Vimple yet? <a href="{% url 'catalog_import' %}{% if add_form.import_url %}?url={{ add_form.import_url|urlencode }}{% endif %}" id="import-link">Import it first</a>.</p>
           <button class="primary" type="submit">Save draft</button>
         </div>
       </form>
+      {% else %}
+      <p class="muted">The listing takes the product's title, pictures, attributes and package.</p>
+      <input type="search" name="q" class="pick-search" placeholder="Search products and combos" aria-label="Search products and combos"
+             hx-get="{% url 'meli_listing_pick' %}" hx-trigger="load, input changed delay:300ms, search" hx-target="#pick-products">
+      <div id="pick-products" class="pick-results" aria-live="polite"></div>
+      {% endif %}
     </section>
   {% endif %}
 

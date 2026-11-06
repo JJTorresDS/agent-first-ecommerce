@@ -296,7 +296,7 @@ class DraftFlowTests(DraftTestCase):
         self.assertEqual(self.meli.validated, [])
 
     def test_quantity_defaults_to_one_and_never_passes_stock(self):
-        page = self.client.get("/catalog/meli/new/")
+        page = self.client.get("/catalog/meli/new/", {"start": "link"})
         self.assertContains(page, 'name="add-quantity" value="1"')
         self.assertContains(page, "(3 in stock)")
         response = self.add(quantity="4")
