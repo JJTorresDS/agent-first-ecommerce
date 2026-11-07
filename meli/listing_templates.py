@@ -118,3 +118,38 @@ def pause_active(organization, items):
         row.error = ""
         row.note = f"Reactivated on Mercado Libre; paused again {timezone.localtime():%d/%m %H:%M}."
         row.save(update_fields=["state", "error", "note", "updated_at"])
+
+
+STATUS_VERBS = {"paused": "pause", "active": "reactivate", "closed": "close"}
+
+
+def set_status(organization, item_ids, status):
+    """The worker's half of the Listings page's Pause, Reactivate and Close. Refusals show on the row.
+
+    A template is never reactivated here; a closed template stops being one.
+    """
+    from .client import set_item_status
+    from .listings import refresh_listing
+
+    if status not in STATUS_VERBS:
+        return
+    token = _token(organization)
+    templates = set(ListingTemplate.objects.filter(organization=organization).values_list("item_id", flat=True))
+    for item_id in item_ids:
+        rows = MeliListing.objects.filter(organization=organization, item_id=item_id)
+        if status == "active" and item_id in templates:
+            rows.update(action_error="A template stays paused: Vimple never reactivates it.")
+            continue
+        try:
+            set_item_status(token, item_id, status)
+        except Exception as error:
+            logger.warning("Couldn't %s %s: %s", STATUS_VERBS[status], item_id, describe_failure(error))
+            rows.update(action_error=f"Couldn't {STATUS_VERBS[status]} it: {_reason(error)}"[:300])
+            continue
+        rows.update(status=status, action_error="")
+        if status == "closed":
+            ListingTemplate.objects.filter(organization=organization, item_id=item_id).delete()
+        try:
+            refresh_listing(organization, item_id)
+        except Exception as error:
+            logger.warning("Listing %s changed but wasn't read back: %s", item_id, describe_failure(error))

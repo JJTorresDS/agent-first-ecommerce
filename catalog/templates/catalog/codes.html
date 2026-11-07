@@ -7,18 +7,20 @@
   <div class="page-head"><h1>Categories &amp; brands</h1></div>
   <p class="muted">Codes go into every SKU: <span class="sku">CATEGORY-BRAND-MODEL-VARIANT</span>. Use capital letters and digits. A code can't change once a SKU uses it; the name can.</p>
   <div class="two-cards">
-    {% for kind, title, example_name, example_code, rows, form, editing in sections %}
+    {% for kind, title, example_name, example_code, rows, form, editing, bulk in sections %}
       <section class="card">
         <h2>{{ title }}</h2>
         {% if rows %}
+          {% if bulk %}{% include "_bulk_bar.html" %}{% endif %}
           <table class="list">
-            <thead><tr><th>Code</th><th>Name</th><th class="num">Models</th>{% if can_edit %}<th></th>{% endif %}</tr></thead>
+            <thead><tr>{% if bulk %}{% include "_bulk_all.html" %}{% endif %}<th>Code</th><th>Name</th><th class="num">Models</th>{% if can_edit %}<th></th>{% endif %}</tr></thead>
             <tbody>
               {% for row in rows %}
                 {% if editing and editing.0 == row.pk %}
-                  <tr><td colspan="4">{% include "catalog/_code_form.html" with form=editing.1 row_id=row.pk button="Save" %}</td></tr>
+                  <tr><td colspan="5">{% include "catalog/_code_form.html" with form=editing.1 row_id=row.pk button="Save" %}</td></tr>
                 {% else %}
                   <tr>
+                    {% if bulk %}{% include "_bulk_check.html" with value=row.pk label=row.name %}{% endif %}
                     <td><span class="sku">{{ row.code }}</span></td>
                     <td>{{ row.name }}</td>
                     <td class="num">{{ row.model_count }}</td>

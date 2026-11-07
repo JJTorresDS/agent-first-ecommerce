@@ -142,6 +142,8 @@ Organization is the tenant. Its UUID does not change. The name can.
 - The POST re-checks what blocks a delete (catalog/deletion.py, purchasing _purchase_blocked) through vimple.deletion.delete, never trusting the page. PROTECT stays: a product or combo with history is archived instead (action archive).
 - Drafts delete one at a time or selected from the list, never while queued or publishing. A posted listing stays on Mercado Libre.
 - A deleted cashflow movement comes back if its receipt is still in the Drive folder (the API upserts by source_file_id).
+- Lists select rows with checkboxes: templates/_bulk_bar.html (the bar, hidden until something is ticked, sticky while scrolling), _bulk_all.html and _bulk_check.html (cells with form="<bar id>", so tables with their own inline forms still work). The view handles action=delete_selected / archive_selected through vimple.deletion (selected reads ids only from the organization's queryset and ignores bad ones; delete_selected deletes what nothing needs and names the rest with their reason). Use it on any new list owners and admins can change.
+- Mercado Libre listings aren't deleted from Vimple (the sync would bring them back). Selected listings are paused, reactivated or closed on Mercado Libre in the worker (drafts queue, action listing_status, listing_templates.set_status); a refusal shows on the row (MeliListing.action_error). A template is never reactivated, and closing it drops the mark. Closed listings show only under the Closed filter.
 - Notices after a redirect use Django messages, rendered from the flash context processor: the inbox's context already has "messages".
 
 ## Access and impersonation

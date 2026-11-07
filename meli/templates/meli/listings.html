@@ -46,6 +46,7 @@
         </select>
       </div>
     </form>
+    {% if bulk %}{% include "_bulk_bar.html" %}{% endif %}
     {% include "meli/_listings.html" %}
   {% endif %}
 {% endblock %}

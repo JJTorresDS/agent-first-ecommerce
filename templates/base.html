@@ -559,6 +559,12 @@
     .sync-card p { margin: 0 0 0.25rem; }
     .sync-line { display: flex; align-items: center; gap: 0.5rem; font-weight: 550; }
     span.thumb { display: block; }
+    /* Selection bar: appears once rows are ticked, stays in view while scrolling. */
+    .bulk-bar { position: sticky; top: 0.5rem; z-index: 6; display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; padding: 0.5rem 0.75rem; margin-bottom: 0.6rem; background: var(--ink); color: #fff; border-radius: 10px; }
+    .bulk-bar[hidden] { display: none; }
+    .bulk-bar button:not(.danger):not(.link-button) { background: var(--ink-2); color: #fff; border: 1px solid var(--ink-3); border-radius: 6px; padding: 0.35rem 0.75rem; cursor: pointer; }
+    .bulk-bar .link-button { color: #c9d1d9; margin-left: auto; }
+    .check-col { width: 2rem; }
     /* One line under a page's title: what you can do here. */
     .page-lead { margin: -0.4rem 0 1rem; color: var(--muted); max-width: 60rem; }
     /* Choices inside a page (not the section tabs above it): one shows at a time. */
@@ -931,6 +937,50 @@
       document.addEventListener("keydown", function (event) {
         if (event.key === "Escape") setOpen(false);
       });
+    })();
+  </script>
+  <script>
+    // Selection bars (templates/_bulk_bar.html): count what's ticked, select all, ask before acting.
+    (function () {
+      function boxes(id) { return document.querySelectorAll('input[type="checkbox"][form="' + id + '"]'); }
+      function update(id) {
+        var form = document.getElementById(id);
+        if (!form) return;
+        var all = boxes(id), ticked = 0;
+        all.forEach(function (box) { if (box.checked) ticked += 1; });
+        form.hidden = ticked === 0;
+        form.querySelector("[data-bulk-count]").textContent = ticked;
+        var head = document.querySelector('[data-bulk-all="' + id + '"]');
+        if (head) { head.checked = ticked > 0 && ticked === all.length; head.indeterminate = ticked > 0 && ticked < all.length; }
+      }
+      function updateAll() { document.querySelectorAll("form[data-bulk]").forEach(function (form) { update(form.id); }); }
+      document.addEventListener("change", function (event) {
+        var target = event.target;
+        if (!target.matches) return;
+        if (target.matches("[data-bulk-all]")) {
+          var id = target.getAttribute("data-bulk-all");
+          boxes(id).forEach(function (box) { box.checked = target.checked; });
+          update(id);
+        } else if (target.matches('input[type="checkbox"][form]')) {
+          var form = document.getElementById(target.getAttribute("form"));
+          if (form && form.hasAttribute("data-bulk")) update(form.id);
+        }
+      });
+      document.addEventListener("click", function (event) {
+        var clear = event.target.closest("[data-bulk-clear]");
+        if (!clear) return;
+        var form = clear.closest("form");
+        boxes(form.id).forEach(function (box) { box.checked = false; });
+        update(form.id);
+      });
+      document.addEventListener("submit", function (event) {
+        var form = event.target;
+        if (!form.hasAttribute || !form.hasAttribute("data-bulk")) return;
+        var text = event.submitter && event.submitter.getAttribute("data-confirm");
+        if (text && !window.confirm(text.replace("{n}", form.querySelector("[data-bulk-count]").textContent))) event.preventDefault();
+      });
+      document.body.addEventListener("htmx:afterSwap", updateAll);
+      window.addEventListener("pageshow", updateAll);
     })();
   </script>
   <script>

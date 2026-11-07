@@ -38,5 +38,6 @@
       <input id="date_to" type="date" name="date_to" value="{{ date_to }}">
     </div>
   </form>
+  {% if bulk %}{% include "_bulk_bar.html" %}{% endif %}
   {% include "purchasing/_purchases.html" %}
 {% endblock %}

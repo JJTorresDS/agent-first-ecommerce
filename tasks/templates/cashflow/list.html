@@ -50,6 +50,7 @@
       <input id="amount_confidence_to" type="number" name="amount_confidence_to" min="0" max="1" step="0.001" value="{{ amount_confidence_to }}">
     </div>
   </form>
+  {% if bulk %}{% include "_bulk_bar.html" %}{% endif %}
   {% include "cashflow/_results.html" %}
   <script>
     function fitDescriptions() {

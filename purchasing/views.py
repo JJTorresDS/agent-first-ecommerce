@@ -36,6 +36,15 @@ def _scope(request):
 @require_app(AppAccess.App.PURCHASING)
 def purchases(request):
     _membership, organization, can_edit = _scope(request)
+    if request.method == "POST":
+        if not can_edit:
+            return HttpResponseForbidden(READ_ONLY)
+        if request.POST.get("action") == "delete_selected":
+            return deletion.delete_selected(
+                request, Purchase.objects.filter(organization=organization), _purchase_blocked,
+                lambda row: row.invoice_number or str(row.purchased_on), request.get_full_path(),
+            )
+        return redirect(request.get_full_path())
     rows = (
         Purchase.objects.filter(organization=organization)
         .select_related("supplier")
@@ -64,6 +73,7 @@ def purchases(request):
         "date_to": request.GET.get("date_to") or "",
         "query": query,
         "can_edit": can_edit,
+        "bulk": deletion.bulk("purchases", deletion.DELETE_ACTION) if can_edit else None,
         "active_tab": "purchases",
     }
     template = "purchasing/_purchases.html" if request.headers.get("HX-Request") else "purchasing/purchases.html"
@@ -282,6 +292,11 @@ def suppliers(request):
     _membership, organization, can_edit = _scope(request)
     if request.method == "POST" and not can_edit:
         return HttpResponseForbidden(READ_ONLY)
+    if request.method == "POST" and request.POST.get("action") == "delete_selected":
+        return deletion.delete_selected(
+            request, Supplier.objects.filter(organization=organization),
+            lambda row: counted((row.purchases.count(), "purchase", "purchases")), lambda row: row.name, "suppliers",
+        )
     form = SupplierForm(request.POST or None, instance=Supplier(organization=organization))
     if request.method == "POST" and form.is_valid():
         form.save()
@@ -294,7 +309,8 @@ def suppliers(request):
     return render(
         request,
         "purchasing/suppliers.html",
-        {"suppliers": rows, "form": form, "can_edit": can_edit, "active_tab": "suppliers"},
+        {"suppliers": rows, "form": form, "can_edit": can_edit, "active_tab": "suppliers",
+         "bulk": deletion.bulk("suppliers", deletion.DELETE_ACTION) if can_edit else None},
     )
 
 
