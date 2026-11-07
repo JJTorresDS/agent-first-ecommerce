@@ -293,6 +293,9 @@ class MeliListing(models.Model):
     logistic_type = models.CharField(max_length=32, blank=True, help_text="fulfillment means Mercado Libre Full.")
     inventory_id = models.CharField(max_length=32, blank=True)
     full_available = models.IntegerField(null=True, blank=True, help_text="Mercado Libre's Full stock.")
+    action_error = models.CharField(
+        max_length=300, blank=True, help_text="Why the last pause, reactivate or close from Vimple didn't happen."
+    )
     meli_created_at = models.DateTimeField(null=True, blank=True)
     meli_updated_at = models.DateTimeField(null=True, blank=True)
     synced_at = models.DateTimeField()

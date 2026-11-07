@@ -569,7 +569,8 @@ class ItemQuestionTests(TestCase):
         self.assertEqual(outbound.body, "Si hay")
         self.assertEqual(outbound.organization, self.organization)
         self.assertFalse(Conversation.objects.get().needs_reply)
-        page = self.client.get(f"/inbox/?conversation={conversation.pk}")
+        # The fixture's question is from 2026-10-30, older than the inbox's 7-day default.
+        page = self.client.get(f"/inbox/?conversation={conversation.pk}&since=all")
         self.assertContains(page, "Si hay")
         self.assertNotContains(page, "Write a reply")
 
@@ -674,7 +675,8 @@ class ItemQuestionTests(TestCase):
             ItemQuestion.objects.get(question_id="999").status,
             "UNANSWERED",
         )
-        shown = self.client.get(f"/inbox/?conversation={conversation.pk}")
+        # The fixture's question is from 2026-10-30, older than the inbox's 7-day default.
+        shown = self.client.get(f"/inbox/?conversation={conversation.pk}&since=all")
         self.assertContains(shown, "Si hay")
         self.assertNotContains(shown, 'class="open-dot"')
 

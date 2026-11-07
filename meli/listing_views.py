@@ -5,7 +5,10 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
 
+from django.contrib import messages
+
 from accounts.access import require_app
+from vimple import deletion
 from accounts.models import AppAccess, can_edit_products, membership_for
 
 from .models import ListingTemplate, MercadoLibreAccount, MeliListing, MeliListingSync
@@ -79,6 +82,8 @@ def meli_listings(request):
             elif listing.category_id:
                 mark(organization, listing)
             return redirect(_back(request))
+        if request.POST.get("action") in BULK_STATUS:
+            return _change_status(request, organization)
         if request.POST.get("action") == "units":
             # Units one sale takes: 2 for a Kit x2. Past sales keep what they took.
             listing = get_object_or_404(MeliListing, organization=organization, pk=request.POST.get("listing"))
@@ -120,6 +125,9 @@ def meli_listings(request):
         )
     if status in dict(STATUSES):
         rows = rows.filter(status=status)
+    else:
+        # Closed listings are over: they show only when asked for.
+        rows = rows.exclude(status="closed")
     page = Paginator(rows.order_by("title", "item_id", "variation_id"), PAGE_SIZE).get_page(request.GET.get("page") or 1)
     listings = list(page.object_list)
     templates = {
@@ -130,21 +138,51 @@ def meli_listings(request):
     }
     for listing in listings:
         listing.template = templates.get(listing.item_id)
+    connected = MercadoLibreAccount.objects.filter(organization=organization).exists()
     context = {
         "listings": listings,
         "page_obj": page,
         "record": record,
-        "connected": MercadoLibreAccount.objects.filter(organization=organization).exists(),
+        "connected": connected,
         "query": query,
         "link": link,
         "status": status,
         "link_states": LINK_STATES,
         "statuses": STATUSES,
         "can_edit": can_edit,
+        "bulk": deletion.bulk(
+            "listings",
+            ("pause_selected", "Pause", "", False),
+            ("activate_selected", "Reactivate", "", False),
+            ("close_selected", "Close", "Close {n} selected on Mercado Libre? Closing ends a listing for good: "
+             "it can't be reopened. Its sales stay in Vimple.", True),
+        ) if can_edit and connected else None,
         "active_tab": "meli",
     }
     template = "meli/_listings.html" if request.headers.get("HX-Request") == "true" else "meli/listings.html"
     return render(request, template, context)
+
+
+BULK_STATUS = {"pause_selected": "paused", "activate_selected": "active", "close_selected": "closed"}
+BULK_DONE = {"paused": "Pausing", "active": "Reactivating", "closed": "Closing"}
+
+
+def _change_status(request, organization):
+    """Pause, reactivate or close the selected listings on Mercado Libre, in the worker. Refusals show on each row."""
+    from .jobs import dispatch_drafts_job
+
+    status = BULK_STATUS[request.POST["action"]]
+    rows = deletion.selected(request, MeliListing.objects.filter(organization=organization))
+    item_ids = sorted({row.item_id for row in rows})
+    if item_ids:
+        MeliListing.objects.filter(organization=organization, item_id__in=item_ids).update(action_error="")
+        dispatch_drafts_job(organization, "listing_status", item_ids=item_ids, status=status)
+        count = len(item_ids)
+        messages.success(
+            request, f"{BULK_DONE[status]} {count} listing{'s' if count != 1 else ''} on Mercado Libre. "
+            "The list shows the new status in a moment."
+        )
+    return redirect(request.get_full_path())
 
 
 def _back(request):

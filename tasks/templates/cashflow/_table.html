@@ -1,6 +1,7 @@
 <table id="cashflow-table">
   <thead>
     <tr>
+      {% if bulk %}{% include "_bulk_all.html" %}{% endif %}
       <th>Date</th>
       <th>Category</th>
       <th>Subcategory</th>
@@ -19,6 +20,7 @@
   <tbody>
     {% for movement in movements %}
       <tr>
+        {% if bulk %}{% include "_bulk_check.html" with value=movement.pk label=movement.transaction_date %}{% endif %}
         <td><a href="{% url 'cashflow_movement' movement.pk %}">{{ movement.transaction_date|date:"Y-m-d" }}</a></td>
         <td>{{ movement.category }}</td>
         <td>{{ movement.sub_category|default:"" }}</td>

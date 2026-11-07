@@ -51,6 +51,15 @@ def _scope(request):
 @require_app(AppAccess.App.CATALOG)
 def products(request):
     organization, can_edit = _scope(request)
+    if request.method == "POST":
+        if not can_edit:
+            return HttpResponseForbidden(READ_ONLY)
+        everything = MasterProduct.objects.filter(organization=organization)
+        if request.POST.get("action") == "archive_selected":
+            return deletion.archive_selected(request, everything, request.get_full_path())
+        if request.POST.get("action") == "delete_selected":
+            return deletion.delete_selected(request, everything, product_blocked, lambda row: row.sku, request.get_full_path())
+        return redirect(request.get_full_path())
     rows = MasterProduct.objects.filter(organization=organization).select_related(
         "product_model__brand", "product_model__category"
     )
@@ -78,6 +87,7 @@ def products(request):
         "categories": Category.objects.filter(organization=organization),
         "statuses": MasterProduct.Status.choices,
         "can_edit": can_edit,
+        "bulk": deletion.bulk("products", deletion.ARCHIVE_ACTION, deletion.DELETE_ACTION) if can_edit else None,
         "active_tab": "products",
     }
     template = "catalog/_products.html" if request.headers.get("HX-Request") else "catalog/products.html"
@@ -87,6 +97,15 @@ def products(request):
 @require_app(AppAccess.App.CATALOG)
 def models(request):
     organization, can_edit = _scope(request)
+    if request.method == "POST":
+        if not can_edit:
+            return HttpResponseForbidden(READ_ONLY)
+        if request.POST.get("action") == "delete_selected":
+            return deletion.delete_selected(
+                request, ProductModel.objects.filter(organization=organization), model_blocked, lambda row: row.name,
+                "catalog_models",
+            )
+        return redirect("catalog_models")
     rows = (
         ProductModel.objects.filter(organization=organization)
         .select_related("brand", "category")
@@ -96,7 +115,8 @@ def models(request):
     return render(
         request,
         "catalog/models.html",
-        {"models": rows, "can_edit": can_edit, "active_tab": "models"},
+        {"models": rows, "can_edit": can_edit, "active_tab": "models",
+         "bulk": deletion.bulk("models", deletion.DELETE_ACTION) if can_edit else None},
     )
 
 
@@ -351,6 +371,10 @@ def product_detail(request, pk):
     )
 
 
+def _code_bulk(kind, can_edit):
+    return deletion.bulk(kind, deletion.DELETE_ACTION, fields={"kind": kind}) if can_edit else None
+
+
 @require_app(AppAccess.App.CATALOG)
 def codes(request):
     """Categories and brands: add one, or change a name or an unused code."""
@@ -359,6 +383,11 @@ def codes(request):
         return HttpResponseForbidden(READ_ONLY)
     forms = {kind: Form(prefix=kind, instance=Model(organization=organization)) for kind, (Model, Form, *_) in _KINDS.items()}
     editing = {}
+    if request.method == "POST" and request.POST.get("kind") in _KINDS and request.POST.get("action") == "delete_selected":
+        Model = _KINDS[request.POST["kind"]][0]
+        return deletion.delete_selected(
+            request, Model.objects.filter(organization=organization), code_blocked, lambda row: row.name, "catalog_codes"
+        )
     if request.method == "POST" and request.POST.get("kind") in _KINDS and request.POST.get("action") == "delete":
         Model = _KINDS[request.POST["kind"]][0]
         row = get_object_or_404(Model, organization=organization, pk=request.POST.get("id"))
@@ -384,8 +413,10 @@ def codes(request):
         "catalog/codes.html",
         {
             "sections": [
-                ("category", "Categories", "Perfumes", "PERF", categories, forms["category"], editing.get("category")),
-                ("brand", "Brands", "Only", "ONLY", brands, forms["brand"], editing.get("brand")),
+                ("category", "Categories", "Perfumes", "PERF", categories, forms["category"], editing.get("category"),
+                 _code_bulk("category", can_edit)),
+                ("brand", "Brands", "Only", "ONLY", brands, forms["brand"], editing.get("brand"),
+                 _code_bulk("brand", can_edit)),
             ],
             "can_edit": can_edit,
             "active_tab": "codes",
@@ -403,11 +434,23 @@ def _stock(organization):
 @require_app(AppAccess.App.CATALOG)
 def combos(request):
     organization, can_edit = _scope(request)
+    if request.method == "POST":
+        if not can_edit:
+            return HttpResponseForbidden(READ_ONLY)
+        everything = Combo.objects.filter(organization=organization)
+        if request.POST.get("action") == "archive_selected":
+            return deletion.archive_selected(request, everything, "catalog_combos")
+        if request.POST.get("action") == "delete_selected":
+            return deletion.delete_selected(request, everything, combo_blocked, lambda row: row.sku, "catalog_combos")
+        return redirect("catalog_combos")
     rows = list(Combo.objects.filter(organization=organization).prefetch_related("items__product"))
     stock = _stock(organization)
     for row in rows:
         row.can_make_now = row.can_make(stock)
-    return render(request, "catalog/combos.html", {"combos": rows, "can_edit": can_edit, "active_tab": "combos"})
+    return render(request, "catalog/combos.html", {
+        "combos": rows, "can_edit": can_edit, "active_tab": "combos",
+        "bulk": deletion.bulk("combos", deletion.ARCHIVE_ACTION, deletion.DELETE_ACTION) if can_edit else None,
+    })
 
 
 @require_app(AppAccess.App.CATALOG)
@@ -480,6 +523,14 @@ def combo_edit(request, pk=None):
 def copy_blocks(request):
     """Saved listing copy, grouped by kind: written once, placed in many descriptions."""
     organization, can_edit = _scope(request)
+    if request.method == "POST":
+        if not can_edit:
+            return HttpResponseForbidden(READ_ONLY)
+        if request.POST.get("action") == "delete_selected":
+            return deletion.delete_selected(
+                request, CopyBlock.objects.filter(organization=organization), None, lambda row: row.title, "catalog_copy"
+            )
+        return redirect("catalog_copy")
     rows = sorted(CopyBlock.objects.filter(organization=organization).select_related("category"), key=CopyBlock.kind_rank)
     groups = []
     for kind, label in CopyBlock.Kind.choices:
@@ -487,7 +538,10 @@ def copy_blocks(request):
         if members:
             groups.append((label, members))
     groups.sort(key=lambda group: CopyBlock.KIND_ORDER.index(group[1][0].kind))
-    return render(request, "catalog/copy.html", {"groups": groups, "can_edit": can_edit, "active_tab": "copy"})
+    return render(request, "catalog/copy.html", {
+        "groups": groups, "can_edit": can_edit, "active_tab": "copy",
+        "bulk": deletion.bulk("copy", deletion.DELETE_ACTION) if can_edit else None,
+    })
 
 
 @require_app(AppAccess.App.CATALOG)

@@ -1,0 +1,13 @@
+{% comment %}
+  A list's selection bar, shown once something is ticked. Row checkboxes sit in the table with form="{{ bulk.id }}",
+  so the table needs no form of its own. bulk = vimple.deletion.bulk(...).
+{% endcomment %}
+<form id="{{ bulk.id }}" method="post" class="bulk-bar" data-bulk hidden>
+  {% csrf_token %}
+  {% for name, value in bulk.fields %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}
+  <span><strong data-bulk-count>0</strong> selected</span>
+  {% for action in bulk.actions %}
+    <button type="submit" name="action" value="{{ action.value }}"{% if action.danger %} class="danger"{% endif %}{% if action.confirm %} data-confirm="{{ action.confirm }}"{% endif %}>{{ action.label }}</button>
+  {% endfor %}
+  <button type="button" class="link-button" data-bulk-clear>Clear</button>
+</form>

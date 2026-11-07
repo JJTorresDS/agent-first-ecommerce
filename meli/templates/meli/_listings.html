@@ -2,10 +2,11 @@
   {% if listings %}
     <div class="card flush table-scroll">
       <table class="list wide">
-        <thead><tr><th></th><th>Listing</th><th>Title</th><th>SKU</th><th>Status</th><th class="num">Price</th><th class="num">Available</th><th class="num">Sold</th><th class="num" title="Catalog units one sale takes">Units per sale</th></tr></thead>
+        <thead><tr>{% if bulk %}{% include "_bulk_all.html" %}{% endif %}<th></th><th>Listing</th><th>Title</th><th>SKU</th><th>Status</th><th class="num">Price</th><th class="num">Available</th><th class="num">Sold</th><th class="num" title="Catalog units one sale takes">Units per sale</th></tr></thead>
         <tbody>
           {% for row in listings %}
             <tr>
+              {% if bulk %}{% include "_bulk_check.html" with value=row.pk label=row.item_id %}{% endif %}
               <td class="thumb-cell">{% if row.thumbnail_url %}<img class="thumb" src="{{ row.thumbnail_url }}" alt="" loading="lazy">{% else %}<span class="thumb"></span>{% endif %}</td>
               <td class="mono">{% if row.listing_url %}<a href="{{ row.listing_url }}" target="_blank" rel="noopener">{{ row.item_id }}</a>{% else %}{{ row.item_id }}{% endif %}{% if row.variation_label %}<br><span class="muted">{{ row.variation_label }}</span>{% endif %}</td>
               <td>
@@ -32,7 +33,7 @@
                 {% elif row.seller_sku %}<span class="mono">{{ row.seller_sku }}</span><br><span class="pill">Not in catalog</span>
                 {% else %}<span class="muted">No SKU</span>{% endif %}
               </td>
-              <td><span class="pill {% if row.status == 'active' %}active{% elif row.status == 'closed' %}archived{% endif %}">{{ row.status|default:"—" }}</span></td>
+              <td><span class="pill {% if row.status == 'active' %}active{% elif row.status == 'closed' %}archived{% endif %}">{{ row.status|default:"—" }}</span>{% if row.action_error %}<br><span class="error">{{ row.action_error }}</span>{% endif %}</td>
               <td class="num">{% if row.price is not None %}{{ row.currency }} {{ row.price }}{% endif %}</td>
               <td class="num">{{ row.available_quantity|default_if_none:"" }}</td>
               <td class="num">{{ row.sold_quantity|default_if_none:"" }}</td>

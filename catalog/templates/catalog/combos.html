@@ -9,13 +9,15 @@
     {% if can_edit %}<a class="accent" href="{% url 'catalog_combo_new' %}">New combo</a>{% endif %}
   </div>
   {% if combos %}
+    {% if bulk %}{% include "_bulk_bar.html" %}{% endif %}
     <section class="card flush">
       <div class="table-scroll">
         <table class="list">
-          <thead><tr><th></th><th>SKU</th><th>Title</th><th>Holds</th><th class="num">Can make</th><th>Status</th></tr></thead>
+          <thead><tr>{% if bulk %}{% include "_bulk_all.html" %}{% endif %}<th></th><th>SKU</th><th>Title</th><th>Holds</th><th class="num">Can make</th><th>Status</th></tr></thead>
           <tbody>
             {% for combo in combos %}
               <tr>
+                {% if bulk %}{% include "_bulk_check.html" with value=combo.pk label=combo.sku %}{% endif %}
                 <td class="thumb-cell"><img class="thumb" src="{{ combo.image_url }}" alt="" loading="lazy"></td>
                 <td><a href="{% url 'catalog_combo' combo.pk %}"><span class="sku">{{ combo.sku }}</span></a></td>
                 <td><a class="row-link" href="{% url 'catalog_combo' combo.pk %}">{{ combo.title }}</a></td>

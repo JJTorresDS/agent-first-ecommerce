@@ -434,6 +434,14 @@ def pause_item(access_token, item_id):
     )
 
 
+def set_item_status(access_token, item_id, status):
+    """Pause, reactivate (active) or close one item. Closing can't be undone on Mercado Libre."""
+    item = quote(str(item_id), safe="")
+    return _api_request(
+        access_token, f"https://api.mercadolibre.com/items/{item}", {"status": status}, method="PUT"
+    )
+
+
 def remove_flex(access_token, site_id, item_id):
     """Take one item out of Mercado Envíos Flex (the account puts new items in)."""
     site = quote(str(site_id), safe="")

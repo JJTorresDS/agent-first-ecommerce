@@ -2,10 +2,11 @@
   {% if purchases %}
     <div class="card flush table-scroll">
       <table class="list">
-        <thead><tr><th>Date</th><th>Supplier</th><th>Invoice</th><th class="num">Lines</th><th class="num">Total</th><th>Status</th><th></th></tr></thead>
+        <thead><tr>{% if bulk %}{% include "_bulk_all.html" %}{% endif %}<th>Date</th><th>Supplier</th><th>Invoice</th><th class="num">Lines</th><th class="num">Total</th><th>Status</th><th></th></tr></thead>
         <tbody>
           {% for row in purchases %}
             <tr>
+              {% if bulk %}{% include "_bulk_check.html" with value=row.pk label=row.purchased_on %}{% endif %}
               <td><a class="row-link" href="{% url 'purchase' row.pk %}">{{ row.purchased_on|date:"Y-m-d" }}</a></td>
               <td>{{ row.supplier.name }}</td>
               <td>{{ row.invoice_number|default:"—" }}</td>

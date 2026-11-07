@@ -102,9 +102,26 @@ def _filtered_movements(request):
 
 @require_app(AppAccess.App.CASHFLOW)
 def cashflow_list(request):
+    membership = membership_for(request.user)
+    can_edit = can_manage_members(membership)
+    if request.method == "POST":
+        if not can_edit:
+            return HttpResponseForbidden("Only owners and admins can change cashflow movements.")
+        if request.POST.get("action") == "delete_selected":
+            return deletion.delete_selected(
+                request, CashflowMovement.objects.filter(organization=membership.organization), None,
+                lambda row: f"{row.transaction_date:%Y-%m-%d} {row.amount}", request.get_full_path(),
+            )
+        return redirect(request.get_full_path())
     movements, filters = _filtered_movements(request)
     page = Paginator(movements, PAGE_SIZE).get_page(request.GET.get("page") or 1)
-    context = {"movements": page.object_list, "page_obj": page, **filters}
+    bulk = deletion.bulk(
+        "movements",
+        ("delete_selected", "Delete",
+         "Delete {n} selected? A movement whose receipt is still in the Drive folder comes back on the next parser run.",
+         True),
+    ) if can_edit else None
+    context = {"movements": page.object_list, "page_obj": page, "bulk": bulk, **filters}
     template = (
         "cashflow/_results.html"
         if request.headers.get("HX-Request")

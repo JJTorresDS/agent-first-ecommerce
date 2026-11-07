@@ -9,12 +9,14 @@
     {% if can_edit %}<a class="accent" href="{% url 'catalog_model_new' %}">New model</a>{% endif %}
   </div>
   {% if models %}
+    {% if bulk %}{% include "_bulk_bar.html" %}{% endif %}
     <div class="card flush table-scroll">
       <table class="list">
-        <thead><tr><th>Family</th><th>Name</th><th>Brand</th><th>Category</th><th class="num">Variants</th></tr></thead>
+        <thead><tr>{% if bulk %}{% include "_bulk_all.html" %}{% endif %}<th>Family</th><th>Name</th><th>Brand</th><th>Category</th><th class="num">Variants</th></tr></thead>
         <tbody>
           {% for model in models %}
             <tr>
+              {% if bulk %}{% include "_bulk_check.html" with value=model.pk label=model.name %}{% endif %}
               <td><a href="{% url 'catalog_model' model.pk %}"><span class="sku">{{ model.family_code }}</span></a></td>
               <td><a class="row-link" href="{% url 'catalog_model' model.pk %}">{{ model.name }}</a></td>
               <td>{{ model.brand.name }}</td>

@@ -6,12 +6,14 @@
   {% include "purchasing/_tabs.html" %}
   <div class="page-head"><h1>Suppliers</h1></div>
   {% if suppliers %}
+    {% if bulk %}{% include "_bulk_bar.html" %}{% endif %}
     <div class="card flush table-scroll">
       <table class="list">
-        <thead><tr><th>Name</th><th>Tax id</th><th>Contact</th><th class="num">Purchases</th><th>Last purchase</th></tr></thead>
+        <thead><tr>{% if bulk %}{% include "_bulk_all.html" %}{% endif %}<th>Name</th><th>Tax id</th><th>Contact</th><th class="num">Purchases</th><th>Last purchase</th></tr></thead>
         <tbody>
           {% for row in suppliers %}
             <tr>
+              {% if bulk %}{% include "_bulk_check.html" with value=row.pk label=row.name %}{% endif %}
               <td><a class="row-link" href="{% url 'supplier' row.pk %}">{{ row.name }}</a></td>
               <td>{{ row.tax_id|default:"—" }}</td>
               <td>{{ row.email }}{% if row.email and row.phone %} · {% endif %}{{ row.phone }}</td>

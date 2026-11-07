@@ -3,11 +3,12 @@
     <div class="card flush table-scroll">
       <table class="list">
         <thead>
-          <tr><th></th><th>SKU</th><th>Title</th><th>Brand</th><th>Category</th><th>Status</th><th class="num">Price</th></tr>
+          <tr>{% if bulk %}{% include "_bulk_all.html" %}{% endif %}<th></th><th>SKU</th><th>Title</th><th>Brand</th><th>Category</th><th>Status</th><th class="num">Price</th></tr>
         </thead>
         <tbody>
           {% for item in products %}
             <tr>
+              {% if bulk %}{% include "_bulk_check.html" with value=item.pk label=item.sku %}{% endif %}
               <td class="thumb-cell"><img class="thumb" src="{{ item.image_url }}" alt="" loading="lazy"></td>
               <td><a href="{% url 'catalog_product' item.pk %}"><span class="sku">{{ item.sku }}</span></a></td>
               <td><a class="row-link" href="{% url 'catalog_product' item.pk %}">{{ item.title }}</a></td>

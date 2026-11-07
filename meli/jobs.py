@@ -714,6 +714,11 @@ def _run_drafts_payload(payload):
         organization = Organization.objects.filter(pk=job.get("organization_id")).first()
         if organization is None:
             return
+        if job.get("action") == "listing_status":
+            from .listing_templates import set_status
+
+            set_status(organization, [str(item) for item in job.get("item_ids") or []], str(job.get("status") or ""))
+            return
         if job.get("action") == "template":
             from .listing_templates import pause_marked
 
