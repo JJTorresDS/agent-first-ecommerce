@@ -547,6 +547,11 @@ class ListingDraft(ListingSettings):
     catalog_product_id = models.CharField(max_length=32, blank=True)
     catalog_name = models.CharField(max_length=255, blank=True)
     catalog_picture = models.CharField(max_length=1024, blank=True)
+    catalog_package = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text='The catalog product\'s own package measures, read in the check: {"SELLER_PACKAGE_HEIGHT": "12 cm", …}.',
+    )
     category_id = models.CharField(max_length=32, blank=True)
     has_regulatory = models.BooleanField(default=False, help_text="The category asks for the 155/98 file number.")
     category_schema = models.JSONField(
