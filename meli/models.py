@@ -585,6 +585,17 @@ class ListingDraft(ListingSettings):
         "Empty: the product's or combo's own description.",
     )
     posted_description = models.TextField(blank=True, help_text="The description as posted, kept as it was sent.")
+    ai_fix = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="The last AI fix suggested for a refusal: {error, body, changes, package, made_at}. Never applied by itself.",
+    )
+    overrides = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text='An applied AI fix, merged over the body build_item makes: {"title": …, "attributes": {ID: {…} or null}}. '
+        "Price, quantity, SKU and the other fields Vimple owns never change.",
+    )
     item_id = models.CharField(max_length=32, blank=True)
     published_at = models.DateTimeField(null=True, blank=True)
     created_by = models.ForeignKey(

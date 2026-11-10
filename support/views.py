@@ -32,6 +32,7 @@ def report_draft_error(request, pk):
             "catalog_product_id": draft.catalog_product_id,
             "item_id": draft.item_id,
             "attributes": draft.attributes,
+            "ai_fix_applied": draft.overrides,
             "use_defaults": draft.use_defaults,
             "settings": {name: getattr(settings, name) for name in ListingDraft.SETTING_FIELDS},
         },

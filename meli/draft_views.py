@@ -2,7 +2,7 @@ import re
 
 from django.contrib import messages
 from django.core.exceptions import ValidationError
-from django.http import HttpResponseBadRequest, HttpResponseForbidden
+from django.http import HttpResponse, HttpResponseBadRequest, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_POST
@@ -15,7 +15,13 @@ from vimple.ai import enabled as ai_enabled
 
 from .description import LIMIT, blocks_for, compose, default_parts, parts_from
 from .description import warnings as description_warnings
+from catalog.models import PACKAGE_FIELDS
+
 from .drafts import (
+    LOCKED_KEYS,
+    PACKAGE,
+    build_item,
+    package_attributes,
     description_of,
     package_missing,
     available_for,
@@ -178,6 +184,11 @@ def meli_draft(request, pk):
             "defaults": defaults,
             "available": available,
             "can_edit": can_edit and not draft.locked(),
+            **(_fix_context(draft) if fix_offered(draft, can_edit and not draft.locked()) else {}),
+            "fix_count": sum(
+                len(value) if key == "attributes" and isinstance(value, dict) else 1
+                for key, value in (draft.overrides or {}).items()
+            ),
             **(_attributes_context(organization, draft, attributes, attributes_error, copy_pending=_copy_pending(request))
                if regular else {}),
             **(_description_context(organization, draft, parts) if regular else {}),
@@ -745,3 +756,175 @@ def meli_draft_copy(request, pk):
             **_attributes_context(organization, draft, rows, "", copied={key: source.title for key in copied}),
         },
     )
+
+
+FIXABLE = (ListingDraft.Status.NEEDS_FIX, ListingDraft.Status.FAILED)
+
+
+def fix_offered(draft, can_edit):
+    """Whether a draft's page offers an AI fix: Mercado Libre refused it, and the body and answer were kept."""
+    details = draft.error_details or {}
+    return bool(
+        can_edit
+        and ai_enabled()
+        and draft.status in FIXABLE
+        and isinstance(details.get("sent"), dict)
+        and isinstance(details.get("response"), dict)
+    )
+
+
+def _fix_context(draft, fix=None, note="", text=None):
+    """The AI fix card: the stored suggestion while it's for the error on screen."""
+    import json
+
+    if fix is None:
+        stored = draft.ai_fix or {}
+        fix = stored if stored.get("error") == draft.error and stored.get("body") else {}
+    if text is None:
+        text = json.dumps(fix["body"], indent=2, ensure_ascii=False) if fix else ""
+    return {"draft": draft, "fix": fix, "fix_note": note, "fix_text": text, "fix_offered": True}
+
+
+def _fixable(request, pk):
+    organization, can_edit = _scope(request)
+    if not can_edit:
+        return organization, None, HttpResponseForbidden(READ_ONLY)
+    draft = get_object_or_404(
+        ListingDraft.objects.select_related("product__product_model__brand", "combo"), organization=organization, pk=pk
+    )
+    if draft.locked():
+        return organization, draft, HttpResponseForbidden("Posted drafts can't change.")
+    return organization, draft, None
+
+
+@require_app(AppAccess.App.CATALOG)
+@require_POST
+def meli_draft_fix(request, pk):
+    """Ask the AI for a corrected body after a refusal. Shown to review and edit; nothing is applied."""
+    from django.utils import timezone
+
+    from catalog.suggest import fix_listing
+    from vimple import ai
+
+    from .drafts import FixRefused, fix_changes, uses_user_products
+
+    organization, draft, refused = _fixable(request, pk)
+    if refused:
+        return refused
+    if not fix_offered(draft, True):
+        return HttpResponseBadRequest("Mercado Libre hasn't refused this draft.")
+    sent = draft.error_details["sent"]
+    listed = draft.listed()
+    brand, _model = brand_and_model(listed)
+    try:
+        body, notes = fix_listing(
+            sent,
+            draft.error_details["response"],
+            draft.category_schema,
+            uses_user_products(organization),
+            listed.title,
+            brand,
+            listed.attributes,
+            {name: str(getattr(listed, name)) for name in PACKAGE_FIELDS if getattr(listed, name) is not None},
+        )
+        # The fields Vimple owns stay as sent, whatever the AI wrote.
+        body = {**{key: value for key, value in body.items() if key not in LOCKED_KEYS},
+                **{key: sent[key] for key in LOCKED_KEYS if key in sent}}
+        sku = next((a for a in sent.get("attributes") or [] if a.get("id") == "SELLER_SKU"), None)
+        attributes = [a for a in body.get("attributes") or [] if not (isinstance(a, dict) and a.get("id") == "SELLER_SKU")]
+        body["attributes"] = ([sku] if sku else []) + attributes
+        changes = fix_changes(sent, body, notes)
+    except ai.SuggestionFailed:
+        return render(request, "meli/_ai_fix.html", _fix_context(draft, {}, "The suggestion didn't come through. Try again."))
+    except FixRefused:
+        return render(request, "meli/_ai_fix.html", _fix_context(draft, {}, "The AI answered with something that isn't a listing. Try again."))
+    if not changes:
+        return render(request, "meli/_ai_fix.html", _fix_context(draft, {}, "The AI found nothing to change. Fix it by hand, or report the error."))
+    fix = {
+        "error": draft.error,
+        "body": body,
+        "changes": changes,
+        "package": any(change["field"].startswith("SELLER_PACKAGE_") for change in changes),
+        "made_at": timezone.now().isoformat(),
+    }
+    draft.ai_fix = fix
+    draft.save(update_fields=["ai_fix", "updated_at"])
+    return render(request, "meli/_ai_fix.html", _fix_context(draft, fix))
+
+
+@require_app(AppAccess.App.CATALOG)
+@require_POST
+def meli_draft_fix_apply(request, pk):
+    """Keep the reviewed fix on the draft and check it again. Package values can also go to the product."""
+    import json
+
+    from .drafts import FixRefused, clean_fix, package_from_fix, settings_of, uses_user_products
+    from .jobs import dispatch_drafts
+
+    organization, draft, refused = _fixable(request, pk)
+    if refused:
+        return refused
+    text = request.POST.get("fix_body") or ""
+    try:
+        edited = json.loads(text)
+        base = build_item(
+            draft, settings_of(draft, defaults_for(organization)), uses_user_products(organization), overrides=False
+        )
+        overrides = clean_fix(edited, base)
+    except ValueError as error:
+        note = str(error) if isinstance(error, FixRefused) else f"That isn't valid JSON: {error}"
+        # Re-rendered in place (htmx), keeping what was typed.
+        return render(request, "meli/_ai_fix.html", _fix_context(draft, None, note, text))
+    notes = []
+    if request.POST.get("save_package"):
+        values, unread = package_from_fix(overrides)
+        if values:
+            listed = draft.listed()
+            for field, value in values.items():
+                setattr(listed, field, value)
+            listed.save(update_fields=[*values, "updated_at"])
+            # build_item sends the product's package now. A catalog product's own measures would still win,
+            # so there the fix stays, written as the product's ("450 g").
+            kept = draft.catalog_package or {}
+            saved = {attribute["id"]: attribute for attribute in package_attributes(listed)}
+            for attribute_id, field, _unit in PACKAGE:
+                if field not in values:
+                    continue
+                if attribute_id in kept:
+                    overrides["attributes"][attribute_id] = {"value_name": saved[attribute_id]["value_name"]}
+                else:
+                    overrides["attributes"].pop(attribute_id, None)
+            if not overrides.get("attributes"):
+                overrides.pop("attributes", None)
+            notes.append(f"Package saved to {listed.sku}.")
+        if unread:
+            notes.append(f"Not saved to the product (no number and unit): {', '.join(unread)}.")
+    draft.overrides = overrides
+    draft.status = ListingDraft.Status.CHECKING
+    draft.error = ""
+    draft.error_details = {}
+    draft.save(update_fields=["overrides", "status", "error", "error_details", "updated_at"])
+    dispatch_drafts(organization, "check", [draft.pk])
+    messages.success(request, " ".join(["Checking with the AI fix.", *notes]))
+    response = HttpResponse(status=204)
+    response["HX-Redirect"] = reverse("meli_draft", args=[draft.pk])
+    return response
+
+
+@require_app(AppAccess.App.CATALOG)
+@require_POST
+def meli_draft_fix_remove(request, pk):
+    """Stop sending the applied fix and check the draft again."""
+    from .jobs import dispatch_drafts
+
+    organization, draft, refused = _fixable(request, pk)
+    if refused:
+        return refused
+    draft.overrides = {}
+    draft.status = ListingDraft.Status.CHECKING
+    draft.error = ""
+    draft.error_details = {}
+    draft.save(update_fields=["overrides", "status", "error", "error_details", "updated_at"])
+    dispatch_drafts(organization, "check", [draft.pk])
+    messages.success(request, "AI fix removed. Checking again.")
+    return redirect("meli_draft", pk=draft.pk)

@@ -1,4 +1,4 @@
-"""AI suggestions for catalog forms: SKU codes and a description. The user reviews them before saving.
+"""AI suggestions the user reviews before saving: SKU codes, descriptions, attributes, and a fix for a refused listing.
 
 Every suggested code goes through the same validators as a typed one; an invalid one is dropped.
 """
@@ -236,3 +236,59 @@ def adapt_attributes(source_title, source, target, schema):
     for key in asked - set(values) - set(dropped):
         dropped[key] = " ".join(str(reasons.get(key) or "describes the other product").split())[:120]
     return values, dropped
+
+
+FIX_PROMPT = (
+    "You fix a Mercado Libre Argentina listing body that Mercado Libre refused.\n"
+    "You get: sent (the body sent to POST /items/validate), response (Mercado Libre's answer, with every "
+    "cause), schema (the category's attributes: id, name, required, value_type, allowed_values, units), "
+    "user_product_seller (the seller's tag), catalog_listing, and the product's own data.\n"
+    "Return the corrected body: the same JSON as sent, with only the changes needed to clear every cause of "
+    "type error. Keep everything else exactly as sent. Never change price, available_quantity, currency_id, "
+    "category_id, catalog_product_id, catalog_listing, listing_type_id, buying_mode, pictures or SELLER_SKU.\n"
+    "Attributes are {\"id\", \"value_name\"} or {\"id\", \"value_id\"}. When an attribute has allowed_values, "
+    "use one of them as value_name, copied as written. Measures are a number and a unit: \"12 cm\", \"320 g\", "
+    "\"75 mL\".\n"
+    "A user_product_seller sends family_name instead of title on a regular listing, and neither on a "
+    "catalog listing.\n"
+    "When a cause needs a fact you can't read from the data (package size or weight, GTIN, a measure), give "
+    "your best realistic estimate for this product as it ships, boxed, and mark that change estimated. "
+    "Package dimensions in Mercado Libre's answer are too small when they are below the product's own.\n"
+    "Return ONLY a JSON object: {\"body\": {…the whole corrected body…}, \"changes\": [{\"field\": "
+    "\"SELLER_PACKAGE_WEIGHT\", \"why\": \"one short sentence in English\", \"estimated\": true}]}. "
+    "field is the top-level key or the attribute id."
+)
+
+
+def fix_listing(sent, response, schema, user_product_seller, name, brand, attributes, package):
+    """Mistral's corrected body for a refused listing and its reasons: ({body}, [{field, why, estimated}]).
+
+    Gets the listing data only: never tokens or costs. The caller keeps the fields Vimple owns.
+    """
+    answer = ai.complete_json(
+        FIX_PROMPT,
+        {
+            "sent": sent,
+            "response": response,
+            "schema": [
+                {
+                    "id": item.get("id"),
+                    "name": item.get("name", ""),
+                    "required": bool(item.get("required")),
+                    "value_type": item.get("type", ""),
+                    "allowed_values": (item.get("values") or [])[:60],
+                    "units": item.get("units") or [],
+                }
+                for item in schema or []
+                if not item.get("hidden")
+            ],
+            "user_product_seller": bool(user_product_seller),
+            "catalog_listing": bool(sent.get("catalog_listing")),
+            "product": {**_product(name, brand, attributes), "package": package or {}},
+        },
+    )
+    body = answer.get("body")
+    if not isinstance(body, dict):
+        raise ai.SuggestionFailed("no body")
+    changes = [item for item in answer.get("changes") or [] if isinstance(item, dict)][:40]
+    return body, changes

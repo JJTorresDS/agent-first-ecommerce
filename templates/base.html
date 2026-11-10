@@ -487,6 +487,13 @@
     .report-error button { justify-self: start; }
     .reported { margin: 0.4rem 0 0; font-size: 0.82rem; color: var(--neon-ink); }
     .error-details summary { cursor: pointer; font-size: 0.82rem; color: var(--muted); }
+    .fix-changes { margin: 0.4rem 0; padding-left: 1.1rem; font-size: 0.82rem; display: grid; gap: 0.3rem; }
+    .fix-changes code { word-break: break-all; }
+    .ai-fix .warn-note { display: inline-block; margin: 0 0 0 0.3rem; padding: 0.05rem 0.4rem; font-size: 0.75rem; }
+    .fix-form { display: grid; gap: 0.4rem; margin-top: 0.4rem; }
+    .fix-form label[for] { font-size: 0.78rem; color: var(--muted); }
+    .fix-form textarea { width: 100%; min-height: 14rem; padding: 0.5rem; border: 1px solid var(--line-strong); border-radius: 6px; font: 0.75rem/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .fix-in-use { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin: 0.35rem 0 0; font-size: 0.82rem; }
     .error-details pre { max-height: 18rem; overflow: auto; white-space: pre-wrap; word-break: break-word; font-size: 0.75rem; background: var(--gray-1); border: 1px solid var(--line); border-radius: 6px; padding: 0.6rem; margin: 0.4rem 0; }
     a.button { display: inline-block; border: 1px solid var(--line-strong); background: var(--surface); color: var(--text); border-radius: 6px; padding: 0.45rem 0.8rem; text-decoration: none; }
     a.button:active { background: var(--gray-2); }

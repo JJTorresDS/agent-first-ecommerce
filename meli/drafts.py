@@ -5,6 +5,7 @@ refuses shows its own reason on the draft instead of a broken listing. Posting r
 one draft at a time, and re-checks the stock first. Every call is made by the worker, never a page.
 """
 
+import json
 import logging
 import re
 from decimal import Decimal
@@ -89,10 +90,11 @@ def _number(value):
     return int(value) if value == value.to_integral_value() else float(value)
 
 
-def build_item(draft, settings, user_products=False):
+def build_item(draft, settings, user_products=False, overrides=True):
     """The POST /items body for a draft, as Mercado Libre's own sell flow fills it in.
 
     user_products: the seller has Mercado Libre's user_product_seller tag (uses_user_products).
+    overrides: merge the draft's applied AI fix (apply_overrides); False gives the body Vimple makes alone.
     """
     sale_terms = [{"id": "INVOICE", "value_id": INVOICE[bool(settings.invoice_a)]}]
     if settings.warranty == ListingSettings.Warranty.NONE:
@@ -145,7 +147,159 @@ def build_item(draft, settings, user_products=False):
         body["category_id"] = draft.category_id
     # One value per attribute: the draft's own, added last, wins.
     body["attributes"] = list({attribute["id"]: attribute for attribute in attributes}.values())
+    return apply_overrides(draft, body) if overrides else body
+
+
+# Fields an AI fix never changes: Vimple owns them, and stock, the sync and the post depend on them.
+LOCKED_KEYS = frozenset(
+    {
+        "price",
+        "available_quantity",
+        "currency_id",
+        "category_id",
+        "catalog_product_id",
+        "catalog_listing",
+        "listing_type_id",
+        "buying_mode",
+        "pictures",
+    }
+)
+LOCKED_ATTRIBUTES = frozenset({"SELLER_SKU"})
+ATTRIBUTE_VALUE_KEYS = ("value_id", "value_name", "value_struct", "values")
+FIX_LIMIT = 20000
+
+
+class FixRefused(ValueError):
+    """What to show next to the AI fix's JSON."""
+
+
+def _attribute_value(attribute):
+    return {key: attribute[key] for key in ATTRIBUTE_VALUE_KEYS if attribute.get(key) not in (None, "", [])}
+
+
+def apply_overrides(draft, body):
+    """The body with the draft's applied AI fix merged in: keys replaced or removed (null), attributes by id.
+
+    The locked fields and SELLER_SKU always stay as build_item made them.
+    """
+    overrides = draft.overrides if isinstance(draft.overrides, dict) else {}
+    if not overrides:
+        return body
+    for key, value in overrides.items():
+        if key in LOCKED_KEYS or key == "attributes":
+            continue
+        if value is None:
+            body.pop(key, None)
+        else:
+            body[key] = value
+    by_id = {attribute["id"]: attribute for attribute in body.get("attributes") or []}
+    for attribute_id, value in (overrides.get("attributes") or {}).items():
+        if attribute_id in LOCKED_ATTRIBUTES:
+            continue
+        if value is None:
+            by_id.pop(attribute_id, None)
+        elif isinstance(value, dict):
+            by_id[attribute_id] = {"id": attribute_id, **value}
+    body["attributes"] = list(by_id.values())
     return body
+
+
+def clean_fix(edited, base):
+    """The overrides an edited body makes over build_item's own (base): only what differs and may change.
+
+    Raises FixRefused when it isn't a listing body.
+    """
+    if not isinstance(edited, dict):
+        raise FixRefused("The fix must be a JSON object, like the body under Details.")
+    overrides = {}
+    for key in sorted(set(edited) | set(base)):
+        if key in LOCKED_KEYS or key == "attributes":
+            continue
+        if not re.fullmatch(r"[a-z_]{1,40}", key):
+            raise FixRefused(f"{key} isn't a Mercado Libre listing field.")
+        if key not in edited:
+            overrides[key] = None
+        elif edited[key] != base.get(key):
+            overrides[key] = edited[key]
+    attributes = edited.get("attributes", base.get("attributes") or [])
+    if not isinstance(attributes, list):
+        raise FixRefused("attributes must be a list of {id, value_name} or {id, value_id}.")
+    before = {attribute["id"]: _attribute_value(attribute) for attribute in base.get("attributes") or []}
+    after = {}
+    for attribute in attributes:
+        if not isinstance(attribute, dict) or not re.fullmatch(r"[A-Z0-9_]{1,60}", str(attribute.get("id") or "")):
+            raise FixRefused("Each attribute needs an id such as BRAND and a value_name or value_id.")
+        value = _attribute_value(attribute)
+        if not value:
+            raise FixRefused(f"{attribute['id']} has no value: remove it, or give it a value_name or value_id.")
+        after[attribute["id"]] = value
+    changed = {}
+    for attribute_id in sorted(set(before) | set(after)):
+        if attribute_id in LOCKED_ATTRIBUTES:
+            continue
+        if attribute_id not in after:
+            changed[attribute_id] = None
+        elif after[attribute_id] != before.get(attribute_id):
+            changed[attribute_id] = after[attribute_id]
+    if changed:
+        overrides["attributes"] = changed
+    if len(json.dumps(overrides, ensure_ascii=False, default=str)) > FIX_LIMIT:
+        raise FixRefused("The fix is too long to keep.")
+    return overrides
+
+
+def _shown(value):
+    if isinstance(value, dict) and set(value) <= set(ATTRIBUTE_VALUE_KEYS) | {"id"}:
+        value = value.get("value_name") or value.get("value_id") or value.get("value_struct") or value.get("values")
+    if value is None or value == "":
+        return ""
+    return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
+
+
+def fix_changes(sent, edited, notes=()):
+    """[{field, before, after, why, estimated}]: what an AI fix changes in the body sent, with the AI's reasons."""
+    by_field = {str(note.get("field") or ""): note for note in notes if isinstance(note, dict)}
+    changes = []
+    for key, value in clean_fix(edited, sent).items():
+        pairs = (
+            [(attribute_id, next((a for a in sent.get("attributes") or [] if a.get("id") == attribute_id), None), after)
+             for attribute_id, after in value.items()]
+            if key == "attributes"
+            else [(key, sent.get(key), value)]
+        )
+        for field, before, after in pairs:
+            note = by_field.get(field) or by_field.get(field.lower()) or {}
+            changes.append(
+                {
+                    "field": field,
+                    "before": _shown(before)[:300],
+                    "after": _shown(after)[:300],
+                    "why": str(note.get("why") or "")[:300],
+                    "estimated": bool(note.get("estimated")),
+                }
+            )
+    return changes
+
+
+def package_from_fix(overrides):
+    """{model field: value} for the SELLER_PACKAGE_ attributes a fix sets, and the ones that can't be read."""
+    values, unread = {}, []
+    for attribute_id, field, unit in PACKAGE:
+        value = ((overrides.get("attributes") or {}).get(attribute_id) or {}).get("value_name")
+        if value is None:
+            continue
+        found = re.fullmatch(r"\s*(\d+(?:[.,]\d+)?)\s*(mm|cm|m|g|kg)\s*", str(value), re.IGNORECASE)
+        if not found:
+            unread.append(attribute_id)
+            continue
+        number, given = Decimal(found.group(1).replace(",", ".")), found.group(2).lower()
+        scale = {"mm": Decimal("0.1"), "cm": 1, "m": 100, "g": 1, "kg": 1000}[given]
+        if (unit == "g") != (given in {"g", "kg"}):
+            unread.append(attribute_id)
+            continue
+        number *= scale
+        values[field] = int(number.to_integral_value()) if unit == "g" else number.quantize(Decimal("0.1"))
+    return values, unread
 
 
 # Mercado Libre's seller package attributes, from the product's Package fields.
@@ -495,23 +649,19 @@ def _check_one(draft, token, defaults, stock, site, user_products=False):
     if draft.kind != ListingDraft.Kind.CATALOG and not draft.category_id:
         _set(draft, ListingDraft.Status.NEEDS_FIX, "Mercado Libre didn't suggest a category: enter one (MLA…).")
         return
-    if draft.kind == ListingDraft.Kind.CATALOG:
-        if len(draft.catalog_package or {}) < len(PACKAGE) and package_missing(draft.listed()):
-            _set(
-                draft,
-                ListingDraft.Status.NEEDS_FIX,
-                "This catalog product has no package measures on Mercado Libre: fill in Package on the product, "
-                "then Save and check.",
-            )
-            return
-    elif package_missing(draft.listed()):
+    body = build_item(draft, settings_of(draft, defaults), user_products)
+    # All four, from the catalog product, the product's Package or an applied AI fix.
+    sent = {attribute["id"] for attribute in body["attributes"]}
+    if any(attribute_id not in sent for attribute_id, _, _ in PACKAGE):
         _set(
             draft,
             ListingDraft.Status.NEEDS_FIX,
-            "Mercado Libre needs the package weight and size: fill in Package on the product, then Save and check.",
+            "This catalog product has no package measures on Mercado Libre: fill in Package on the product, "
+            "then Save and check."
+            if draft.kind == ListingDraft.Kind.CATALOG
+            else "Mercado Libre needs the package weight and size: fill in Package on the product, then Save and check.",
         )
         return
-    body = build_item(draft, settings_of(draft, defaults), user_products)
     missing = missing_attributes(draft, body) if draft.kind != ListingDraft.Kind.CATALOG else []
     if missing:
         names = ", ".join(attribute["name"] for attribute in missing)
@@ -611,7 +761,13 @@ def publish(organization, draft_ids):
         draft.status = ListingDraft.Status.PUBLISHED
         draft.error = ""
         draft.error_details = {}
-        draft.save(update_fields=["item_id", "published_at", "status", "error", "error_details", "updated_at"])
+        draft.ai_fix = {}
+        draft.overrides = {}
+        draft.save(
+            update_fields=[
+                "item_id", "published_at", "status", "error", "error_details", "ai_fix", "overrides", "updated_at"
+            ]
+        )
         logger.info("Draft %s posted as %s", draft.pk, draft.item_id)
         notes = []
         if draft.template:

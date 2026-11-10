@@ -12,6 +12,13 @@
     <p class="muted">{% if draft.regular %}{% if draft.combo_id %}Combo listing of{% else %}Regular listing of{% endif %} <a href="{{ draft.listed_url }}">{{ draft.listed.sku }}</a>{% else %}<a href="{{ draft.catalog_url }}" target="_blank" rel="noopener">{{ draft.catalog_product_id }}</a>{% endif %} · {{ available }} {% if draft.combo_id %}can be made from the Depósito{% else %}in stock in the Depósito{% endif %} · {{ draft.get_status_display }} · Draft #{{ draft.pk }}</p>
     {% if draft.error %}<p class="{% if draft.status == 'ready' or draft.status == 'published' %}muted{% else %}error{% endif %}">{{ draft.error }}</p>{% endif %}
     {% include "meli/_error_details.html" %}
+    {% if draft.overrides %}
+      <form method="post" action="{% url 'meli_draft_fix_remove' draft.pk %}" class="fix-in-use">
+        {% csrf_token %}
+        <span class="muted">Checked with an AI fix ({{ fix_count }} change{{ fix_count|pluralize }}).</span>
+        {% if can_edit %}<button type="submit" class="link-button">Remove fix</button>{% endif %}
+      </form>
+    {% endif %}
     {% for error in form.non_field_errors %}<p class="error">{{ error }}</p>{% endfor %}
     <form method="post" class="form-grid" id="draft-form">
       {% csrf_token %}

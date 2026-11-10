@@ -1,0 +1,35 @@
+{# The AI fix for a refused draft: a corrected body to review and edit. Nothing is applied until "Use this and check". #}
+<details class="error-details ai-fix" id="ai-fix"{% if fix or fix_note or fix_text %} open{% endif %}>
+  <summary>AI fix</summary>
+  {% if fix_note %}<p class="{% if fix_text %}error{% else %}muted{% endif %}">{{ fix_note }}</p>{% endif %}
+  {% if fix_text %}
+    {% if fix.changes %}
+      <ul class="fix-changes">
+        {% for change in fix.changes %}
+          <li>
+            <code>{{ change.field }}</code>: {% if change.before %}{{ change.before }}{% else %}<span class="muted">not sent</span>{% endif %} → {% if change.after %}<strong>{{ change.after }}</strong>{% else %}<span class="muted">removed</span>{% endif %}
+            {% if change.estimated %}<span class="warn-note">AI guess: check it</span>{% endif %}
+            {% if change.why %}<br><span class="muted">{{ change.why }}</span>{% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+    <form class="fix-form" hx-post="{% url 'meli_draft_fix_apply' draft.pk %}" hx-target="#ai-fix" hx-swap="outerHTML" hx-sync="this:drop">
+      {% csrf_token %}
+      <label for="fix-body">Body to send (you can edit it)</label>
+      <textarea id="fix-body" name="fix_body" rows="14" spellcheck="false">{{ fix_text }}</textarea>
+      {% if fix.package %}
+        <label class="check-label"><input type="checkbox" name="save_package" value="1" checked> Also save package size and weight to the product</label>
+      {% endif %}
+      <div class="ai-row">
+        <button type="submit">Use this and check</button>
+        <button type="button" class="link-button" hx-post="{% url 'meli_draft_fix' draft.pk %}" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' hx-target="#ai-fix" hx-swap="outerHTML" hx-sync="closest form:drop">Suggest again</button>
+      </div>
+    </form>
+  {% else %}
+    <p class="muted">The AI reads Mercado Libre's answer and proposes a corrected body. Nothing changes until you use it.</p>
+    <button type="button" class="ai-button" hx-post="{% url 'meli_draft_fix' draft.pk %}" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' hx-target="#ai-fix" hx-swap="outerHTML" hx-sync="this:drop">
+      <span class="spinner htmx-indicator" aria-hidden="true"></span>Suggest a fix
+    </button>
+  {% endif %}
+</details>
