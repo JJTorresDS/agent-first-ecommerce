@@ -120,8 +120,10 @@ def build_item(draft, settings, user_products=False):
         "attributes": attributes,
     }
     if draft.kind == ListingDraft.Kind.CATALOG:
-        # No package attributes: Mercado Libre has the catalog product's own measures and refuses
-        # seller ones smaller than those (item.attribute.invalid.seller.package.dimensions).
+        # Mercado Libre requires all four and refuses ones smaller than the catalog product's
+        # (item.attribute.invalid.seller.package.dimensions): its own measures win over the product's.
+        attributes.extend(package_attributes(listed))
+        attributes.extend({"id": key, "value_name": value} for key, value in (draft.catalog_package or {}).items())
         body["catalog_product_id"] = draft.catalog_product_id
         body["catalog_listing"] = True
         # A seller without user products must send a title: the catalog product's own name, as its sell flow uses.
@@ -153,6 +155,22 @@ PACKAGE = (
     ("SELLER_PACKAGE_LENGTH", "length_cm", "cm"),
     ("SELLER_PACKAGE_WEIGHT", "weight_g", "g"),
 )
+
+
+def catalog_package(product):
+    """A catalog product's PACKAGE_HEIGHT/WIDTH/LENGTH/WEIGHT as SELLER_PACKAGE_ values ("12 cm")."""
+    found = {}
+    for attribute in product.get("attributes") or []:
+        name = f"SELLER_{attribute.get('id')}"
+        if name not in {attribute_id for attribute_id, _, _ in PACKAGE}:
+            continue
+        value = str(attribute.get("value_name") or "").strip()
+        struct = attribute.get("value_struct") or {}
+        if not value and struct.get("number") is not None and struct.get("unit"):
+            value = f"{_number(str(struct['number']))} {struct['unit']}"
+        if value:
+            found[name] = value[:30]
+    return found
 
 
 def package_attributes(product):
@@ -455,6 +473,7 @@ def _check_one(draft, token, defaults, stock, site, user_products=False):
         pictures = product.get("pictures") or []
         draft.catalog_name = str(product.get("name") or "")[:255]
         draft.catalog_picture = str((pictures[0] or {}).get("url") or "")[:1024] if pictures else ""
+        draft.catalog_package = catalog_package(product)
         if not draft.category_id:
             draft.category_id = _category_for(token, site, product)
     elif not draft.category_id:
@@ -466,7 +485,7 @@ def _check_one(draft, token, defaults, stock, site, user_products=False):
         draft.has_regulatory = any(attribute.get("id") == REGULATORY for attribute in attributes)
         draft.category_schema = schema_of(attributes)
     draft.save(
-        update_fields=["catalog_name", "catalog_picture", "category_id", "has_regulatory", "category_schema", "updated_at"]
+        update_fields=["catalog_name", "catalog_picture", "catalog_package", "category_id", "has_regulatory", "category_schema", "updated_at"]
     )
     # A template is posted paused with quantity 1: it never sells, so stock doesn't hold it back.
     problem = "" if draft.template else _stock_problem(draft, stock)
@@ -476,7 +495,16 @@ def _check_one(draft, token, defaults, stock, site, user_products=False):
     if draft.kind != ListingDraft.Kind.CATALOG and not draft.category_id:
         _set(draft, ListingDraft.Status.NEEDS_FIX, "Mercado Libre didn't suggest a category: enter one (MLA…).")
         return
-    if draft.kind != ListingDraft.Kind.CATALOG and package_missing(draft.listed()):
+    if draft.kind == ListingDraft.Kind.CATALOG:
+        if len(draft.catalog_package or {}) < len(PACKAGE) and package_missing(draft.listed()):
+            _set(
+                draft,
+                ListingDraft.Status.NEEDS_FIX,
+                "This catalog product has no package measures on Mercado Libre: fill in Package on the product, "
+                "then Save and check.",
+            )
+            return
+    elif package_missing(draft.listed()):
         _set(
             draft,
             ListingDraft.Status.NEEDS_FIX,

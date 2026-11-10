@@ -9,6 +9,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from accounts.models import AppAccess, Membership, Organization
+from catalog.models import MasterProduct
 from catalog.test_views import member
 from catalog.tests import product
 from inventory import ledger
@@ -33,6 +34,13 @@ class FakeSellFlow:
         self.refuse_text = ""
         self.warn_only = False
         self.product_status = "active"
+        # Mercado Libre's own measures of the catalog product, as /products/<id> lists them.
+        self.product_package = [
+            {"id": "PACKAGE_HEIGHT", "value_name": "12 cm"},
+            {"id": "PACKAGE_WIDTH", "value_name": "8 cm"},
+            {"id": "PACKAGE_LENGTH", "value_struct": {"number": 6.5, "unit": "cm"}},
+            {"id": "PACKAGE_WEIGHT", "value_name": "320 g"},
+        ]
         self.flex_removed = []
         self.category_attributes = [{"id": "BRAND"}, {"id": "155_98_RESOLUTION_FILE_NUMBER"}]
         self.categories_read = []
@@ -83,6 +91,7 @@ class FakeSellFlow:
                     "status": self.product_status,
                     "domain_id": "MLA-PERFUMES",
                     "pictures": [{"url": "https://http2.mlstatic.com/caramel.jpg"}],
+                    "attributes": [{"id": "BRAND", "value_name": "Sabrina Carpenter"}, *self.product_package],
                 }
             )
         if url.path == "/sites/MLA/domain_discovery/search":
@@ -174,7 +183,6 @@ class BodyTests(DraftTestCase):
         user_products = build_item(draft, defaults_for(self.organization), user_products=True)
         self.assertNotIn("title", user_products)
         self.assertNotIn("family_name", user_products)
-        self.assertFalse([a for a in body["attributes"] if a["id"].startswith("SELLER_PACKAGE_")])
         self.assertEqual(user_products["catalog_product_id"], CATALOG)
         self.assertEqual((body["price"], body["currency_id"], body["available_quantity"]), (65000, "ARS", 2))
         self.assertEqual(body["listing_type_id"], "gold_special")
@@ -205,6 +213,54 @@ class BodyTests(DraftTestCase):
         self.assertIs(body["shipping"]["local_pick_up"], False)
         # The category doesn't ask for the 155/98 number: it isn't sent.
         self.assertNotIn("155_98_RESOLUTION_FILE_NUMBER", [attribute["id"] for attribute in body["attributes"]])
+
+
+class CatalogPackageTests(DraftTestCase):
+    def sent_package(self):
+        return {
+            attribute["id"]: attribute["value_name"]
+            for attribute in self.meli.validated[-1]["attributes"]
+            if attribute["id"].startswith("SELLER_PACKAGE_")
+        }
+
+    def test_a_catalog_listing_sends_the_catalog_products_own_package(self):
+        # The product's own package is smaller: Mercado Libre would refuse it as too small.
+        MasterProduct.objects.filter(pk=self.product.pk).update(height_cm=3, width_cm=10, length_cm=20, weight_g=100)
+        self.add()
+        draft = self.draft()
+        self.assertEqual(draft.status, ListingDraft.Status.READY, draft.error)
+        expected = {
+            "SELLER_PACKAGE_HEIGHT": "12 cm",
+            "SELLER_PACKAGE_WIDTH": "8 cm",
+            "SELLER_PACKAGE_LENGTH": "6.5 cm",
+            "SELLER_PACKAGE_WEIGHT": "320 g",
+        }
+        self.assertEqual(draft.catalog_package, expected)
+        self.assertEqual(self.sent_package(), expected)
+
+    def test_the_products_package_fills_what_the_catalog_lacks(self):
+        self.meli.product_package = self.meli.product_package[:1]
+        MasterProduct.objects.filter(pk=self.product.pk).update(height_cm=3, width_cm=10, length_cm=20, weight_g=100)
+        self.add()
+        self.assertEqual(self.draft().status, ListingDraft.Status.READY, self.draft().error)
+        self.assertEqual(
+            self.sent_package(),
+            {
+                "SELLER_PACKAGE_HEIGHT": "12 cm",
+                "SELLER_PACKAGE_WIDTH": "10 cm",
+                "SELLER_PACKAGE_LENGTH": "20 cm",
+                "SELLER_PACKAGE_WEIGHT": "100 g",
+            },
+        )
+
+    def test_no_package_anywhere_stops_before_validate(self):
+        self.meli.product_package = []
+        MasterProduct.objects.filter(pk=self.product.pk).update(height_cm=None, width_cm=None, length_cm=None, weight_g=None)
+        self.add()
+        draft = self.draft()
+        self.assertEqual(draft.status, ListingDraft.Status.NEEDS_FIX)
+        self.assertIn("no package measures", draft.error)
+        self.assertEqual(self.meli.validated, [])
 
 
 class DraftFlowTests(DraftTestCase):
