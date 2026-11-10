@@ -628,8 +628,9 @@ def _check_one(draft, token, defaults, stock, site, user_products=False):
         draft.catalog_name = str(product.get("name") or "")[:255]
         draft.catalog_picture = str((pictures[0] or {}).get("url") or "")[:1024] if pictures else ""
         draft.catalog_package = catalog_package(product)
-        if not draft.category_id:
-            draft.category_id = _category_for(token, site, product)
+        # Picked again on every check: a category from another domain is refused, so an earlier wrong
+        # guess must not stay. The draft's own stays only when nothing in the domain is found.
+        draft.category_id = _category_for(token, site, product) or draft.category_id
     elif not draft.category_id:
         draft.category_id = draft.listed().meli_category_id or _category_for(
             token, site, {"name": draft.listed().title}
@@ -685,17 +686,25 @@ def _check_one(draft, token, defaults, stock, site, user_products=False):
 
 
 def _category_for(token, site, product):
-    """The catalog product's own category, else Mercado Libre's guess for its name in the same domain."""
+    """The catalog product's own category, else Mercado Libre's guess in the catalog product's domain.
+
+    A guess from another domain is refused (item_domain_different_from_category_domain): "Caramel Dream
+    Sweet Tooth" alone is guessed as candy, so the name is asked again with the domain's word ("perfumes").
+    """
     if product.get("category_id"):
         return str(product["category_id"])
-    guesses = predict_category(token, site, product.get("name") or "")
-    domain = product.get("domain_id")
-    for guess in guesses:
-        if isinstance(guess, dict) and guess.get("domain_id") == domain and guess.get("category_id"):
-            return str(guess["category_id"])
-    for guess in guesses:
-        if isinstance(guess, dict) and guess.get("category_id"):
-            return str(guess["category_id"])
+    name = str(product.get("name") or "")
+    domain = str(product.get("domain_id") or "")
+    if not domain:
+        for guess in predict_category(token, site, name):
+            if isinstance(guess, dict) and guess.get("category_id"):
+                return str(guess["category_id"])
+        return ""
+    word = domain.split("-", 1)[-1].replace("_", " ").lower()
+    for query in (name, f"{name} {word}"):
+        for guess in predict_category(token, site, query):
+            if isinstance(guess, dict) and guess.get("domain_id") == domain and guess.get("category_id"):
+                return str(guess["category_id"])
     return ""
 
 

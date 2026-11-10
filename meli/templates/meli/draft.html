@@ -3,6 +3,13 @@
 {% block title %}{% if draft.regular %}{{ draft.listed.title }}{% else %}{{ draft.catalog_name|default:draft.listed.sku }}{% endif %}{% endblock %}
 
 {% block content %}
+  <script>
+    // Opened from the drafts list's "AI fix" link: show it open.
+    document.addEventListener("DOMContentLoaded", function () {
+      var fix = document.getElementById("ai-fix");
+      if (fix && location.hash === "#ai-fix") { fix.open = true; fix.scrollIntoView({ block: "start" }); }
+    });
+  </script>
   {% include "meli/_tabs.html" %}
   <div class="page-head">
     <h1>{% if draft.regular %}{{ draft.listed.title }}{% else %}{{ draft.catalog_name|default:draft.catalog_product_id }}{% endif %}</h1>

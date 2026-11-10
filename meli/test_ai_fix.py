@@ -54,6 +54,8 @@ class AiFixTests(DraftTestCase):
 
     def test_a_refused_draft_offers_the_ai_fix_and_nothing_changes_until_it_is_used(self):
         self.assertEqual(self.refused.status, ListingDraft.Status.NEEDS_FIX)
+        listed = self.client.get("/catalog/meli/new/")
+        self.assertContains(listed, f'href="/catalog/meli/new/{self.refused.pk}/#ai-fix"')
         page = self.client.get(f"/catalog/meli/new/{self.refused.pk}/")
         self.assertContains(page, "AI fix")
         self.assertContains(page, "Suggest a fix")
@@ -153,6 +155,7 @@ class AiFixTests(DraftTestCase):
     @override_settings(MISTRAL_API_KEY="")
     def test_no_key_no_ai_fix(self):
         self.assertNotContains(self.client.get(f"/catalog/meli/new/{self.refused.pk}/"), "Suggest a fix")
+        self.assertNotContains(self.client.get("/catalog/meli/new/"), "#ai-fix")
 
 
 class OverrideTests(DraftTestCase):

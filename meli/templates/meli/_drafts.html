@@ -20,6 +20,10 @@
                   {% if draft.regular %}<a href="{{ draft.listed_url }}">{{ draft.listed.title }}</a> <span class="muted">· {% if draft.combo_id %}combo{% else %}regular{% endif %}</span>{% else %}<a href="{{ draft.catalog_url }}" target="_blank" rel="noopener">{{ draft.catalog_name|default:draft.catalog_product_id }}</a>{% endif %}
                   {% if draft.error %}<p class="{% if draft.status == 'published' or draft.status == 'ready' %}muted{% else %}error{% endif %}">{{ draft.error }}</p>{% endif %}
                   {% include "meli/_error_details.html" %}
+                  {% if ai and can_edit and draft.error_details.response and draft.error_details.sent %}{% if draft.status == "needs_fix" or draft.status == "failed" %}
+                    {# The fix has its own form, so it lives on the draft's page, not inside this Post form. #}
+                    <p class="ai-fix-link"><a href="{% url 'meli_draft' draft.pk %}#ai-fix">AI fix</a> <span class="muted">· a corrected body to review</span></p>
+                  {% endif %}{% endif %}
                 </td>
                 <td class="num">ARS {{ draft.price }}</td>
                 <td class="num">{{ draft.quantity }} / {{ draft.stock }}</td>

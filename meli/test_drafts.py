@@ -3,7 +3,7 @@ from decimal import Decimal
 from io import BytesIO
 from unittest.mock import patch
 from urllib.error import HTTPError
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from django.test import TestCase
 from django.utils import timezone
@@ -34,6 +34,8 @@ class FakeSellFlow:
         self.refuse_text = ""
         self.warn_only = False
         self.product_status = "active"
+        self.candy_guess = False
+        self.discovered = []
         # Mercado Libre's own measures of the catalog product, as /products/<id> lists them.
         self.product_package = [
             {"id": "PACKAGE_HEIGHT", "value_name": "12 cm"},
@@ -95,6 +97,11 @@ class FakeSellFlow:
                 }
             )
         if url.path == "/sites/MLA/domain_discovery/search":
+            query = parse_qs(url.query).get("q", [""])[0]
+            self.discovered.append(query)
+            if self.candy_guess and not query.endswith("perfumes"):
+                # "Caramel Dream Sweet Tooth" alone reads as candy.
+                return TokenResponse([{"domain_id": "MLA-CANDIES", "category_id": "MLA114011"}])
             return TokenResponse(
                 [
                     {"domain_id": "MLA-COLOGNES", "category_id": "MLA9999"},
@@ -261,6 +268,26 @@ class CatalogPackageTests(DraftTestCase):
         self.assertEqual(draft.status, ListingDraft.Status.NEEDS_FIX)
         self.assertIn("no package measures", draft.error)
         self.assertEqual(self.meli.validated, [])
+
+
+class CatalogCategoryTests(DraftTestCase):
+    def test_a_guess_from_another_domain_is_never_used(self):
+        self.meli.candy_guess = True
+        self.add()
+        draft = self.draft()
+        self.assertEqual(draft.category_id, "MLA1271", draft.error)
+        self.assertEqual(self.meli.discovered, ["Caramel Dream Sweet Tooth 75 Ml", "Caramel Dream Sweet Tooth 75 Ml perfumes"])
+        self.assertEqual(self.meli.validated[-1]["category_id"], "MLA1271")
+
+    def test_an_earlier_wrong_category_is_picked_again_on_the_next_check(self):
+        self.add()
+        draft = self.draft()
+        ListingDraft.objects.filter(pk=draft.pk).update(category_id="MLA114011", status=ListingDraft.Status.CHECKING)
+        from .jobs import dispatch_drafts
+
+        dispatch_drafts(self.organization, "check", [draft.pk])
+        self.assertEqual(self.draft().category_id, "MLA1271")
+        self.assertEqual(self.meli.validated[-1]["category_id"], "MLA1271")
 
 
 class DraftFlowTests(DraftTestCase):
