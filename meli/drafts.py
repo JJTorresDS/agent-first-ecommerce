@@ -119,11 +119,12 @@ def build_item(draft, settings, user_products=False):
         "shipping": {"mode": "me2", "local_pick_up": False, "free_shipping": Decimal(draft.price) >= FREE_SHIPPING_FROM},
         "attributes": attributes,
     }
-    attributes.extend(package_attributes(listed))
     if draft.kind == ListingDraft.Kind.CATALOG:
+        # No package attributes: Mercado Libre has the catalog product's own measures and refuses
+        # seller ones smaller than those (item.attribute.invalid.seller.package.dimensions).
         body["catalog_product_id"] = draft.catalog_product_id
         body["catalog_listing"] = True
-        # Any other seller must send a title: the catalog product's own name, as its sell flow uses.
+        # A seller without user products must send a title: the catalog product's own name, as its sell flow uses.
         # A user-products seller's title comes from the catalog product, and a title sent is refused
         # ("The fields [title] are invalid for requested call").
         if not user_products:
@@ -136,6 +137,7 @@ def build_item(draft, settings, user_products=False):
         else:
             body["title"] = listed.title
         body["pictures"] = [{"source": url} for url in pictures_of(listed)]
+        attributes.extend(package_attributes(listed))
         attributes.extend(product_attributes(draft))
     if draft.category_id:
         body["category_id"] = draft.category_id
