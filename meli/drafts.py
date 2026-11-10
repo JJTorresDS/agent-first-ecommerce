@@ -123,8 +123,11 @@ def build_item(draft, settings, user_products=False):
     if draft.kind == ListingDraft.Kind.CATALOG:
         body["catalog_product_id"] = draft.catalog_product_id
         body["catalog_listing"] = True
-        # Mercado Libre still requires a title: the catalog product's own name, as its sell flow uses.
-        body["title"] = draft.catalog_name
+        # Any other seller must send a title: the catalog product's own name, as its sell flow uses.
+        # A user-products seller's title comes from the catalog product, and a title sent is refused
+        # ("The fields [title] are invalid for requested call").
+        if not user_products:
+            body["title"] = draft.catalog_name
     else:
         # A user-products seller sends family_name and Mercado Libre builds the title;
         # any other seller sends title, and family_name is refused as invalid.
