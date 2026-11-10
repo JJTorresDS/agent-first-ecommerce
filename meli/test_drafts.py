@@ -174,6 +174,7 @@ class BodyTests(DraftTestCase):
         user_products = build_item(draft, defaults_for(self.organization), user_products=True)
         self.assertNotIn("title", user_products)
         self.assertNotIn("family_name", user_products)
+        self.assertFalse([a for a in body["attributes"] if a["id"].startswith("SELLER_PACKAGE_")])
         self.assertEqual(user_products["catalog_product_id"], CATALOG)
         self.assertEqual((body["price"], body["currency_id"], body["available_quantity"]), (65000, "ARS", 2))
         self.assertEqual(body["listing_type_id"], "gold_special")
