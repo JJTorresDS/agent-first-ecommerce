@@ -141,12 +141,8 @@ def set_status(organization, item_ids, status, change_ids=()):
 
     def finish(item_id, error=""):
         change = changes.get(item_id)
-        if change is None:
-            return
-        change.state = ListingChange.State.FAILED if error else ListingChange.State.DONE
-        change.error = error[:300]
-        change.finished_at = timezone.now()
-        change.save(update_fields=["state", "error", "finished_at"])
+        if change is not None:
+            change.finish(error)
 
     try:
         token = _token(organization)

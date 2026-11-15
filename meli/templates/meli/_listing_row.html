@@ -1,0 +1,78 @@
+{% comment %}
+  One listing row. While its last change is queued the row polls meli_listing_row, which answers 204 (no swap)
+  until the worker is done, then this row without the poll. Needs row (with template, last_change, polling,
+  stock_limit), bulk, can_edit and back.
+{% endcomment %}
+<tr id="listing-row-{{ row.pk }}"{% if row.polling %} hx-get="{% url 'meli_listing_row' row.pk %}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  {% if bulk %}{% include "_bulk_check.html" with value=row.pk label=row.item_id %}{% endif %}
+  <td class="thumb-cell">{% if row.thumbnail_url %}<img class="thumb" src="{{ row.thumbnail_url }}" alt="" loading="lazy">{% else %}<span class="thumb"></span>{% endif %}</td>
+  <td class="mono">{% if row.listing_url %}<a href="{{ row.listing_url }}" target="_blank" rel="noopener">{{ row.item_id }}</a>{% else %}{{ row.item_id }}{% endif %}{% if row.variation_label %}<br><span class="muted">{{ row.variation_label }}</span>{% endif %}</td>
+  <td>
+    {{ row.title }}
+    {% with template=row.template %}
+      {% if template %}
+        <br><span class="pill {% if template.state == 'ready' %}active{% endif %}">{% if template.state == 'ready' %}Template · {{ template.category_id }}{% elif template.state == 'pausing' %}Pausing to make it the template…{% else %}Not a template yet{% endif %}</span>
+        {% if template.error %}<br><span class="error">{{ template.error }}</span>{% endif %}
+        {% if template.note %}<br><span class="muted">{{ template.note }}</span>{% endif %}
+      {% endif %}
+      {% if can_edit and row.category_id %}
+        <form method="post" action="{% url 'meli_listings' %}" class="inline"{% if not template %} onsubmit="return confirm('This pauses the listing on Mercado Libre so it can\'t sell, and makes it the template for {{ row.category_id }}. Continue?')"{% endif %}>
+          {% csrf_token %}
+          <input type="hidden" name="action" value="{% if template %}untemplate{% else %}template{% endif %}">
+          <input type="hidden" name="listing" value="{{ row.pk }}">
+          <input type="hidden" name="next" value="{{ back }}">
+          <br><button type="submit" class="link-button">{% if template %}Stop using as template{% else %}Make template{% endif %}</button>
+        </form>
+      {% endif %}
+    {% endwith %}
+  </td>
+  <td>
+    {% if row.product %}<a href="{% url 'catalog_product' row.product_id %}" title="Linked to the catalog"><span class="sku">{{ row.product.sku }}</span></a>
+    {% elif row.seller_sku %}<span class="mono">{{ row.seller_sku }}</span><br><span class="pill">Not in catalog</span>
+    {% else %}<span class="muted">No SKU</span>{% endif %}
+  </td>
+  <td>
+    <span class="pill {% if row.status == 'active' %}active{% elif row.status == 'closed' %}archived{% endif %}">{{ row.status|default:"—" }}</span>
+    {% with change=row.last_change %}
+      {% if change.state == "queued" %}<br><span class="muted">{{ change.pending_verb }}…</span>
+      {% elif change.state == "failed" %}<br><span class="error">{{ change.error|default:row.action_error }}</span>
+      {% elif change %}<br><span class="muted">{{ change.verb }}{% if change.user %} by {{ change.user.first_name|default:change.user.username }}{% endif %} · {{ change.get_reason_display }} · {{ change.created_at|date:"d/m H:i" }}</span>
+      {% elif row.action_error %}<br><span class="error">{{ row.action_error }}</span>{% endif %}
+      {% if change %}<br><button type="button" class="link-button" data-dialog="history-dialog" hx-get="{% url 'meli_listing_history' row.item_id %}" hx-target="#history-dialog-body" hx-on:htmx:before-request="document.getElementById('history-dialog-body').innerHTML = '<p class=&quot;muted&quot;>Loading…</p>'">History</button>{% endif %}
+    {% endwith %}
+    {% if bulk %}
+      {% if row.status == "active" %}<br><button type="button" class="link-button" data-status-dialog data-action="pause_selected" data-listing="{{ row.pk }}" data-label="{{ row.item_id }} · {{ row.title }}">Pause</button>
+      {% elif row.status == "paused" and not row.template %}<br><button type="button" class="link-button" data-status-dialog data-action="activate_selected" data-listing="{{ row.pk }}" data-label="{{ row.item_id }} · {{ row.title }}">Reactivate</button>{% endif %}
+    {% endif %}
+  </td>
+  <td>
+    {% with state=row.catalog_state %}
+      {% if state == "competing" %}<span class="pill active">Competing</span>
+      {% elif state == "twin" %}<span class="pill" title="Its catalog listing competes for it; they share stock">Via {{ row.catalog_twin }}</span>
+      {% elif state == "eligible" %}<span class="pill">Can join</span>
+      {% else %}<span class="muted">No</span>{% endif %}
+      {% if state and row.catalog_url %}<br><a class="muted" href="{{ row.catalog_url }}" target="_blank" rel="noopener">Catalog page</a>{% endif %}
+    {% endwith %}
+  </td>
+  <td class="num">
+    {% if row.price is not None %}{{ row.currency }} {{ row.price }}{% endif %}
+    {% if bulk and row.status != "closed" %}<br><button type="button" class="link-button" data-edit-dialog data-field="price" data-listing="{{ row.pk }}" data-current="{{ row.price|default_if_none:'' }}" data-label="{{ row.item_id }} · {{ row.title }}" data-unit="{{ row.currency }}">Change</button>{% endif %}
+  </td>
+  <td class="num">
+    {{ row.available_quantity|default_if_none:"" }}
+    {% if row.is_full %}<br><span class="muted" title="Mercado Libre counts Full stock">Full</span>
+    {% elif bulk and row.status != "closed" %}<br><button type="button" class="link-button" data-edit-dialog data-field="available_quantity" data-listing="{{ row.pk }}" data-current="{{ row.available_quantity|default_if_none:'' }}" data-label="{{ row.item_id }}{% if row.variation_label %} · {{ row.variation_label }}{% endif %} · {{ row.title }}"{% if row.stock_limit is not None %} data-max="{{ row.stock_limit }}"{% endif %}>Change</button>{% endif %}
+  </td>
+  <td class="num">{{ row.sold_quantity|default_if_none:"" }}</td>
+  <td class="num">
+    {% if can_edit and row.product_id %}
+      <form method="post" action="{% url 'meli_listings' %}" class="inline units-form">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="units">
+        <input type="hidden" name="listing" value="{{ row.pk }}">
+        <input type="hidden" name="next" value="{{ back }}">
+        <input class="qty" type="number" min="1" max="100" name="units_per_sale" value="{{ row.units_per_sale }}" aria-label="Units per sale for {{ row.item_id }}" onchange="this.form.requestSubmit()">
+      </form>
+    {% else %}{{ row.units_per_sale }}{% endif %}
+  </td>
+</tr>

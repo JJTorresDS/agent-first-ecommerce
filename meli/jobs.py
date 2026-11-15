@@ -711,13 +711,14 @@ def dispatch_drafts_job(organization, action, draft_ids=(), **fields):
                 pk__in=draft_ids,
                 status__in=[ListingDraft.Status.CHECKING, ListingDraft.Status.QUEUED],
             ).update(status=ListingDraft.Status.FAILED, error="Could not be queued. Try again.")
-            if fields.get("change_ids"):
+            change_ids = list(fields.get("change_ids") or []) + ([fields["change_id"]] if fields.get("change_id") else [])
+            if change_ids:
                 from django.utils import timezone
 
                 from .models import ListingChange
 
                 ListingChange.objects.filter(
-                    organization=organization, pk__in=fields["change_ids"], state=ListingChange.State.QUEUED
+                    organization=organization, pk__in=change_ids, state=ListingChange.State.QUEUED
                 ).update(state=ListingChange.State.FAILED, error="Could not be queued. Try again.",
                          finished_at=timezone.now())
     else:
@@ -748,6 +749,11 @@ def _run_drafts_payload(payload):
                 str(job.get("status") or ""),
                 change_ids=job.get("change_ids") or (),
             )
+            return
+        if job.get("action") == "listing_edit":
+            from .listing_edits import apply_change
+
+            apply_change(organization, job.get("change_id"))
             return
         if job.get("action") == "template":
             from .listing_templates import pause_marked

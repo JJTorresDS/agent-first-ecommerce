@@ -1027,10 +1027,43 @@
         form.querySelector("[data-note-hint]").textContent = other ? "(say why)" : "(optional)";
       }
       document.addEventListener("change", function (event) {
-        var form = event.target.closest && event.target.closest("[data-status-form]");
+        var form = event.target.closest && event.target.closest("[data-reason-form]");
         if (form && event.target.name === "reason") updateNote(form);
       });
+      // Price or available quantity (Mercado Libre listings): a row's [data-edit-dialog] opens #edit-dialog.
+      function openEditDialog(button) {
+        var dialog = document.getElementById("edit-dialog");
+        if (!dialog) return;
+        var form = dialog.querySelector("form");
+        var price = button.getAttribute("data-field") === "price";
+        var current = button.getAttribute("data-current") || "";
+        var max = button.getAttribute("data-max");
+        var input = form.querySelector("[name=value]");
+        form.querySelector("[name=listing]").value = button.getAttribute("data-listing");
+        form.querySelector("[name=field]").value = button.getAttribute("data-field");
+        form.querySelector("[data-edit-title]").textContent = price ? "Change price" : "Change available quantity";
+        form.querySelector("[data-edit-for]").textContent = button.getAttribute("data-label") || "";
+        form.querySelector("[data-edit-label]").textContent = price
+          ? "New price" + (button.getAttribute("data-unit") ? " (" + button.getAttribute("data-unit") + ")" : "")
+          : "Units available";
+        input.type = price ? "text" : "number";
+        input.inputMode = price ? "decimal" : "numeric";
+        input.min = price ? "" : "0";
+        if (!price && max !== null) input.max = max; else input.removeAttribute("max");
+        input.value = current;
+        var hint = "Now " + (current || "—") + ".";
+        if (!price && max !== null) hint += " Up to " + max + " from the Depósito.";
+        form.querySelector("[data-edit-hint]").textContent = hint;
+        form.querySelector("[name=reason]").value = "";
+        form.querySelector("[name=note]").value = "";
+        updateNote(form);
+        dialog.showModal();
+        input.focus();
+        input.select();
+      }
       document.addEventListener("click", function (event) {
+        var edit = event.target.closest("[data-edit-dialog]");
+        if (edit) { openEditDialog(edit); return; }
         var row = event.target.closest("[data-status-dialog]");
         var bar = row ? null : event.target.closest("[data-bulk-dialog]");
         if (!row && !bar) return;

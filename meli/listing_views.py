@@ -7,6 +7,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
+from urllib.parse import urlparse
 
 from django.contrib import messages
 
@@ -88,6 +89,8 @@ def meli_listings(request):
             return redirect(_back(request))
         if request.POST.get("action") in BULK_STATUS:
             return _change_status(request, organization)
+        if request.POST.get("action") == "edit":
+            return _edit(request, organization)
         if request.POST.get("action") == "units":
             # Units one sale takes: 2 for a Kit x2. Past sales keep what they took.
             listing = get_object_or_404(MeliListing, organization=organization, pk=request.POST.get("listing"))
@@ -111,7 +114,11 @@ def meli_listings(request):
             # The sync ended: reload so the table shows what it found.
             response["HX-Refresh"] = "true"
         return response
-    rows = MeliListing.objects.filter(organization=organization).select_related("product")
+    rows = (
+        MeliListing.objects.filter(organization=organization)
+        .select_related("product", "combo")
+        .prefetch_related("combo__items")
+    )
     query = (request.GET.get("q") or "").strip()
     link = request.GET.get("link") or ""
     status = request.GET.get("status") or ""
@@ -140,12 +147,8 @@ def meli_listings(request):
             organization=organization, item_id__in={listing.item_id for listing in listings}
         )
     }
-    last_changes = latest_changes(organization, {listing.item_id for listing in listings})
-    for listing in listings:
-        listing.template = templates.get(listing.item_id)
-        listing.last_change = last_changes.get(listing.item_id)
-        listing.polling = _waiting(listing.last_change)
     connected = MercadoLibreAccount.objects.filter(organization=organization).exists()
+    _decorate(organization, listings, templates, editing=can_edit and connected)
     context = {
         "listings": listings,
         "page_obj": page,
@@ -164,6 +167,7 @@ def meli_listings(request):
             ("close_selected", "Close", "", True, "status-dialog"),
         ) if can_edit and connected else None,
         "reasons": ListingChange.Reason.choices,
+        "back": request.get_full_path(),
         "active_tab": "meli",
     }
     template = "meli/_listings.html" if request.headers.get("HX-Request") == "true" else "meli/listings.html"
@@ -239,7 +243,7 @@ def latest_changes(organization, item_ids):
 
 
 def _waiting(change):
-    """The worker usually answers in seconds: a cell polls while its change is queued, for a few minutes at most."""
+    """The worker usually answers in seconds: a row polls while its change is queued, for a few minutes at most."""
     return (
         change is not None
         and change.state == ListingChange.State.QUEUED
@@ -247,19 +251,99 @@ def _waiting(change):
     )
 
 
+def _decorate(organization, listings, templates, editing):
+    """What each row shows besides its own fields: template, last change, polling, stock cap (editors only)."""
+    from .listing_edits import stock_limits
+
+    last_changes = latest_changes(organization, {listing.item_id for listing in listings})
+    limits = stock_limits(organization, listings) if editing else {}
+    for listing in listings:
+        listing.template = templates.get(listing.item_id)
+        listing.last_change = last_changes.get(listing.item_id)
+        listing.polling = _waiting(listing.last_change)
+        listing.stock_limit = limits.get(listing.pk)
+
+
 @require_app(AppAccess.App.CATALOG)
-def meli_listing_status(request, pk):
-    """One listing's Status cell, polled while its change is queued: 204 (no swap) until the worker is done."""
+def meli_listing_row(request, pk):
+    """One listing's row, polled while its change is queued: 204 (no swap) until the worker is done."""
     membership = membership_for(request.user)
     organization = membership.organization
-    listing = get_object_or_404(MeliListing, organization=organization, pk=pk)
-    listing.last_change = latest_changes(organization, {listing.item_id}).get(listing.item_id)
-    listing.polling = _waiting(listing.last_change)
-    if listing.polling:
+    listing = get_object_or_404(
+        MeliListing.objects.select_related("product", "combo").prefetch_related("combo__items"),
+        organization=organization,
+        pk=pk,
+    )
+    change = latest_changes(organization, {listing.item_id}).get(listing.item_id)
+    if _waiting(change):
         return HttpResponse(status=204)
-    listing.template = ListingTemplate.objects.filter(organization=organization, item_id=listing.item_id).first()
-    can_act = can_edit_products(membership) and MercadoLibreAccount.objects.filter(organization=organization).exists()
-    return render(request, "meli/_listing_status.html", {"row": listing, "can_act": can_act})
+    can_edit = can_edit_products(membership)
+    connected = MercadoLibreAccount.objects.filter(organization=organization).exists()
+    templates = {
+        row.item_id: row for row in ListingTemplate.objects.filter(organization=organization, item_id=listing.item_id)
+    }
+    _decorate(organization, [listing], templates, editing=can_edit and connected)
+    current = request.headers.get("HX-Current-URL") or ""
+    back = urlparse(current).path if url_has_allowed_host_and_scheme(current, allowed_hosts={request.get_host()}) else ""
+    if back and urlparse(current).query:
+        back += "?" + urlparse(current).query
+    return render(request, "meli/_listing_row.html", {
+        "row": listing,
+        "can_edit": can_edit,
+        "bulk": {"id": "bulk-listings"} if can_edit and connected else None,
+        "back": back or reverse("meli_listings"),
+    })
+
+
+def _edit(request, organization):
+    """Change one listing's price or available quantity on Mercado Libre, with a reason, in the worker."""
+    from .jobs import dispatch_drafts_job
+    from .listing_edits import EDIT_FIELDS, edit_problem, read_price, read_quantity, stock_limits
+
+    listing = get_object_or_404(
+        MeliListing.objects.select_related("combo").prefetch_related("combo__items"),
+        organization=organization,
+        pk=request.POST.get("listing"),
+    )
+    back = _back(request)
+    field = request.POST.get("field") or ""
+    reason = request.POST.get("reason") or ""
+    note = (request.POST.get("note") or "").strip()[:500]
+    if field not in EDIT_FIELDS:
+        return redirect(back)
+    price = field == ListingChange.Field.PRICE
+    value = read_price(request.POST.get("value")) if price else read_quantity(request.POST.get("value"))
+    current = listing.price if price else listing.available_quantity
+    limit = None if price else stock_limits(organization, [listing]).get(listing.pk)
+    if value is None:
+        problem = "Type a price above zero." if price else "Type a whole number of units, 0 or more."
+    elif value == current:
+        problem = f"That's already its {'price' if price else 'available quantity'}."
+    elif reason not in ListingChange.Reason.values:
+        problem = "Pick a reason first"
+    elif reason == ListingChange.Reason.OTHER and not note:
+        problem = "Say why in the note when the reason is Other"
+    else:
+        problem = edit_problem(listing, field, value, limit)
+    if problem:
+        messages.error(request, f"{listing.item_id}: {problem.rstrip('.')}. Nothing was changed.")
+        return redirect(back)
+    change = ListingChange.objects.create(
+        organization=organization,
+        item_id=listing.item_id,
+        variation_id="" if price else listing.variation_id,
+        title=listing.title,
+        field=field,
+        old_value="" if current is None else str(current),
+        new_value=str(value),
+        reason=reason,
+        note=note,
+        user=request.user,
+    )
+    MeliListing.objects.filter(pk=listing.pk).update(action_error="")
+    dispatch_drafts_job(organization, "listing_edit", change_id=change.pk)
+    messages.success(request, f"{change.pending_verb()} for {listing.item_id} on Mercado Libre.")
+    return redirect(back)
 
 
 @require_app(AppAccess.App.CATALOG)

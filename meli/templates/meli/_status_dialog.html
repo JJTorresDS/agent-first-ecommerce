@@ -3,7 +3,7 @@
   action and the selected rows); posts to the Listings page, which logs one ListingChange per item.
 {% endcomment %}
 <dialog class="modal" id="status-dialog" aria-labelledby="status-dialog-title">
-  <form method="post" action="{{ request.get_full_path }}" data-status-form>
+  <form method="post" action="{{ request.get_full_path }}" data-reason-form data-status-form>
     {% csrf_token %}
     <input type="hidden" name="action" value="">
     <div data-selected></div>

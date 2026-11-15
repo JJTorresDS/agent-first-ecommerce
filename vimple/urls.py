@@ -34,7 +34,7 @@ from meli.draft_views import (
 )
 from meli.category_views import meli_categories
 from meli.import_views import catalog_import
-from meli.listing_views import meli_listing_history, meli_listing_status, meli_listings
+from meli.listing_views import meli_listing_history, meli_listing_row, meli_listings
 from meli.views import (
     mercadolibre_callback,
     mercadolibre_connect,
@@ -83,7 +83,7 @@ urlpatterns = [
     path("cashflow/movements/<str:pk>/", cashflow_movement, name="cashflow_movement"),
     path("catalog/meli/", meli_listings, name="meli_listings"),
     path("catalog/meli/history/<str:item_id>/", meli_listing_history, name="meli_listing_history"),
-    path("catalog/meli/status/<int:pk>/", meli_listing_status, name="meli_listing_status"),
+    path("catalog/meli/row/<int:pk>/", meli_listing_row, name="meli_listing_row"),
     path("catalog/import/", catalog_import, name="catalog_import"),
     path("catalog/meli/new/", meli_drafts, name="meli_drafts"),
     path("catalog/meli/new/pick/", meli_listing_pick, name="meli_listing_pick"),

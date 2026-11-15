@@ -328,6 +328,37 @@ class MeliListing(models.Model):
             return self.thumbnail
         return ""
 
+    def catalog_state(self):
+        """How this listing stands in Mercado Libre's catalog, from the synced payload (no API call).
+
+        competing: it is a catalog listing. twin: a regular listing whose catalog twin competes for it
+        (item_relations; they share stock). eligible: Mercado Libre says it can join. "" otherwise.
+        """
+        payload = self.payload or {}
+        if self.catalog_listing:
+            return "competing"
+        if any(isinstance(row, dict) and row.get("id") for row in payload.get("item_relations") or []):
+            return "twin"
+        if "catalog_listing_eligible" in (payload.get("tags") or []):
+            return "eligible"
+        return ""
+
+    def catalog_twin(self):
+        for row in (self.payload or {}).get("item_relations") or []:
+            if isinstance(row, dict) and row.get("id"):
+                return str(row["id"])
+        return ""
+
+    def catalog_url(self):
+        product_id = str((self.payload or {}).get("catalog_product_id") or "")
+        if product_id[:3].isalpha() and product_id[3:].isdigit():
+            return f"https://www.mercadolibre.com.ar/p/{product_id}"
+        return ""
+
+    def is_full(self):
+        """In Mercado Libre Full: Mercado Libre counts its stock, so Vimple doesn't set it."""
+        return self.logistic_type == "fulfillment"
+
     def is_full(self):
         return self.logistic_type == "fulfillment"
 
@@ -690,6 +721,8 @@ class ListingChange(models.Model):
 
     class Field(models.TextChoices):
         STATUS = "status", "Status"
+        PRICE = "price", "Price"
+        QUANTITY = "available_quantity", "Available"
 
     class Reason(models.TextChoices):
         OUT_OF_STOCK = "out_of_stock", "Out of stock"
@@ -709,6 +742,9 @@ class ListingChange(models.Model):
         related_name="listing_changes",
     )
     item_id = models.CharField(max_length=32)
+    variation_id = models.CharField(
+        max_length=32, blank=True, help_text="The variation a quantity change is for; blank for the whole item."
+    )
     title = models.CharField(max_length=255, blank=True)
     field = models.CharField(max_length=32, choices=Field.choices, default=Field.STATUS)
     old_value = models.CharField(max_length=64, blank=True)
@@ -734,8 +770,19 @@ class ListingChange(models.Model):
         return f"{self.item_id} {self.field} → {self.new_value}"
 
     def verb(self):
-        """ "Paused", "Reactivated", "Closed": what happened, or was asked."""
-        return {"paused": "Paused", "active": "Reactivated", "closed": "Closed"}.get(self.new_value, self.new_value)
+        """ "Paused", "Price 100 → 120": what happened, or was asked."""
+        if self.field == self.Field.STATUS:
+            return {"paused": "Paused", "active": "Reactivated", "closed": "Closed"}.get(self.new_value, self.new_value)
+        return f"{self.get_field_display()} {self.old_value or '—'} → {self.new_value}"
 
     def pending_verb(self):
-        return {"paused": "Pausing", "active": "Reactivating", "closed": "Closing"}.get(self.new_value, "Changing")
+        if self.field == self.Field.STATUS:
+            return {"paused": "Pausing", "active": "Reactivating", "closed": "Closing"}.get(self.new_value, "Changing")
+        return f"Setting {self.get_field_display().lower()} to {self.new_value}"
+
+    def finish(self, error=""):
+        """Done, or failed with Mercado Libre's reason (never a token)."""
+        self.state = self.State.FAILED if error else self.State.DONE
+        self.error = error[:300]
+        self.finished_at = timezone.now()
+        self.save(update_fields=["state", "error", "finished_at"])

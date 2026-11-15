@@ -1,0 +1,29 @@
+{% comment %}
+  Change a listing's price or available quantity, with a reason. A row's Change button opens it (base.html
+  fills field, listing, current value and the Depósito cap); the Listings page logs a ListingChange and queues it.
+{% endcomment %}
+<dialog class="modal" id="edit-dialog" aria-labelledby="edit-dialog-title">
+  <form method="post" action="{% url 'meli_listings' %}" data-reason-form data-edit-form>
+    {% csrf_token %}
+    <input type="hidden" name="action" value="edit">
+    <input type="hidden" name="listing" value="">
+    <input type="hidden" name="field" value="">
+    <input type="hidden" name="next" value="{{ back }}">
+    <h2 id="edit-dialog-title" data-edit-title>Change price</h2>
+    <p class="muted" data-edit-for></p>
+    <label for="edit-value" data-edit-label>New price</label>
+    <input id="edit-value" name="value" required autocomplete="off">
+    <p class="muted" data-edit-hint></p>
+    <label for="edit-reason">Reason</label>
+    <select id="edit-reason" name="reason" required>
+      <option value="">Pick one</option>
+      {% for value, label in reasons %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+    </select>
+    <label for="edit-note">Note <span class="muted" data-note-hint>(optional)</span></label>
+    <textarea id="edit-note" name="note" rows="3" maxlength="500"></textarea>
+    <div class="actions">
+      <button type="button" data-close-dialog>Cancel</button>
+      <button type="submit" class="accent">Save on Mercado Libre</button>
+    </div>
+  </form>
+</dialog>

@@ -442,6 +442,13 @@ def set_item_status(access_token, item_id, status):
     )
 
 
+def update_item(access_token, item_id, body):
+    """Change one item's price or available quantity (PUT /items). Its variations, when it has them, go in
+    body["variations"], every one of them: Mercado Libre deletes a variation the body leaves out."""
+    item = quote(str(item_id), safe="")
+    return _api_request(access_token, f"https://api.mercadolibre.com/items/{item}", body, method="PUT")
+
+
 def remove_flex(access_token, site_id, item_id):
     """Take one item out of Mercado Envíos Flex (the account puts new items in)."""
     site = quote(str(site_id), safe="")
