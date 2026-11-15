@@ -13,7 +13,7 @@ from catalog.tests import product
 from inventory import ledger
 from inventory.tests import listing
 
-from .models import ListingTemplate, MeliListing
+from .models import ListingChange, ListingTemplate, MeliListing
 from .tests import TokenResponse, shared_seller
 
 
@@ -43,8 +43,12 @@ class ListingStatusTests(TestCase):
             return TokenResponse({"id": item})
         return TokenResponse([])
 
-    def act(self, action, *rows, **query):
-        return self.client.post("/catalog/meli/", {"action": action, "selected": [row.pk for row in rows]}, follow=True)
+    def act(self, action, *rows, reason="out_of_stock", note=""):
+        return self.client.post(
+            "/catalog/meli/",
+            {"action": action, "selected": [row.pk for row in rows], "reason": reason, "note": note},
+            follow=True,
+        )
 
     def test_an_item_with_variations_is_changed_once(self):
         response = self.act("pause_selected", self.first, self.second)
@@ -78,8 +82,70 @@ class ListingStatusTests(TestCase):
         self.act("pause_selected", foreign)
         self.assertEqual(self.calls, [])
         self.client.force_login(member(self.organization, role=Membership.Role.CONTRIBUTOR, username="cid"))
-        self.assertEqual(self.client.post("/catalog/meli/", {"action": "pause_selected", "selected": [self.first.pk]}).status_code, 403)
+        self.assertEqual(self.client.post(
+            "/catalog/meli/", {"action": "pause_selected", "selected": [self.first.pk], "reason": "seasonal"}
+        ).status_code, 403)
         self.assertNotContains(self.client.get("/catalog/meli/"), 'form="bulk-listings"')
+        self.assertNotContains(self.client.get("/catalog/meli/"), "data-status-dialog data-action")
+        self.assertFalse(ListingChange.objects.exists())
+
+    def test_each_item_logs_who_why_and_how_it_went(self):
+        self.act("pause_selected", self.first, self.second, reason="other", note="Restocking")
+        changes = {row.item_id: row for row in ListingChange.objects.all()}
+        # MLA1's two variations are one item: one change.
+        self.assertEqual(sorted(changes), ["MLA1", "MLA2"])
+        first = changes["MLA1"]
+        self.assertEqual((first.old_value, first.new_value, first.reason, first.note), ("active", "paused", "other", "Restocking"))
+        self.assertEqual(first.user.username, "ada")
+        self.assertEqual(first.state, ListingChange.State.DONE)
+        self.assertIsNotNone(first.finished_at)
+        self.assertEqual(first.title, "Perfume A")
+        page = self.client.get("/catalog/meli/")
+        self.assertContains(page, "Paused by ada · Other")
+        history = self.client.get("/catalog/meli/history/MLA1/")
+        self.assertContains(history, "Restocking")
+        self.assertContains(history, "active → paused")
+
+    def test_a_row_pauses_alone(self):
+        self.assertContains(self.client.get("/catalog/meli/"), f'data-action="pause_selected" data-listing="{self.first.pk}"')
+        self.act("pause_selected", self.first, reason="price_review")
+        self.assertEqual(self.calls, [("MLA1", "paused")])
+        self.assertEqual(ListingChange.objects.get().reason, "price_review")
+
+    def test_no_reason_no_change(self):
+        response = self.act("pause_selected", self.first, reason="")
+        self.assertContains(response, "Pick a reason first")
+        response = self.act("pause_selected", self.first, reason="other", note="  ")
+        self.assertContains(response, "Say why in the note")
+        self.act("pause_selected", self.first, reason="made_up")
+        self.assertEqual(self.calls, [])
+        self.assertFalse(ListingChange.objects.exists())
+        self.assertEqual(MeliListing.objects.get(pk=self.first.pk).status, "active")
+
+    def test_refusals_and_templates_fail_their_change(self):
+        self.refuse = {"MLA1"}
+        self.act("close_selected", self.first)
+        change = ListingChange.objects.get(item_id="MLA1")
+        self.assertEqual(change.state, ListingChange.State.FAILED)
+        self.assertEqual(change.error, "Couldn't close it: Item has stock in Full")
+        ListingTemplate.objects.create(
+            organization=self.organization, category_id="MLA1271", item_id="MLA2", state=ListingTemplate.State.READY
+        )
+        self.act("activate_selected", self.second)
+        change = ListingChange.objects.get(item_id="MLA2")
+        self.assertEqual(change.state, ListingChange.State.FAILED)
+        self.assertIn("never reactivates", change.error)
+
+    def test_another_organizations_changes_stay_invisible(self):
+        other = shared_seller("Other")
+        foreign = listing(other, "MLA1", title="Theirs", status="active")
+        ListingChange.objects.create(
+            organization=other, item_id="MLA1", new_value="paused", reason="other", note="Their secret", state="done"
+        )
+        self.act("pause_selected", foreign)
+        self.assertEqual(ListingChange.objects.filter(organization=self.organization).count(), 0)
+        self.assertNotContains(self.client.get("/catalog/meli/history/MLA1/"), "Their secret")
+        self.assertNotContains(self.client.get("/catalog/meli/"), "Paused by")
 
 
 class SelectedRowsTests(TestCase):

@@ -140,6 +140,22 @@ def _client():
     return client
 
 
+def redis_health():
+    """(ok, detail) from one PING with the app's own client, as this server sees Redis.
+
+    detail is the round trip ("12 ms") or the error class, never the URL or password.
+    """
+    if not postsale_queue_enabled():
+        return False, "REDIS_URL is not set"
+    started = time.monotonic()
+    try:
+        _client().ping()
+    except Exception as error:
+        logger.warning("Redis health check failed: %s", type(error).__name__)
+        return False, type(error).__name__
+    return True, f"{round((time.monotonic() - started) * 1000)} ms"
+
+
 def postsale_status(organization):
     """queued, running, ok, failed, or an empty string when Redis is unused."""
     if organization is None or not postsale_queue_enabled():
@@ -695,6 +711,15 @@ def dispatch_drafts_job(organization, action, draft_ids=(), **fields):
                 pk__in=draft_ids,
                 status__in=[ListingDraft.Status.CHECKING, ListingDraft.Status.QUEUED],
             ).update(status=ListingDraft.Status.FAILED, error="Could not be queued. Try again.")
+            if fields.get("change_ids"):
+                from django.utils import timezone
+
+                from .models import ListingChange
+
+                ListingChange.objects.filter(
+                    organization=organization, pk__in=fields["change_ids"], state=ListingChange.State.QUEUED
+                ).update(state=ListingChange.State.FAILED, error="Could not be queued. Try again.",
+                         finished_at=timezone.now())
     else:
         threading.Thread(target=_run_drafts_payload, args=(payload,), name="meli-drafts", daemon=True).start()
 
@@ -717,7 +742,12 @@ def _run_drafts_payload(payload):
         if job.get("action") == "listing_status":
             from .listing_templates import set_status
 
-            set_status(organization, [str(item) for item in job.get("item_ids") or []], str(job.get("status") or ""))
+            set_status(
+                organization,
+                [str(item) for item in job.get("item_ids") or []],
+                str(job.get("status") or ""),
+                change_ids=job.get("change_ids") or (),
+            )
             return
         if job.get("action") == "template":
             from .listing_templates import pause_marked

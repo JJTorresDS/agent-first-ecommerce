@@ -1,0 +1,25 @@
+{% comment %}
+  Pause, Reactivate or Close with a reason. Opened by a row's button or the selection bar (base.html fills
+  action and the selected rows); posts to the Listings page, which logs one ListingChange per item.
+{% endcomment %}
+<dialog class="modal" id="status-dialog" aria-labelledby="status-dialog-title">
+  <form method="post" action="{{ request.get_full_path }}" data-status-form>
+    {% csrf_token %}
+    <input type="hidden" name="action" value="">
+    <div data-selected></div>
+    <h2 id="status-dialog-title" data-status-title>Pause</h2>
+    <p class="muted" data-status-for></p>
+    <p class="error" data-status-close hidden>Closing ends a listing for good: it can't be reopened. Its sales stay in Vimple.</p>
+    <label for="status-reason">Reason</label>
+    <select id="status-reason" name="reason" required>
+      <option value="">Pick one</option>
+      {% for value, label in reasons %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+    </select>
+    <label for="status-note">Note <span class="muted" data-note-hint>(optional)</span></label>
+    <textarea id="status-note" name="note" rows="3" maxlength="500" placeholder="Back when the next shipment arrives"></textarea>
+    <div class="actions">
+      <button type="button" data-close-dialog>Cancel</button>
+      <button type="submit" class="accent" data-status-submit>Pause</button>
+    </div>
+  </form>
+</dialog>

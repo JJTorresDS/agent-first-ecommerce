@@ -33,7 +33,20 @@
                 {% elif row.seller_sku %}<span class="mono">{{ row.seller_sku }}</span><br><span class="pill">Not in catalog</span>
                 {% else %}<span class="muted">No SKU</span>{% endif %}
               </td>
-              <td><span class="pill {% if row.status == 'active' %}active{% elif row.status == 'closed' %}archived{% endif %}">{{ row.status|default:"—" }}</span>{% if row.action_error %}<br><span class="error">{{ row.action_error }}</span>{% endif %}</td>
+              <td>
+                <span class="pill {% if row.status == 'active' %}active{% elif row.status == 'closed' %}archived{% endif %}">{{ row.status|default:"—" }}</span>
+                {% with change=row.last_change %}
+                  {% if change.state == "queued" %}<br><span class="muted">{{ change.pending_verb }}…</span>
+                  {% elif change.state == "failed" %}<br><span class="error">{{ change.error|default:row.action_error }}</span>
+                  {% elif change %}<br><span class="muted">{{ change.verb }}{% if change.user %} by {{ change.user.first_name|default:change.user.username }}{% endif %} · {{ change.get_reason_display }} · {{ change.created_at|date:"d/m H:i" }}</span>
+                  {% elif row.action_error %}<br><span class="error">{{ row.action_error }}</span>{% endif %}
+                  {% if change %}<br><button type="button" class="link-button" data-dialog="history-dialog" hx-get="{% url 'meli_listing_history' row.item_id %}" hx-target="#history-dialog-body" hx-on:htmx:before-request="document.getElementById('history-dialog-body').innerHTML = '<p class=&quot;muted&quot;>Loading…</p>'">History</button>{% endif %}
+                {% endwith %}
+                {% if bulk %}
+                  {% if row.status == "active" %}<br><button type="button" class="link-button" data-status-dialog data-action="pause_selected" data-listing="{{ row.pk }}" data-label="{{ row.item_id }} · {{ row.title }}">Pause</button>
+                  {% elif row.status == "paused" and not row.template %}<br><button type="button" class="link-button" data-status-dialog data-action="activate_selected" data-listing="{{ row.pk }}" data-label="{{ row.item_id }} · {{ row.title }}">Reactivate</button>{% endif %}
+                {% endif %}
+              </td>
               <td class="num">{% if row.price is not None %}{{ row.currency }} {{ row.price }}{% endif %}</td>
               <td class="num">{{ row.available_quantity|default_if_none:"" }}</td>
               <td class="num">{{ row.sold_quantity|default_if_none:"" }}</td>

@@ -989,6 +989,60 @@
       });
       document.body.addEventListener("htmx:afterSwap", updateAll);
       window.addEventListener("pageshow", updateAll);
+
+      // Pause, Reactivate, Close with a reason (Mercado Libre listings): a row's [data-status-dialog] or a
+      // selection bar's [data-bulk-dialog] opens the dialog with the action and the rows it's for.
+      var STATUS_TEXT = {
+        pause_selected: ["Pause", "Pause"],
+        activate_selected: ["Reactivate", "Reactivate"],
+        close_selected: ["Close on Mercado Libre", "Close for good"]
+      };
+      function openStatusDialog(dialog, action, ids, label) {
+        var form = dialog.querySelector("form");
+        form.querySelector("[name=action]").value = action;
+        var holder = form.querySelector("[data-selected]");
+        holder.innerHTML = "";
+        ids.forEach(function (id) {
+          var input = document.createElement("input");
+          input.type = "hidden"; input.name = "selected"; input.value = id;
+          holder.appendChild(input);
+        });
+        var text = STATUS_TEXT[action] || ["Change", "Change"];
+        form.querySelector("[data-status-title]").textContent = text[0];
+        var submit = form.querySelector("[data-status-submit]");
+        submit.textContent = text[1] + (ids.length > 1 ? " " + ids.length + " listings" : "");
+        submit.classList.toggle("danger", action === "close_selected");
+        submit.classList.toggle("accent", action !== "close_selected");
+        form.querySelector("[data-status-close]").hidden = action !== "close_selected";
+        form.querySelector("[data-status-for]").textContent = label || "";
+        form.querySelector("[name=reason]").value = "";
+        form.querySelector("[name=note]").value = "";
+        updateNote(form);
+        dialog.showModal();
+        form.querySelector("[name=reason]").focus();
+      }
+      function updateNote(form) {
+        var other = form.querySelector("[name=reason]").value === "other";
+        form.querySelector("[name=note]").required = other;
+        form.querySelector("[data-note-hint]").textContent = other ? "(say why)" : "(optional)";
+      }
+      document.addEventListener("change", function (event) {
+        var form = event.target.closest && event.target.closest("[data-status-form]");
+        if (form && event.target.name === "reason") updateNote(form);
+      });
+      document.addEventListener("click", function (event) {
+        var row = event.target.closest("[data-status-dialog]");
+        var bar = row ? null : event.target.closest("[data-bulk-dialog]");
+        if (!row && !bar) return;
+        var dialog = document.getElementById(bar ? bar.getAttribute("data-bulk-dialog") : "status-dialog");
+        if (!dialog) return;
+        if (row) {
+          openStatusDialog(dialog, row.getAttribute("data-action"), [row.getAttribute("data-listing")], row.getAttribute("data-label"));
+          return;
+        }
+        var ids = Array.prototype.filter.call(boxes(bar.closest("form").id), function (box) { return box.checked; }).map(function (box) { return box.value; });
+        if (ids.length) openStatusDialog(dialog, bar.getAttribute("data-action"), ids, "");
+      });
     })();
   </script>
   <script>

@@ -9,7 +9,7 @@ import logging
 from django.utils import timezone
 
 from .client import describe_failure, pause_item
-from .models import ListingTemplate, MeliListing
+from .models import ListingChange, ListingTemplate, MeliListing
 
 logger = logging.getLogger(__name__)
 
@@ -123,30 +123,56 @@ def pause_active(organization, items):
 STATUS_VERBS = {"paused": "pause", "active": "reactivate", "closed": "close"}
 
 
-def set_status(organization, item_ids, status):
+def set_status(organization, item_ids, status, change_ids=()):
     """The worker's half of the Listings page's Pause, Reactivate and Close. Refusals show on the row.
 
-    A template is never reactivated here; a closed template stops being one.
+    A template is never reactivated here; a closed template stops being one. Each item's ListingChange
+    (change_ids, this organization's only) ends done or failed with the same reason the row shows.
     """
     from .client import set_item_status
     from .listings import refresh_listing
 
     if status not in STATUS_VERBS:
         return
-    token = _token(organization)
+    changes = {
+        row.item_id: row
+        for row in ListingChange.objects.filter(organization=organization, pk__in=list(change_ids or ()))
+    }
+
+    def finish(item_id, error=""):
+        change = changes.get(item_id)
+        if change is None:
+            return
+        change.state = ListingChange.State.FAILED if error else ListingChange.State.DONE
+        change.error = error[:300]
+        change.finished_at = timezone.now()
+        change.save(update_fields=["state", "error", "finished_at"])
+
+    try:
+        token = _token(organization)
+    except Exception as error:
+        logger.warning("Listings not changed to %s: %s", status, describe_failure(error))
+        for item_id in item_ids:
+            finish(item_id, f"Couldn't {STATUS_VERBS[status]} it: {_reason(error)}")
+        raise
     templates = set(ListingTemplate.objects.filter(organization=organization).values_list("item_id", flat=True))
     for item_id in item_ids:
         rows = MeliListing.objects.filter(organization=organization, item_id=item_id)
         if status == "active" and item_id in templates:
-            rows.update(action_error="A template stays paused: Vimple never reactivates it.")
+            message = "A template stays paused: Vimple never reactivates it."
+            rows.update(action_error=message)
+            finish(item_id, message)
             continue
         try:
             set_item_status(token, item_id, status)
         except Exception as error:
             logger.warning("Couldn't %s %s: %s", STATUS_VERBS[status], item_id, describe_failure(error))
-            rows.update(action_error=f"Couldn't {STATUS_VERBS[status]} it: {_reason(error)}"[:300])
+            message = f"Couldn't {STATUS_VERBS[status]} it: {_reason(error)}"[:300]
+            rows.update(action_error=message)
+            finish(item_id, message)
             continue
         rows.update(status=status, action_error="")
+        finish(item_id)
         if status == "closed":
             ListingTemplate.objects.filter(organization=organization, item_id=item_id).delete()
         try:

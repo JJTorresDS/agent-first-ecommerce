@@ -679,3 +679,63 @@ class ListingTemplate(models.Model):
 
     def __str__(self):
         return f"{self.category_id}: {self.item_id}"
+
+
+class ListingChange(models.Model):
+    """One change Vimple asked of a Mercado Libre listing, with who asked, why, and whether it happened.
+
+    By item_id, since listing rows are rewritten by the sync: the log outlives them. One row per item;
+    variations are one item on Mercado Libre. Status only for now; price or stock edits log here too.
+    """
+
+    class Field(models.TextChoices):
+        STATUS = "status", "Status"
+
+    class Reason(models.TextChoices):
+        OUT_OF_STOCK = "out_of_stock", "Out of stock"
+        PRICE_REVIEW = "price_review", "Price review"
+        LISTING_FIX = "listing_fix", "Fixing the listing"
+        SEASONAL = "seasonal", "Seasonal"
+        OTHER = "other", "Other"
+
+    class State(models.TextChoices):
+        QUEUED = "queued", "Queued"
+        DONE = "done", "Done"
+        FAILED = "failed", "Failed"
+
+    organization = models.ForeignKey(
+        "accounts.Organization",
+        on_delete=models.CASCADE,
+        related_name="listing_changes",
+    )
+    item_id = models.CharField(max_length=32)
+    title = models.CharField(max_length=255, blank=True)
+    field = models.CharField(max_length=32, choices=Field.choices, default=Field.STATUS)
+    old_value = models.CharField(max_length=64, blank=True)
+    new_value = models.CharField(max_length=64)
+    reason = models.CharField(max_length=32, choices=Reason.choices)
+    note = models.CharField(max_length=500, blank=True)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    state = models.CharField(max_length=16, choices=State.choices, default=State.QUEUED)
+    error = models.CharField(max_length=300, blank=True, help_text="Mercado Libre's reason, never a token.")
+    created_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "meli_listing_change"
+        ordering = ["-created_at", "-pk"]
+        indexes = [
+            models.Index(fields=["organization", "item_id", "-created_at"], name="meli_change_org_item"),
+        ]
+
+    def __str__(self):
+        return f"{self.item_id} {self.field} → {self.new_value}"
+
+    def verb(self):
+        """ "Paused", "Reactivated", "Closed": what happened, or was asked."""
+        return {"paused": "Paused", "active": "Reactivated", "closed": "Closed"}.get(self.new_value, self.new_value)
+
+    def pending_verb(self):
+        return {"paused": "Pausing", "active": "Reactivating", "closed": "Closing"}.get(self.new_value, "Changing")

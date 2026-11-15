@@ -26,13 +26,15 @@ def delete(request, row, blocked, back, done, name):
 
 
 def bulk(name, *actions, fields=None):
-    """A list's selection bar: its form id and its buttons as (action, label, confirmation, danger).
+    """A list's selection bar: its form id and its buttons as (action, label, confirmation, danger[, dialog]).
 
-    The confirmation's {n} becomes the number selected.
+    The confirmation's {n} becomes the number selected. An action with a dialog id asks more first: the
+    button opens that dialog, whose form gets the ticked rows as selected and the action (base.html).
     """
     return {"id": f"bulk-{name}", "fields": sorted((fields or {}).items()), "actions": [
-        {"value": value, "label": label, "confirm": confirm, "danger": danger}
-        for value, label, confirm, danger in actions
+        {"value": action[0], "label": action[1], "confirm": action[2], "danger": action[3],
+         "dialog": action[4] if len(action) > 4 else ""}
+        for action in actions
     ]}
 
 

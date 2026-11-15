@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import BUENOS_AIRES, MercadoLibreAccount, MercadoLibreNotification
+from .models import BUENOS_AIRES, ListingChange, MercadoLibreAccount, MercadoLibreNotification
 
 
 @admin.register(MercadoLibreAccount)
@@ -21,3 +21,11 @@ class MercadoLibreNotificationAdmin(admin.ModelAdmin):
         if obj.buenos_aires_at is None:
             return ""
         return obj.buenos_aires_at.astimezone(BUENOS_AIRES).strftime("%Y-%m-%d %H:%M:%S")
+
+
+@admin.register(ListingChange)
+class ListingChangeAdmin(admin.ModelAdmin):
+    list_display = ("item_id", "title", "new_value", "reason", "user", "state", "organization", "created_at")
+    list_filter = ("state", "reason", "new_value")
+    search_fields = ("item_id", "title", "note")
+    readonly_fields = [field.name for field in ListingChange._meta.fields]

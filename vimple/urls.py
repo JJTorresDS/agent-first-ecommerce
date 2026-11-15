@@ -34,7 +34,7 @@ from meli.draft_views import (
 )
 from meli.category_views import meli_categories
 from meli.import_views import catalog_import
-from meli.listing_views import meli_listings
+from meli.listing_views import meli_listing_history, meli_listings
 from meli.views import (
     mercadolibre_callback,
     mercadolibre_connect,
@@ -57,6 +57,7 @@ from tasks.views import (
     cashflow_parser_run,
     cashflow_settings,
     health,
+    redis_health,
 )
 
 admin.site.site_header = "Vimple"
@@ -81,6 +82,7 @@ urlpatterns = [
     path("cashflow/settings/drive-token/", cashflow_drive_token, name="cashflow_drive_token"),
     path("cashflow/movements/<str:pk>/", cashflow_movement, name="cashflow_movement"),
     path("catalog/meli/", meli_listings, name="meli_listings"),
+    path("catalog/meli/history/<str:item_id>/", meli_listing_history, name="meli_listing_history"),
     path("catalog/import/", catalog_import, name="catalog_import"),
     path("catalog/meli/new/", meli_drafts, name="meli_drafts"),
     path("catalog/meli/new/pick/", meli_listing_pick, name="meli_listing_pick"),
@@ -103,6 +105,7 @@ urlpatterns = [
     path("access/<int:user_id>/", set_app_access, name="set_app_access"),
     path("accounts/", include("allauth.urls")),
     path("health/", health, name="health"),
+    path("health/redis/", redis_health, name="redis_health"),
     path("support/", include("support.urls")),
     path("inbox/", inbox, name="inbox"),
     path("inbox/<uuid:conversation_id>/reply/", inbox_reply, name="inbox_reply"),

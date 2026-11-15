@@ -28,6 +28,24 @@ def health(request):
     return HttpResponse("ok", content_type="text/plain")
 
 
+def redis_health(request):
+    """Can this server reach Redis? 200 "ok 12 ms" or 503 with the error class.
+
+    For uptime monitors, not Render's healthCheckPath: a Redis outage would make Render
+    restart the service, and a restart doesn't fix a network path.
+    """
+    from meli.jobs import redis_health as check
+
+    ok, detail = check()
+    response = HttpResponse(
+        f"ok {detail}" if ok else f"redis unreachable: {detail}",
+        content_type="text/plain",
+        status=200 if ok else 503,
+    )
+    response["Cache-Control"] = "no-store"
+    return response
+
+
 def _chosen_date(raw):
     if not raw:
         return None

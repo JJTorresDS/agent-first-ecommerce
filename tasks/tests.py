@@ -716,6 +716,31 @@ class HealthTests(SimpleTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.content, b"ok")
 
+    @override_settings(REDIS_URL="redis://example.invalid:6380/0")
+    def test_redis_health_reports_the_round_trip(self):
+        with patch("meli.jobs._client") as client:
+            response = self.client.get("/health/redis/")
+        client.return_value.ping.assert_called_once()
+        self.assertEqual(response.status_code, 200)
+        self.assertRegex(response.content.decode(), r"^ok \d+ ms$")
+        self.assertEqual(response["Cache-Control"], "no-store")
+
+    @override_settings(REDIS_URL="redis://user:secret@example.invalid:6380/0")
+    def test_redis_health_names_the_error_without_the_url(self):
+        import redis
+
+        with patch("meli.jobs._client") as client, self.assertLogs("meli.jobs", "WARNING"):
+            client.return_value.ping.side_effect = redis.exceptions.TimeoutError("Timeout connecting to server")
+            response = self.client.get("/health/redis/")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.content, b"redis unreachable: TimeoutError")
+        self.assertNotIn(b"secret", response.content)
+
+    def test_redis_health_fails_without_redis(self):
+        response = self.client.get("/health/redis/")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.content, b"redis unreachable: REDIS_URL is not set")
+
 
 FOLDERS = {
     "receipts_folder": "1owUI7-o1n3MHrTJ8WHQjsG8NtnQOs4i1",

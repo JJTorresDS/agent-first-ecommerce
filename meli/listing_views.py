@@ -11,7 +11,7 @@ from accounts.access import require_app
 from vimple import deletion
 from accounts.models import AppAccess, can_edit_products, membership_for
 
-from .models import ListingTemplate, MercadoLibreAccount, MeliListing, MeliListingSync
+from .models import ListingChange, ListingTemplate, MercadoLibreAccount, MeliListing, MeliListingSync
 
 PAGE_SIZE = 50
 LINK_STATES = (
@@ -136,8 +136,10 @@ def meli_listings(request):
             organization=organization, item_id__in={listing.item_id for listing in listings}
         )
     }
+    last_changes = latest_changes(organization, {listing.item_id for listing in listings})
     for listing in listings:
         listing.template = templates.get(listing.item_id)
+        listing.last_change = last_changes.get(listing.item_id)
     connected = MercadoLibreAccount.objects.filter(organization=organization).exists()
     context = {
         "listings": listings,
@@ -152,11 +154,11 @@ def meli_listings(request):
         "can_edit": can_edit,
         "bulk": deletion.bulk(
             "listings",
-            ("pause_selected", "Pause", "", False),
-            ("activate_selected", "Reactivate", "", False),
-            ("close_selected", "Close", "Close {n} selected on Mercado Libre? Closing ends a listing for good: "
-             "it can't be reopened. Its sales stay in Vimple.", True),
+            ("pause_selected", "Pause", "", False, "status-dialog"),
+            ("activate_selected", "Reactivate", "", False, "status-dialog"),
+            ("close_selected", "Close", "", True, "status-dialog"),
         ) if can_edit and connected else None,
+        "reasons": ListingChange.Reason.choices,
         "active_tab": "meli",
     }
     template = "meli/_listings.html" if request.headers.get("HX-Request") == "true" else "meli/listings.html"
@@ -168,21 +170,79 @@ BULK_DONE = {"paused": "Pausing", "active": "Reactivating", "closed": "Closing"}
 
 
 def _change_status(request, organization):
-    """Pause, reactivate or close the selected listings on Mercado Libre, in the worker. Refusals show on each row."""
+    """Pause, reactivate or close the selected listings on Mercado Libre, in the worker. Refusals show on each row.
+
+    Each needs a reason (Other needs a note); one ListingChange per item keeps who, why and how it went.
+    """
     from .jobs import dispatch_drafts_job
 
     status = BULK_STATUS[request.POST["action"]]
+    reason = request.POST.get("reason") or ""
+    note = (request.POST.get("note") or "").strip()[:500]
+    if reason not in ListingChange.Reason.values:
+        messages.error(request, "Pick a reason first: nothing was changed.")
+        return redirect(request.get_full_path())
+    if reason == ListingChange.Reason.OTHER and not note:
+        messages.error(request, "Say why in the note when the reason is Other: nothing was changed.")
+        return redirect(request.get_full_path())
     rows = deletion.selected(request, MeliListing.objects.filter(organization=organization))
-    item_ids = sorted({row.item_id for row in rows})
+    first = {}
+    for row in rows:
+        first.setdefault(row.item_id, row)
+    item_ids = sorted(first)
     if item_ids:
+        changes = ListingChange.objects.bulk_create([
+            ListingChange(
+                organization=organization,
+                item_id=item_id,
+                title=first[item_id].title,
+                field=ListingChange.Field.STATUS,
+                old_value=first[item_id].status,
+                new_value=status,
+                reason=reason,
+                note=note,
+                user=request.user,
+            )
+            for item_id in item_ids
+        ])
         MeliListing.objects.filter(organization=organization, item_id__in=item_ids).update(action_error="")
-        dispatch_drafts_job(organization, "listing_status", item_ids=item_ids, status=status)
+        dispatch_drafts_job(
+            organization, "listing_status", item_ids=item_ids, status=status,
+            change_ids=[change.pk for change in changes],
+        )
         count = len(item_ids)
         messages.success(
             request, f"{BULK_DONE[status]} {count} listing{'s' if count != 1 else ''} on Mercado Libre. "
             "The list shows the new status in a moment."
         )
     return redirect(request.get_full_path())
+
+
+def latest_changes(organization, item_ids):
+    """Each item's newest ListingChange, in one query."""
+    latest = {}
+    if not item_ids:
+        return latest
+    rows = (
+        ListingChange.objects.filter(organization=organization, item_id__in=list(item_ids))
+        .select_related("user")
+        .order_by("item_id", "-created_at", "-pk")
+    )
+    for row in rows:
+        latest.setdefault(row.item_id, row)
+    return latest
+
+
+@require_app(AppAccess.App.CATALOG)
+def meli_listing_history(request, item_id):
+    """This organization's changes to one listing from Vimple, newest first, for the History dialog."""
+    organization = membership_for(request.user).organization
+    changes = (
+        ListingChange.objects.filter(organization=organization, item_id=item_id)
+        .select_related("user")
+        .order_by("-created_at", "-pk")[:100]
+    )
+    return render(request, "meli/_listing_history.html", {"changes": changes, "item_id": item_id})
 
 
 def _back(request):

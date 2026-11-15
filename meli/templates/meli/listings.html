@@ -7,7 +7,7 @@
   <div class="page-head">
     <h1>Mercado Libre listings</h1>
   </div>
-  <p class="page-lead">Your listings as last synced: search and filter them, link units per sale, and pick each category's template.</p>
+  <p class="page-lead">Your listings as last synced: search and filter them, pause or reactivate them, set units per sale, and pick each category's template.</p>
   {% if not connected %}
     <div class="card empty">
       <p>Mercado Libre isn't connected for this organization.</p>
@@ -48,5 +48,7 @@
     </form>
     {% if bulk %}{% include "_bulk_bar.html" %}{% endif %}
     {% include "meli/_listings.html" %}
+    {% if can_edit and connected %}{% include "meli/_status_dialog.html" %}{% endif %}
+    {% include "meli/_history_dialog.html" %}
   {% endif %}
 {% endblock %}
