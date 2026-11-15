@@ -106,6 +106,26 @@ class ListingStatusTests(TestCase):
         self.assertContains(history, "Restocking")
         self.assertContains(history, "active → paused")
 
+    def test_only_the_waiting_cell_polls_and_gets_its_answer_when_done(self):
+        self.assertNotContains(self.client.get("/catalog/meli/"), 'hx-trigger="every 2s"')
+        ListingChange.objects.create(
+            organization=self.organization, item_id="MLA2", new_value="active", reason="seasonal"
+        )
+        page = self.client.get("/catalog/meli/")
+        self.assertContains(page, f'hx-get="/catalog/meli/status/{self.second.pk}/"', count=1)
+        self.assertContains(page, "Reactivating…")
+        url = f"/catalog/meli/status/{self.second.pk}/"
+        self.assertEqual(self.client.get(url).status_code, 204)
+        MeliListing.objects.filter(pk=self.second.pk).update(status="active")
+        ListingChange.objects.update(state=ListingChange.State.DONE)
+        cell = self.client.get(url)
+        self.assertContains(cell, f'id="listing-status-{self.second.pk}"')
+        self.assertContains(cell, "Reactivated · Seasonal")
+        self.assertNotContains(cell, "every 2s")
+        self.assertContains(cell, 'data-action="pause_selected"')
+        foreign = listing(shared_seller("Other"), "MLA9", title="Theirs", status="active")
+        self.assertEqual(self.client.get(f"/catalog/meli/status/{foreign.pk}/").status_code, 404)
+
     def test_a_row_pauses_alone(self):
         self.assertContains(self.client.get("/catalog/meli/"), f'data-action="pause_selected" data-listing="{self.first.pk}"')
         self.act("pause_selected", self.first, reason="price_review")

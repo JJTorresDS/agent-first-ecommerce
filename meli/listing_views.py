@@ -1,8 +1,11 @@
+from datetime import timedelta
+
 from django.core.paginator import Paginator
 from django.db.models import Count, Q
-from django.http import HttpResponseForbidden
+from django.http import HttpResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 
 from django.contrib import messages
@@ -14,6 +17,7 @@ from accounts.models import AppAccess, can_edit_products, membership_for
 from .models import ListingChange, ListingTemplate, MercadoLibreAccount, MeliListing, MeliListingSync
 
 PAGE_SIZE = 50
+PENDING_POLL = timedelta(minutes=5)
 LINK_STATES = (
     ("linked", "Linked"),
     ("unmatched", "SKU not in catalog"),
@@ -140,6 +144,7 @@ def meli_listings(request):
     for listing in listings:
         listing.template = templates.get(listing.item_id)
         listing.last_change = last_changes.get(listing.item_id)
+        listing.polling = _waiting(listing.last_change)
     connected = MercadoLibreAccount.objects.filter(organization=organization).exists()
     context = {
         "listings": listings,
@@ -231,6 +236,30 @@ def latest_changes(organization, item_ids):
     for row in rows:
         latest.setdefault(row.item_id, row)
     return latest
+
+
+def _waiting(change):
+    """The worker usually answers in seconds: a cell polls while its change is queued, for a few minutes at most."""
+    return (
+        change is not None
+        and change.state == ListingChange.State.QUEUED
+        and change.created_at >= timezone.now() - PENDING_POLL
+    )
+
+
+@require_app(AppAccess.App.CATALOG)
+def meli_listing_status(request, pk):
+    """One listing's Status cell, polled while its change is queued: 204 (no swap) until the worker is done."""
+    membership = membership_for(request.user)
+    organization = membership.organization
+    listing = get_object_or_404(MeliListing, organization=organization, pk=pk)
+    listing.last_change = latest_changes(organization, {listing.item_id}).get(listing.item_id)
+    listing.polling = _waiting(listing.last_change)
+    if listing.polling:
+        return HttpResponse(status=204)
+    listing.template = ListingTemplate.objects.filter(organization=organization, item_id=listing.item_id).first()
+    can_act = can_edit_products(membership) and MercadoLibreAccount.objects.filter(organization=organization).exists()
+    return render(request, "meli/_listing_status.html", {"row": listing, "can_act": can_act})
 
 
 @require_app(AppAccess.App.CATALOG)
