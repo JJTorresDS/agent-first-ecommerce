@@ -101,7 +101,8 @@ class ListingStatusTests(TestCase):
         self.assertIsNotNone(first.finished_at)
         self.assertEqual(first.title, "Perfume A")
         page = self.client.get("/catalog/meli/")
-        self.assertContains(page, "Paused by ada · Other")
+        self.assertContains(page, "View history")
+        self.assertNotContains(page, "Paused by")
         history = self.client.get("/catalog/meli/history/MLA1/")
         self.assertContains(history, "Restocking")
         self.assertContains(history, "active → paused")
@@ -120,7 +121,8 @@ class ListingStatusTests(TestCase):
         ListingChange.objects.update(state=ListingChange.State.DONE)
         cell = self.client.get(url)
         self.assertContains(cell, f'id="listing-row-{self.second.pk}"')
-        self.assertContains(cell, "Reactivated · Seasonal")
+        self.assertContains(cell, "View history")
+        self.assertNotContains(cell, "Reactivating…")
         self.assertNotContains(cell, "every 2s")
         self.assertContains(cell, 'data-action="pause_selected"')
         foreign = listing(shared_seller("Other"), "MLA9", title="Theirs", status="active")
@@ -165,7 +167,7 @@ class ListingStatusTests(TestCase):
         self.act("pause_selected", foreign)
         self.assertEqual(ListingChange.objects.filter(organization=self.organization).count(), 0)
         self.assertNotContains(self.client.get("/catalog/meli/history/MLA1/"), "Their secret")
-        self.assertNotContains(self.client.get("/catalog/meli/"), "Paused by")
+        self.assertNotContains(self.client.get("/catalog/meli/"), "View history")
 
 
 class SelectedRowsTests(TestCase):

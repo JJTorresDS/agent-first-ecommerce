@@ -786,3 +786,57 @@ class ListingChange(models.Model):
         self.error = error[:300]
         self.finished_at = timezone.now()
         self.save(update_fields=["state", "error", "finished_at"])
+
+
+class CatalogCompetition(models.Model):
+    """Where one catalog listing stands in its catalog page, as Mercado Libre's price_to_win said when last asked.
+
+    Read only when a user asks (Refresh on the row or Check catalog prices); never on a schedule. By item_id,
+    since listing rows are rewritten by the sync.
+    """
+
+    class State(models.TextChoices):
+        CHECKING = "checking", "Checking"
+        READY = "ready", "Ready"
+        FAILED = "failed", "Failed"
+
+    STATUS_LABELS = {
+        "winning": "Winning",
+        "sharing_first_place": "Sharing first place",
+        "competing": "Losing",
+        "listed": "Not competing",
+    }
+
+    organization = models.ForeignKey(
+        "accounts.Organization",
+        on_delete=models.CASCADE,
+        related_name="catalog_competitions",
+    )
+    item_id = models.CharField(max_length=32)
+    state = models.CharField(max_length=16, choices=State.choices, default=State.CHECKING)
+    status = models.CharField(max_length=32, blank=True, help_text="winning, sharing_first_place, competing, listed.")
+    currency = models.CharField(max_length=8, blank=True)
+    current_price = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    price_to_win = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    winner_item_id = models.CharField(max_length=32, blank=True)
+    winner_price = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    reasons = models.JSONField(default=list, blank=True, help_text="Why it isn't winning, in Mercado Libre's codes.")
+    error = models.CharField(max_length=300, blank=True, help_text="Mercado Libre's reason, never a token.")
+    payload = models.JSONField(default=dict, blank=True)
+    requested_at = models.DateTimeField(null=True, blank=True)
+    checked_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "meli_catalog_competition"
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "item_id"], name="uniq_meli_competition_org_item"),
+        ]
+
+    def __str__(self):
+        return f"{self.item_id} {self.status}"
+
+    def status_label(self):
+        return self.STATUS_LABELS.get(self.status, self.status.replace("_", " ").capitalize())
+
+    def we_win(self):
+        return self.status == "winning" or (self.winner_item_id and self.winner_item_id == self.item_id)

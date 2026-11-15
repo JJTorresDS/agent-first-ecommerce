@@ -442,6 +442,15 @@ def set_item_status(access_token, item_id, status):
     )
 
 
+def fetch_price_to_win(access_token, item_id):
+    """Where a catalog listing stands: status, the winner's item and price, and the price that would win."""
+    item = quote(str(item_id), safe="")
+    site = quote(str(item_id)[:3], safe="")
+    return _api_request(
+        access_token, f"https://api.mercadolibre.com/items/{item}/price_to_win?siteId={site}&version=v2"
+    )
+
+
 def update_item(access_token, item_id, body):
     """Change one item's price or available quantity (PUT /items). Its variations, when it has them, go in
     body["variations"], every one of them: Mercado Libre deletes a variation the body leaves out."""

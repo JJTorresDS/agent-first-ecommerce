@@ -750,6 +750,11 @@ def _run_drafts_payload(payload):
                 change_ids=job.get("change_ids") or (),
             )
             return
+        if job.get("action") == "catalog_prices":
+            from .catalog_prices import check
+
+            check(organization, [str(item) for item in job.get("item_ids") or []])
+            return
         if job.get("action") == "listing_edit":
             from .listing_edits import apply_change
 

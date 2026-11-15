@@ -15,7 +15,7 @@ from accounts.access import require_app
 from vimple import deletion
 from accounts.models import AppAccess, can_edit_products, membership_for
 
-from .models import ListingChange, ListingTemplate, MercadoLibreAccount, MeliListing, MeliListingSync
+from .models import CatalogCompetition, ListingChange, ListingTemplate, MercadoLibreAccount, MeliListing, MeliListingSync
 
 PAGE_SIZE = 50
 PENDING_POLL = timedelta(minutes=5)
@@ -91,6 +91,15 @@ def meli_listings(request):
             return _change_status(request, organization)
         if request.POST.get("action") == "edit":
             return _edit(request, organization)
+        if request.POST.get("action") == "catalog_prices":
+            from .catalog_prices import checkable, request_check
+
+            count = len(request_check(organization, checkable(organization)))
+            if count:
+                messages.success(request, f"Checking {count} catalog listing{'s' if count != 1 else ''} on Mercado Libre.")
+            else:
+                messages.info(request, "No catalog listings to check.")
+            return redirect(_back(request))
         if request.POST.get("action") == "units":
             # Units one sale takes: 2 for a Kit x2. Past sales keep what they took.
             listing = get_object_or_404(MeliListing, organization=organization, pk=request.POST.get("listing"))
@@ -168,6 +177,9 @@ def meli_listings(request):
         ) if can_edit and connected else None,
         "reasons": ListingChange.Reason.choices,
         "back": request.get_full_path(),
+        "has_catalog": connected and MeliListing.objects.filter(
+            organization=organization, catalog_listing=True
+        ).exclude(status="closed").exists(),
         "active_tab": "meli",
     }
     template = "meli/_listings.html" if request.headers.get("HX-Request") == "true" else "meli/listings.html"
@@ -251,22 +263,47 @@ def _waiting(change):
     )
 
 
+def _checking(competition):
+    return (
+        competition is not None
+        and competition.state == CatalogCompetition.State.CHECKING
+        and competition.requested_at is not None
+        and competition.requested_at >= timezone.now() - PENDING_POLL
+    )
+
+
+def _competition_item(listing):
+    """The catalog listing whose competition this row shows: itself, or the catalog twin that competes for it."""
+    if listing.catalog_listing:
+        return listing.item_id
+    return listing.catalog_twin()
+
+
 def _decorate(organization, listings, templates, editing):
-    """What each row shows besides its own fields: template, last change, polling, stock cap (editors only)."""
+    """What each row shows besides its own fields: template, last change, catalog competition, polling,
+    stock cap (editors only). A fixed number of queries, whatever the page holds."""
     from .listing_edits import stock_limits
 
     last_changes = latest_changes(organization, {listing.item_id for listing in listings})
+    competing = {_competition_item(listing) for listing in listings} - {""}
+    competitions = {
+        row.item_id: row
+        for row in CatalogCompetition.objects.filter(organization=organization, item_id__in=competing)
+    } if competing else {}
     limits = stock_limits(organization, listings) if editing else {}
     for listing in listings:
         listing.template = templates.get(listing.item_id)
         listing.last_change = last_changes.get(listing.item_id)
-        listing.polling = _waiting(listing.last_change)
+        listing.competition_item = _competition_item(listing)
+        listing.competition = competitions.get(listing.competition_item)
+        listing.polling = _waiting(listing.last_change) or _checking(listing.competition)
         listing.stock_limit = limits.get(listing.pk)
 
 
 @require_app(AppAccess.App.CATALOG)
 def meli_listing_row(request, pk):
-    """One listing's row, polled while its change is queued: 204 (no swap) until the worker is done."""
+    """One listing's row. GET is the poll while a change or catalog check is running: 204 (no swap) until the
+    worker is done. POST (Refresh, owners and admins) asks Mercado Libre for the catalog's winning price."""
     membership = membership_for(request.user)
     organization = membership.organization
     listing = get_object_or_404(
@@ -274,10 +311,19 @@ def meli_listing_row(request, pk):
         organization=organization,
         pk=pk,
     )
-    change = latest_changes(organization, {listing.item_id}).get(listing.item_id)
-    if _waiting(change):
-        return HttpResponse(status=204)
     can_edit = can_edit_products(membership)
+    if request.method == "POST":
+        if not can_edit:
+            return HttpResponseForbidden("Only owners and admins can check catalog prices.")
+        from .catalog_prices import request_check
+
+        request_check(organization, [_competition_item(listing)])
+    else:
+        change = latest_changes(organization, {listing.item_id}).get(listing.item_id)
+        item = _competition_item(listing)
+        competition = CatalogCompetition.objects.filter(organization=organization, item_id=item).first() if item else None
+        if _waiting(change) or _checking(competition):
+            return HttpResponse(status=204)
     connected = MercadoLibreAccount.objects.filter(organization=organization).exists()
     templates = {
         row.item_id: row for row in ListingTemplate.objects.filter(organization=organization, item_id=listing.item_id)

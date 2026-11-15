@@ -36,19 +36,31 @@
     {% with change=row.last_change %}
       {% if change.state == "queued" %}<br><span class="muted">{{ change.pending_verb }}…</span>
       {% elif change.state == "failed" %}<br><span class="error">{{ change.error|default:row.action_error }}</span>
-      {% elif change %}<br><span class="muted">{{ change.verb }}{% if change.user %} by {{ change.user.first_name|default:change.user.username }}{% endif %} · {{ change.get_reason_display }} · {{ change.created_at|date:"d/m H:i" }}</span>
-      {% elif row.action_error %}<br><span class="error">{{ row.action_error }}</span>{% endif %}
-      {% if change %}<br><button type="button" class="link-button" data-dialog="history-dialog" hx-get="{% url 'meli_listing_history' row.item_id %}" hx-target="#history-dialog-body" hx-on:htmx:before-request="document.getElementById('history-dialog-body').innerHTML = '<p class=&quot;muted&quot;>Loading…</p>'">History</button>{% endif %}
+      {% elif not change and row.action_error %}<br><span class="error">{{ row.action_error }}</span>{% endif %}
+      {% if change %}<br><button type="button" class="link-button" data-dialog="history-dialog" hx-get="{% url 'meli_listing_history' row.item_id %}" hx-target="#history-dialog-body" hx-on:htmx:before-request="document.getElementById('history-dialog-body').innerHTML = '<p class=&quot;muted&quot;>Loading…</p>'">View history</button>{% endif %}
     {% endwith %}
     {% if bulk %}
       {% if row.status == "active" %}<br><button type="button" class="link-button" data-status-dialog data-action="pause_selected" data-listing="{{ row.pk }}" data-label="{{ row.item_id }} · {{ row.title }}">Pause</button>
       {% elif row.status == "paused" and not row.template %}<br><button type="button" class="link-button" data-status-dialog data-action="activate_selected" data-listing="{{ row.pk }}" data-label="{{ row.item_id }} · {{ row.title }}">Reactivate</button>{% endif %}
     {% endif %}
   </td>
-  <td>
-    {% with state=row.catalog_state %}
-      {% if state == "competing" %}<span class="pill active">Competing</span>
-      {% elif state == "twin" %}<span class="pill" title="Its catalog listing competes for it; they share stock">Via {{ row.catalog_twin }}</span>
+  <td class="catalog-cell">
+    {% with state=row.catalog_state competition=row.competition %}
+      {% if state == "competing" or state == "twin" %}
+        {% if competition.status and competition.state != "checking" %}
+          <span class="pill{% if competition.status == 'winning' or competition.status == 'sharing_first_place' %} active{% endif %}">{{ competition.status_label }}</span>
+        {% elif state == "competing" %}<span class="pill active">Competing</span>{% endif %}
+        {% if state == "twin" %}<br><span class="muted" title="Its catalog listing competes for it; they share stock">Via {{ row.catalog_twin }}</span>{% endif %}
+        {% if competition.state == "checking" %}<br><span class="muted"><span class="spinner" aria-hidden="true"></span> Checking…</span>
+        {% elif competition.state == "failed" %}<br><span class="error">{{ competition.error }}</span>{% endif %}
+        {% if competition.checked_at and competition.state != "checking" %}
+          {% if competition.winner_price is not None %}<br>Winner {% if competition.we_win %}(you) {% endif %}{{ competition.currency }} {{ competition.winner_price }}{% endif %}
+          {% if competition.price_to_win is not None and not competition.we_win %}<br><span class="muted">To win: {{ competition.currency }} {{ competition.price_to_win }}</span>{% endif %}
+          <br><span class="muted">Checked {{ competition.checked_at|date:"d/m H:i" }}</span>
+        {% endif %}
+        {% if can_edit and row.status != "closed" and competition.state != "checking" %}
+          <br><button type="button" class="link-button" hx-post="{% url 'meli_listing_row' row.pk %}" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' hx-target="#listing-row-{{ row.pk }}" hx-swap="outerHTML" hx-sync="this:drop">{% if competition.checked_at %}Refresh{% else %}Get winning price{% endif %}</button>
+        {% endif %}
       {% elif state == "eligible" %}<span class="pill">Can join</span>
       {% else %}<span class="muted">No</span>{% endif %}
       {% if state and row.catalog_url %}<br><a class="muted" href="{{ row.catalog_url }}" target="_blank" rel="noopener">Catalog page</a>{% endif %}

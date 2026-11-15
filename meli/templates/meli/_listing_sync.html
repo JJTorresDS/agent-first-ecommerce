@@ -13,9 +13,19 @@
     {% endif %}
   </div>
   {% if can_edit %}
-    <form method="post" action="{% url 'meli_listings' %}">
-      {% csrf_token %}
-      <button class="accent" type="submit"{% if record and record.busy %} disabled{% endif %}>Sync listings</button>
-    </form>
+    <div class="sync-actions">
+      {% if has_catalog %}
+        <form method="post" action="{% url 'meli_listings' %}">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="catalog_prices">
+          <input type="hidden" name="next" value="{{ request.get_full_path }}">
+          <button type="submit" title="Ask Mercado Libre for the winning price of every catalog listing">Check catalog prices</button>
+        </form>
+      {% endif %}
+      <form method="post" action="{% url 'meli_listings' %}">
+        {% csrf_token %}
+        <button class="accent" type="submit"{% if record and record.busy %} disabled{% endif %}>Sync listings</button>
+      </form>
+    </div>
   {% endif %}
 </section>

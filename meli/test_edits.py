@@ -63,7 +63,10 @@ class ListingEditTests(TestCase):
         self.assertEqual((change.field, change.old_value, change.new_value, change.state),
                          ("price", "1000.00", "1250.50", "done"))
         self.assertEqual(response.redirect_chain[-1][0], "/catalog/meli/?q=Perfume")
-        self.assertContains(response, "Price 1000.00 → 1250.50 by ada · Price review")
+        self.assertContains(response, "View history")
+        history = self.client.get("/catalog/meli/history/MLA1/")
+        self.assertContains(history, "1000.00 → 1250.50")
+        self.assertContains(history, "Supplier raised it")
 
     def test_variations_are_all_named_and_quantity_goes_on_one(self):
         self.edit(self.variant, "available_quantity", "2", reason="out_of_stock")
