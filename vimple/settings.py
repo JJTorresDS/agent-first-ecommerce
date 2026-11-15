@@ -237,3 +237,28 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 if not DEBUG:
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
     USE_X_FORWARDED_HOST = True
+
+# Logs go to stdout, where Render (and its log streams) pick them up. Our apps log at
+# LOG_LEVEL (default INFO); Django and libraries only warnings. Tests stay at WARNING.
+LOG_LEVEL = "WARNING" if _COMMAND == "test" else os.environ.get("LOG_LEVEL", "INFO").upper()
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "plain": {"format": "%(levelname)s %(name)s [%(threadName)s] %(message)s"},
+    },
+    "handlers": {
+        "stdout": {"class": "logging.StreamHandler", "stream": "ext://sys.stdout", "formatter": "plain"},
+    },
+    "root": {"handlers": ["stdout"], "level": "WARNING"},
+    "loggers": {
+        "django": {"level": "WARNING"},
+        **{
+            name: {"level": LOG_LEVEL}
+            for name in (
+                "accounts", "catalog", "inbox", "inventory", "meli", "notifications",
+                "purchasing", "support", "tasks", "vimple",
+            )
+        },
+    },
+}

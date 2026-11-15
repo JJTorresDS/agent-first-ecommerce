@@ -827,6 +827,7 @@ def start_postsale_worker():
         for name, queues in (("meli-replies", REPLY_LANE), ("meli-jobs", WORKER_QUEUES)):
             threading.Thread(target=_worker_loop, args=(queues,), name=name, daemon=True).start()
         _started = True
+    logger.info("Started the Mercado Libre worker threads (Redis prefix %s)", settings.REDIS_PREFIX)
 
 
 def _skip_worker():
