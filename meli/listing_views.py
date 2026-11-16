@@ -33,9 +33,9 @@ STATUSES = (
     ("inactive", "Inactive"),
 )
 
-SHIPPING = (
-    ("flex", "Flex"),
-    ("no_flex", "Not Flex"),
+# Where the units are: Mercado Libre Full holds them in its own warehouse, out of the seller's hands.
+STOCK_PLACES = (
+    ("own", "My warehouse"),
     ("full", "Full"),
 )
 # Sort choices: the key in the URL, its label, and the order. Ties fall back to the title.
@@ -151,7 +151,7 @@ def meli_listings(request):
     if link == "template" and status == DEFAULT_STATUS:
         # Templates are kept paused: Active would always show none.
         status = "all"
-    shipping = request.GET.get("shipping") or ""
+    stock = request.GET.get("stock") or ""
     sort = request.GET.get("sort") if request.GET.get("sort") in SORTS else DEFAULT_SORT
     if query:
         rows = rows.filter(Q(item_id__icontains=query) | Q(title__icontains=query) | Q(seller_sku__icontains=query))
@@ -170,11 +170,9 @@ def meli_listings(request):
     else:
         # Closed listings are over: they show only when asked for.
         rows = rows.exclude(status="closed")
-    if shipping == "flex":
-        rows = rows.filter(flex=True)
-    elif shipping == "no_flex":
-        rows = rows.filter(flex=False)
-    elif shipping == "full":
+    if stock == "own":
+        rows = rows.exclude(logistic_type="fulfillment")
+    elif stock == "full":
         rows = rows.filter(logistic_type="fulfillment")
     order = SORTS[sort][1]
     page = Paginator(rows.order_by(order, "title", "item_id", "variation_id"), PAGE_SIZE).get_page(request.GET.get("page") or 1)
@@ -195,12 +193,12 @@ def meli_listings(request):
         "query": query,
         "link": link,
         "status": status,
-        "shipping": shipping,
+        "stock": stock,
         "sort": sort,
-        "filtered": bool(query or link or shipping or status != "all"),
+        "filtered": bool(query or link or stock or status != "all"),
         "link_states": LINK_STATES,
         "statuses": STATUSES,
-        "shipping_options": SHIPPING,
+        "stock_places": STOCK_PLACES,
         "sorts": [(key, label) for key, (label, _) in SORTS.items()],
         "can_edit": can_edit,
         "bulk": deletion.bulk(

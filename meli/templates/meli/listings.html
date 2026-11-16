@@ -46,10 +46,10 @@
         </select>
       </div>
       <div>
-        <label for="shipping">Shipping</label>
-        <select id="shipping" name="shipping">
+        <label for="stock">Stock in</label>
+        <select id="stock" name="stock">
           <option value="">All</option>
-          {% for value, label in shipping_options %}<option value="{{ value }}"{% if value == shipping %} selected{% endif %}>{{ label }}</option>{% endfor %}
+          {% for value, label in stock_places %}<option value="{{ value }}"{% if value == stock %} selected{% endif %}>{{ label }}</option>{% endfor %}
         </select>
       </div>
       <div>

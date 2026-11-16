@@ -286,7 +286,7 @@ class ListingPageTests(TestCase):
         self.assertFalse(MeliListingSync.objects.filter(organization=organization).exists())
 
 
-class ListingSortAndFlexTests(TestCase):
+class ListingSortAndStockTests(TestCase):
     def setUp(self):
         self.organization = shared_seller("Test Seller")
         when = self.organization.created_at
@@ -297,13 +297,13 @@ class ListingSortAndFlexTests(TestCase):
                 currency="ARS", synced_at=when, **fields,
             )
 
-        listing("MLA1", status="active", available_quantity=3, price=Decimal("500"), flex=True)
-        listing("MLA2", status="active", available_quantity=9, price=Decimal("100"))
+        listing("MLA1", status="active", available_quantity=3, price=Decimal("500"), logistic_type="fulfillment")
+        listing("MLA2", status="active", available_quantity=9, price=Decimal("100"), logistic_type="cross_docking")
         listing("MLA3", status="active", available_quantity=None, price=Decimal("900"))
-        listing("MLA4", status="paused", available_quantity=50, price=Decimal("50"), flex=True)
+        listing("MLA4", status="paused", available_quantity=50, price=Decimal("50"), logistic_type="fulfillment")
         listing("MLA5", status="closed", available_quantity=70, price=Decimal("70"))
         listing("MLA9", organization=shared_seller("Other", user_id="555"), status="active",
-                available_quantity=99, flex=True)
+                available_quantity=99, logistic_type="fulfillment")
         self.client.force_login(member(self.organization))
 
     def order(self, **params):
@@ -326,14 +326,9 @@ class ListingSortAndFlexTests(TestCase):
         self.assertEqual(self.order(status="all"), ["MLA4", "MLA2", "MLA1", "MLA3"])
         self.assertEqual(self.order(status="closed"), ["MLA5"])
 
-    def test_flex_filter_keeps_other_organizations_out(self):
-        self.assertEqual(self.order(shipping="flex", status="all"), ["MLA4", "MLA1"])
-        self.assertEqual(self.order(shipping="no_flex"), ["MLA2", "MLA3"])
-        page = self.client.get("/catalog/meli/", {"shipping": "flex", "status": "all"})
-        self.assertContains(page, 'title="In Mercado Envíos Flex">Flex</span>', count=2)
+    def test_stock_in_full_or_own_warehouse_keeps_other_organizations_out(self):
+        self.assertEqual(self.order(stock="full", status="all"), ["MLA4", "MLA1"])
+        self.assertEqual(self.order(stock="own"), ["MLA2", "MLA3"])
+        page = self.client.get("/catalog/meli/", {"stock": "full", "status": "all"})
+        self.assertContains(page, ">In Full</span>", count=2)
         self.assertNotContains(page, "MLA9")
-
-    def test_the_sync_reads_flex_from_the_shipping_tags(self):
-        flex = rows_for(item("MLA1", shipping={"logistic_type": "cross_docking", "tags": ["self_service_in"]}))
-        out = rows_for(item("MLA2", shipping={"tags": ["self_service_out"]}))
-        self.assertEqual((flex[0]["flex"], out[0]["flex"], rows_for(item("MLA3"))[0]["flex"]), (True, False, False))

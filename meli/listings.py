@@ -36,7 +36,6 @@ UPDATE_FIELDS = [
     "permalink",
     "thumbnail",
     "logistic_type",
-    "flex",
     "inventory_id",
     "meli_created_at",
     "meli_updated_at",
@@ -62,12 +61,6 @@ def sku_of(item, variation=None):
     return ""
 
 
-def is_flex(item):
-    """In Mercado Envíos Flex: the item's shipping tags include self_service_in."""
-    tags = (item.get("shipping") or {}).get("tags") or []
-    return isinstance(tags, list) and "self_service_in" in tags
-
-
 def rows_for(item):
     """The rows one Mercado Libre item becomes: one per variation, or one for the item."""
     variations = [variation for variation in item.get("variations") or [] if isinstance(variation, dict)]
@@ -85,7 +78,6 @@ def rows_for(item):
         "permalink": _https(item.get("permalink")),
         "thumbnail": _https(item.get("secure_thumbnail") or item.get("thumbnail")),
         "logistic_type": _text((item.get("shipping") or {}).get("logistic_type"), 32),
-        "flex": is_flex(item),
         "meli_created_at": _when(item.get("date_created")),
         "meli_updated_at": _when(item.get("last_updated")),
     }
