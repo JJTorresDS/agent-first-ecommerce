@@ -19,7 +19,7 @@
     {% endif %}
   {% else %}
     <div class="card empty">
-      <p>{% if query or link or status %}No listings match these filters.{% else %}No listings yet. Sync to bring them in.{% endif %}</p>
+      <p>{% if filtered %}No listings match these filters.{% else %}No listings yet. Sync to bring them in.{% endif %}</p>
     </div>
   {% endif %}
 </div>

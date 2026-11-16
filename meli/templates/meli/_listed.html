@@ -17,7 +17,7 @@
     {% endfor %}
   </ul>
   {% if more %}<p class="muted">Showing the first {{ rows|length }}.</p>{% endif %}
-  <p><a href="{% url 'meli_listings' %}?q={{ listed.sku|urlencode }}">See them in Listings</a></p>
+  <p><a href="{% url 'meli_listings' %}?q={{ listed.sku|urlencode }}&amp;status=all">See them in Listings</a></p>
 {% else %}
   <p class="muted">Not listed on Mercado Libre yet.</p>
 {% endif %}

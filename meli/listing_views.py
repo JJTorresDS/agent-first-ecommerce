@@ -1,7 +1,7 @@
 from datetime import timedelta
 
 from django.core.paginator import Paginator
-from django.db.models import Count, Q
+from django.db.models import Count, F, Q
 from django.http import HttpResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -32,6 +32,22 @@ STATUSES = (
     ("under_review", "Under review"),
     ("inactive", "Inactive"),
 )
+
+SHIPPING = (
+    ("flex", "Flex"),
+    ("no_flex", "Not Flex"),
+    ("full", "Full"),
+)
+# Sort choices: the key in the URL, its label, and the order. Ties fall back to the title.
+SORTS = {
+    "-available": ("Most available", F("available_quantity").desc(nulls_last=True)),
+    "available": ("Least available", F("available_quantity").asc(nulls_last=True)),
+    "-price": ("Highest price", F("price").desc(nulls_last=True)),
+    "price": ("Lowest price", F("price").asc(nulls_last=True)),
+    "title": ("Title", F("title").asc()),
+}
+DEFAULT_SORT = "-available"
+DEFAULT_STATUS = "active"
 
 
 # The order a product's listings are summed up in; closed ones only when nothing else is left.
@@ -130,7 +146,13 @@ def meli_listings(request):
     )
     query = (request.GET.get("q") or "").strip()
     link = request.GET.get("link") or ""
-    status = request.GET.get("status") or ""
+    # No status in the URL means active; "all" is every status but closed.
+    status = request.GET.get("status", DEFAULT_STATUS) or "all"
+    if link == "template" and status == DEFAULT_STATUS:
+        # Templates are kept paused: Active would always show none.
+        status = "all"
+    shipping = request.GET.get("shipping") or ""
+    sort = request.GET.get("sort") if request.GET.get("sort") in SORTS else DEFAULT_SORT
     if query:
         rows = rows.filter(Q(item_id__icontains=query) | Q(title__icontains=query) | Q(seller_sku__icontains=query))
     if link == "linked":
@@ -148,7 +170,14 @@ def meli_listings(request):
     else:
         # Closed listings are over: they show only when asked for.
         rows = rows.exclude(status="closed")
-    page = Paginator(rows.order_by("title", "item_id", "variation_id"), PAGE_SIZE).get_page(request.GET.get("page") or 1)
+    if shipping == "flex":
+        rows = rows.filter(flex=True)
+    elif shipping == "no_flex":
+        rows = rows.filter(flex=False)
+    elif shipping == "full":
+        rows = rows.filter(logistic_type="fulfillment")
+    order = SORTS[sort][1]
+    page = Paginator(rows.order_by(order, "title", "item_id", "variation_id"), PAGE_SIZE).get_page(request.GET.get("page") or 1)
     listings = list(page.object_list)
     templates = {
         row.item_id: row
@@ -166,8 +195,13 @@ def meli_listings(request):
         "query": query,
         "link": link,
         "status": status,
+        "shipping": shipping,
+        "sort": sort,
+        "filtered": bool(query or link or shipping or status != "all"),
         "link_states": LINK_STATES,
         "statuses": STATUSES,
+        "shipping_options": SHIPPING,
+        "sorts": [(key, label) for key, (label, _) in SORTS.items()],
         "can_edit": can_edit,
         "bulk": deletion.bulk(
             "listings",

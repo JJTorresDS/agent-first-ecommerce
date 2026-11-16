@@ -291,6 +291,9 @@ class MeliListing(models.Model):
         help_text="Catalog units one sale takes: 2 for a Kit x2. Set in Vimple; the sync never changes it.",
     )
     logistic_type = models.CharField(max_length=32, blank=True, help_text="fulfillment means Mercado Libre Full.")
+    flex = models.BooleanField(
+        default=False, help_text="In Mercado Envíos Flex: shipping tag self_service_in, as last synced."
+    )
     inventory_id = models.CharField(max_length=32, blank=True)
     full_available = models.IntegerField(null=True, blank=True, help_text="Mercado Libre's Full stock.")
     action_error = models.CharField(
@@ -357,9 +360,6 @@ class MeliListing(models.Model):
 
     def is_full(self):
         """In Mercado Libre Full: Mercado Libre counts its stock, so Vimple doesn't set it."""
-        return self.logistic_type == "fulfillment"
-
-    def is_full(self):
         return self.logistic_type == "fulfillment"
 
     def link_state(self):

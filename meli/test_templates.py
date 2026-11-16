@@ -84,7 +84,7 @@ class MakeTemplateTests(PerfumeDraftCase):
         self.assertEqual(self.meli.paused, ["MLA900"])
         self.row.refresh_from_db()
         self.assertEqual(self.row.status, "paused")
-        page = self.client.get("/catalog/meli/")
+        page = self.client.get("/catalog/meli/?status=all")
         self.assertContains(page, "Template · MLA1271")
         self.assertContains(page, "Stop using as template")
         other = listing(self.organization, "MLA901", title="Perfume 900", category_id="MLA1271", status="paused")

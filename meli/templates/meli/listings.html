@@ -7,7 +7,7 @@
   <div class="page-head">
     <h1>Mercado Libre listings</h1>
   </div>
-  <p class="page-lead">Your listings as last synced: search and filter them, change price, stock and status, see which compete in a catalog, and pick each category's template.</p>
+  <p class="page-lead">Your listings as last synced: search, filter and sort them, change price, stock and status, see which compete in a catalog, and pick each category's template.</p>
   {% if not connected %}
     <div class="card empty">
       <p>Mercado Libre isn't connected for this organization.</p>
@@ -16,7 +16,7 @@
   {% else %}
     {% include "meli/_listing_sync.html" %}
   {% endif %}
-  {% if connected or listings or query or link or status %}
+  {% if connected or listings or filtered %}
     <form
       class="filters"
       method="get"
@@ -33,7 +33,7 @@
       </div>
       <div>
         <label for="link">Show</label>
-        <select id="link" name="link">
+        <select id="link" name="link" onchange="if (this.value === 'template' && document.getElementById('status').value === 'active') document.getElementById('status').value = 'all'">
           <option value="">All</option>
           {% for value, label in link_states %}<option value="{{ value }}"{% if value == link %} selected{% endif %}>{{ label }}</option>{% endfor %}
         </select>
@@ -41,8 +41,21 @@
       <div>
         <label for="status">Status</label>
         <select id="status" name="status">
-          <option value="">All</option>
+          <option value="all"{% if status == "all" %} selected{% endif %}>All but closed</option>
           {% for value, label in statuses %}<option value="{{ value }}"{% if value == status %} selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="shipping">Shipping</label>
+        <select id="shipping" name="shipping">
+          <option value="">All</option>
+          {% for value, label in shipping_options %}<option value="{{ value }}"{% if value == shipping %} selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="sort">Sort by</label>
+        <select id="sort" name="sort">
+          {% for value, label in sorts %}<option value="{{ value }}"{% if value == sort %} selected{% endif %}>{{ label }}</option>{% endfor %}
         </select>
       </div>
     </form>

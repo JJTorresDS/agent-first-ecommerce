@@ -284,3 +284,56 @@ class ListingPageTests(TestCase):
         self.assertContains(page, "Mercado Libre isn't connected")
         self.assertEqual(self.client.post("/catalog/meli/").status_code, 302)
         self.assertFalse(MeliListingSync.objects.filter(organization=organization).exists())
+
+
+class ListingSortAndFlexTests(TestCase):
+    def setUp(self):
+        self.organization = shared_seller("Test Seller")
+        when = self.organization.created_at
+
+        def listing(item_id, organization=None, **fields):
+            return MeliListing.objects.create(
+                organization=organization or self.organization, item_id=item_id, title=f"Listing {item_id}",
+                currency="ARS", synced_at=when, **fields,
+            )
+
+        listing("MLA1", status="active", available_quantity=3, price=Decimal("500"), flex=True)
+        listing("MLA2", status="active", available_quantity=9, price=Decimal("100"))
+        listing("MLA3", status="active", available_quantity=None, price=Decimal("900"))
+        listing("MLA4", status="paused", available_quantity=50, price=Decimal("50"), flex=True)
+        listing("MLA5", status="closed", available_quantity=70, price=Decimal("70"))
+        listing("MLA9", organization=shared_seller("Other", user_id="555"), status="active",
+                available_quantity=99, flex=True)
+        self.client.force_login(member(self.organization))
+
+    def order(self, **params):
+        page = self.client.get("/catalog/meli/", params, HTTP_HX_REQUEST="true")
+        return [row.item_id for row in page.context["listings"]]
+
+    def test_by_default_only_active_listings_most_available_first(self):
+        self.assertEqual(self.order(), ["MLA2", "MLA1", "MLA3"])
+        page = self.client.get("/catalog/meli/")
+        self.assertContains(page, '<option value="-available" selected>')
+        self.assertContains(page, '<option value="active" selected>')
+
+    def test_sorting_by_quantity_or_price(self):
+        self.assertEqual(self.order(sort="available"), ["MLA1", "MLA2", "MLA3"])
+        self.assertEqual(self.order(sort="-price"), ["MLA3", "MLA1", "MLA2"])
+        self.assertEqual(self.order(sort="price", status="all"), ["MLA4", "MLA2", "MLA1", "MLA3"])
+        self.assertEqual(self.order(sort="nonsense"), ["MLA2", "MLA1", "MLA3"])
+
+    def test_all_but_closed_and_closed(self):
+        self.assertEqual(self.order(status="all"), ["MLA4", "MLA2", "MLA1", "MLA3"])
+        self.assertEqual(self.order(status="closed"), ["MLA5"])
+
+    def test_flex_filter_keeps_other_organizations_out(self):
+        self.assertEqual(self.order(shipping="flex", status="all"), ["MLA4", "MLA1"])
+        self.assertEqual(self.order(shipping="no_flex"), ["MLA2", "MLA3"])
+        page = self.client.get("/catalog/meli/", {"shipping": "flex", "status": "all"})
+        self.assertContains(page, 'title="In Mercado Envíos Flex">Flex</span>', count=2)
+        self.assertNotContains(page, "MLA9")
+
+    def test_the_sync_reads_flex_from_the_shipping_tags(self):
+        flex = rows_for(item("MLA1", shipping={"logistic_type": "cross_docking", "tags": ["self_service_in"]}))
+        out = rows_for(item("MLA2", shipping={"tags": ["self_service_out"]}))
+        self.assertEqual((flex[0]["flex"], out[0]["flex"], rows_for(item("MLA3"))[0]["flex"]), (True, False, False))

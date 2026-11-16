@@ -100,7 +100,7 @@ class ListingStatusTests(TestCase):
         self.assertEqual(first.state, ListingChange.State.DONE)
         self.assertIsNotNone(first.finished_at)
         self.assertEqual(first.title, "Perfume A")
-        page = self.client.get("/catalog/meli/")
+        page = self.client.get("/catalog/meli/?status=all")
         self.assertContains(page, "View history")
         self.assertNotContains(page, "Paused by")
         history = self.client.get("/catalog/meli/history/MLA1/")
@@ -108,11 +108,11 @@ class ListingStatusTests(TestCase):
         self.assertContains(history, "active → paused")
 
     def test_only_the_waiting_cell_polls_and_gets_its_answer_when_done(self):
-        self.assertNotContains(self.client.get("/catalog/meli/"), 'hx-trigger="every 2s"')
+        self.assertNotContains(self.client.get("/catalog/meli/?status=all"), 'hx-trigger="every 2s"')
         ListingChange.objects.create(
             organization=self.organization, item_id="MLA2", new_value="active", reason="seasonal"
         )
-        page = self.client.get("/catalog/meli/")
+        page = self.client.get("/catalog/meli/?status=all")
         self.assertContains(page, f'hx-get="/catalog/meli/row/{self.second.pk}/"', count=1)
         self.assertContains(page, "Reactivating…")
         url = f"/catalog/meli/row/{self.second.pk}/"
