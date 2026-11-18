@@ -40,7 +40,18 @@
           <input type="text" value="{{ api_key.masked }}" readonly aria-label="API key, masked">
           {% if raw_ok %}<button type="button" id="copy-api-key" data-url="{% url 'organization_api_key_copy' %}">Copy</button>{% endif %}
         </div>
-        {% if not raw_ok %}<p class="error">This key was created on another server and can't be copied here. Regenerate it to get one you can copy.</p>{% endif %}
+        {% if raw_ok %}
+          <details class="api-curl"{% if not api_key.last_used_at %} open{% endif %}>
+            <summary>Use it with curl</summary>
+            <pre class="snippet" id="api-key-curl" data-endpoint="{{ api_token_url }}" data-organization="{{ organization.id }}">curl -H "Authorization: Bearer {{ api_key.masked }}" \
+  "{{ api_token_url }}?organization={{ organization.id }}"</pre>
+            <div class="actions">
+              <button type="button" id="copy-api-curl" data-url="{% url 'organization_api_key_copy' %}">Copy command</button>
+            </div>
+          </details>
+        {% else %}
+          <p class="error">This key was created on another server and can't be copied here. Regenerate it to get one you can copy.</p>
+        {% endif %}
       {% endwith %}
       <p class="muted">Created{% if api_key.created_by %} by {{ api_key.created_by.get_full_name|default:api_key.created_by.email }}{% endif %} on {{ api_key.created_at|date:"d/m/Y" }} · {% if api_key.last_used_at %}last used {{ api_key.last_used_at|date:"d/m/Y H:i" }}{% else %}never used{% endif %}</p>
       <div class="actions">
@@ -94,16 +105,27 @@
   <script>
     (function () {
       // The raw key is fetched only when copied, so it is never in the page.
-      var button = document.getElementById("copy-api-key");
-      if (!button) return;
-      button.addEventListener("click", function () {
-        var token = document.querySelector("#api-key input[name=csrfmiddlewaretoken]").value;
-        fetch(button.dataset.url, { method: "POST", headers: { "X-CSRFToken": token }, credentials: "same-origin" })
-          .then(function (response) { if (!response.ok) throw new Error(response.status); return response.text(); })
-          .then(function (key) { return navigator.clipboard.writeText(key); })
-          .then(function () { button.textContent = "Copied"; }, function () { button.textContent = "Couldn't copy"; })
-          .then(function () { setTimeout(function () { button.textContent = "Copy"; }, 2000); });
-      });
+      function copyWithKey(button, build) {
+        var label = button.textContent;
+        button.addEventListener("click", function () {
+          var token = document.querySelector("#api-key input[name=csrfmiddlewaretoken]").value;
+          fetch(button.dataset.url, { method: "POST", headers: { "X-CSRFToken": token }, credentials: "same-origin" })
+            .then(function (response) { if (!response.ok) throw new Error(response.status); return response.text(); })
+            .then(function (key) { return navigator.clipboard.writeText(build(key)); })
+            .then(function () { button.textContent = "Copied"; }, function () { button.textContent = "Couldn't copy"; })
+            .then(function () { setTimeout(function () { button.textContent = label; }, 2000); });
+        });
+      }
+      var copyKey = document.getElementById("copy-api-key");
+      if (copyKey) copyWithKey(copyKey, function (key) { return key; });
+      var copyCurl = document.getElementById("copy-api-curl");
+      var curl = document.getElementById("api-key-curl");
+      if (copyCurl && curl) {
+        copyWithKey(copyCurl, function (key) {
+          return 'curl -H "Authorization: Bearer ' + key + '" \\\n  "' +
+            curl.dataset.endpoint + "?organization=" + curl.dataset.organization + '"';
+        });
+      }
     })();
     document.getElementById("copy-organization-id").addEventListener("click", function () {
       var field = document.getElementById("organization-id");

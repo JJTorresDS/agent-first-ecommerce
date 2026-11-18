@@ -33,6 +33,19 @@ class ApiKeyPageTests(TestCase):
         self.assertEqual(copied["Cache-Control"], "no-store")
         self.assertEqual(self.client.get("/organization/api-key/copy/").status_code, 405)
 
+    def test_a_new_key_shows_a_curl_command_with_the_key_masked(self):
+        raw = OrganizationApiKey.generate(self.organization, self.owner)
+        key = OrganizationApiKey.objects.get()
+        page = self.client.get("/organization/")
+        self.assertContains(page, "Use it with curl")
+        self.assertContains(page, '<details class="api-curl" open>')
+        self.assertContains(page, f'Authorization: Bearer {key.masked()}')
+        self.assertContains(page, f"http://testserver/api/meli/token?organization={self.organization.pk}")
+        self.assertContains(page, 'id="copy-api-curl"')
+        self.assertNotContains(page, raw)
+        OrganizationApiKey.objects.update(last_used_at=key.created_at)
+        self.assertContains(self.client.get("/organization/"), '<details class="api-curl">')
+
     def test_regenerate_replaces_and_delete_removes_one_key_per_organization(self):
         first = OrganizationApiKey.generate(self.organization, self.owner)
         self.client.post("/organization/api-key/", {"action": "regenerate"})
@@ -59,6 +72,7 @@ class ApiKeyPageTests(TestCase):
         page = self.client.get("/organization/")
         self.assertContains(page, "Regenerate it to get one you can copy")
         self.assertNotContains(page, 'id="copy-api-key"')
+        self.assertNotContains(page, 'id="copy-api-curl"')
         self.assertEqual(OrganizationApiKey.matching(raw).organization, self.organization)
 
 

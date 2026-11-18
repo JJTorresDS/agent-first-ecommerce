@@ -206,7 +206,7 @@ def organization_setup(request):
     )
 
 
-def _organization_context(membership, error=""):
+def _organization_context(request, membership, error=""):
     organization = membership.organization
     is_owner = membership.role == Membership.Role.OWNER
     return {
@@ -220,6 +220,8 @@ def _organization_context(membership, error=""):
             if is_owner
             else None
         ),
+        # For the curl example: where another service of the owner's calls with the key.
+        "api_token_url": request.build_absolute_uri("/api/meli/token") if is_owner else "",
     }
 
 
@@ -243,7 +245,7 @@ def organization_settings(request):
     return render(
         request,
         "accounts/organization.html",
-        _organization_context(membership, error),
+        _organization_context(request, membership, error),
     )
 
 
@@ -260,6 +262,7 @@ def organization_delete(request):
             request,
             "accounts/organization.html",
             _organization_context(
+                request,
                 membership,
                 "Confirm the deletion to remove the organization.",
             ),
