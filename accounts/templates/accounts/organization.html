@@ -31,6 +31,50 @@
     </form>
   </section>
   {% if is_owner %}
+  <section class="card" id="api-key">
+    <h1>API key</h1>
+    {% if api_key %}
+      <p class="muted">Another service of yours sends it as a Bearer token to get this organization's Mercado Libre token.</p>
+      {% with raw_ok=api_key.value %}
+        <div class="id-row">
+          <input type="text" value="{{ api_key.masked }}" readonly aria-label="API key, masked">
+          {% if raw_ok %}<button type="button" id="copy-api-key" data-url="{% url 'organization_api_key_copy' %}">Copy</button>{% endif %}
+        </div>
+        {% if not raw_ok %}<p class="error">This key was created on another server and can't be copied here. Regenerate it to get one you can copy.</p>{% endif %}
+      {% endwith %}
+      <p class="muted">Created{% if api_key.created_by %} by {{ api_key.created_by.get_full_name|default:api_key.created_by.email }}{% endif %} on {{ api_key.created_at|date:"d/m/Y" }} · {% if api_key.last_used_at %}last used {{ api_key.last_used_at|date:"d/m/Y H:i" }}{% else %}never used{% endif %}</p>
+      <div class="actions">
+        <button type="button" data-dialog="api-key-regenerate">Regenerate</button>
+        <button type="button" class="danger" data-dialog="api-key-delete">Delete</button>
+      </div>
+      <dialog class="modal" id="api-key-regenerate" aria-labelledby="api-key-regenerate-title">
+        <h2 id="api-key-regenerate-title">Regenerate the API key?</h2>
+        <p>The current key stops working at once. Put the new one in your service before it calls again.</p>
+        <form method="post" action="{% url 'organization_api_key' %}" class="actions">
+          {% csrf_token %}
+          <button type="button" data-close-dialog>Cancel</button>
+          <button type="submit" name="action" value="regenerate" class="accent">Regenerate</button>
+        </form>
+      </dialog>
+      <dialog class="modal" id="api-key-delete" aria-labelledby="api-key-delete-title">
+        <h2 id="api-key-delete-title">Delete the API key?</h2>
+        <p>Calls with it are refused from now on. You can create a new one later.</p>
+        <form method="post" action="{% url 'organization_api_key' %}" class="actions">
+          {% csrf_token %}
+          <button type="button" data-close-dialog>Cancel</button>
+          <button type="submit" name="action" value="delete" class="danger">Delete</button>
+        </form>
+      </dialog>
+    {% else %}
+      <p class="muted">Lets another service of yours get this organization's Mercado Libre token. Only owners can see or change it.</p>
+      <form method="post" action="{% url 'organization_api_key' %}" class="actions">
+        {% csrf_token %}
+        <button type="submit" name="action" value="create" class="accent">Create API key</button>
+      </form>
+    {% endif %}
+  </section>
+  {% endif %}
+  {% if is_owner %}
   <section class="card">
     <h1>Danger zone</h1>
     <p class="muted">Delete organization</p>
@@ -48,6 +92,19 @@
   </section>
   {% endif %}
   <script>
+    (function () {
+      // The raw key is fetched only when copied, so it is never in the page.
+      var button = document.getElementById("copy-api-key");
+      if (!button) return;
+      button.addEventListener("click", function () {
+        var token = document.querySelector("#api-key input[name=csrfmiddlewaretoken]").value;
+        fetch(button.dataset.url, { method: "POST", headers: { "X-CSRFToken": token }, credentials: "same-origin" })
+          .then(function (response) { if (!response.ok) throw new Error(response.status); return response.text(); })
+          .then(function (key) { return navigator.clipboard.writeText(key); })
+          .then(function () { button.textContent = "Copied"; }, function () { button.textContent = "Couldn't copy"; })
+          .then(function () { setTimeout(function () { button.textContent = "Copy"; }, 2000); });
+      });
+    })();
     document.getElementById("copy-organization-id").addEventListener("click", function () {
       var field = document.getElementById("organization-id");
       navigator.clipboard.writeText(field.value);

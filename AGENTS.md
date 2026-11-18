@@ -158,6 +158,12 @@ Organization is the tenant. Its UUID does not change. The name can.
 - The Catalog column comes from the synced payload, no Mercado Libre call (MeliListing.catalog_state): Competing (catalog_listing), Via <item> (item_relations: its catalog twin competes and they share stock), Can join (tag catalog_listing_eligible), else No. New edits Vimple makes to a listing (price, stock…) log there too, with their own field.
 - Notices after a redirect use Django messages, rendered from the flash context processor: the inbox's context already has "messages".
 
+## Service API key
+
+- An organization has at most one accounts.OrganizationApiKey (OneToOne). Only owners see, create, copy, regenerate or delete it, on the Organization page; anyone else gets 403 and no card. Regenerate replaces the row, so the old key stops working at once.
+- It is stored twice: key_hash (sha256, unique) to find it on each call, and key_encrypted (meli.tokens encrypt_secret) so owners can copy it. The page shows only the mask (vk_••••last4); Copy POSTs to organization_api_key_copy, which answers the raw key with no-store. Never render, log or put the raw key in an error. A key encrypted with another SECRET_KEY still authenticates; the page offers Regenerate instead of Copy.
+- GET /api/meli/token?organization=<id> with Authorization: Bearer <key> (meli/token_api.py) answers that organization's Mercado Libre access token through fresh_access_token, with expires_at and meli_user_id. The organization must be the key's own, else 404. The refresh token never leaves Vimple: refresh tokens work once and are shared across the seller's organizations.
+
 ## Access and impersonation
 
 - Only a superuser can view Vimple as another user, never as a superuser, themselves or an inactive user. A GET shows a confirmation; only a POST switches. The session keeps the superuser id and where to return (Access page or Django admin), written after login(), which empties the session.

@@ -1,8 +1,10 @@
+import hashlib
+import secrets
 import uuid
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.db import models
+from django.db import models, transaction
 from django.db.models.functions import Lower
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
@@ -18,6 +20,72 @@ class Organization(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class OrganizationApiKey(models.Model):
+    """The one key another service of the owner's uses to call Vimple for this organization.
+
+    Looked up by its sha256 on each call; kept encrypted too, so owners can copy it later. Never rendered whole.
+    """
+
+    PREFIX = "vk_"
+
+    organization = models.OneToOneField(Organization, on_delete=models.CASCADE, related_name="api_key")
+    key_hash = models.CharField(max_length=64, unique=True)
+    key_encrypted = models.TextField()
+    last4 = models.CharField(max_length=4)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "accounts_organization_api_key"
+
+    def __str__(self):
+        return f"{self.organization} {self.masked()}"
+
+    @staticmethod
+    def hash_of(raw):
+        return hashlib.sha256(raw.encode()).hexdigest()
+
+    @classmethod
+    def generate(cls, organization, user):
+        """A new key for the organization; the old one, if any, stops working at once. Returns the raw key."""
+        from meli.tokens import encrypt_secret
+
+        raw = cls.PREFIX + secrets.token_urlsafe(32)
+        with transaction.atomic():
+            cls.objects.filter(organization=organization).delete()
+            cls.objects.create(
+                organization=organization,
+                key_hash=cls.hash_of(raw),
+                key_encrypted=encrypt_secret(raw),
+                last4=raw[-4:],
+                created_by=user,
+            )
+        return raw
+
+    @classmethod
+    def matching(cls, raw):
+        if not raw or not raw.startswith(cls.PREFIX):
+            return None
+        return cls.objects.select_related("organization").filter(key_hash=cls.hash_of(raw)).first()
+
+    def value(self):
+        """The raw key, or "" when it was encrypted with another SECRET_KEY (a laptop against Render's database)."""
+        from cryptography.fernet import InvalidToken
+
+        from meli.tokens import decrypt_secret
+
+        try:
+            return decrypt_secret(self.key_encrypted)
+        except InvalidToken:
+            return ""
+
+    def masked(self):
+        return f"{self.PREFIX}{'•' * 12}{self.last4}"
 
 
 class TenantModel(models.Model):

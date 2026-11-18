@@ -7,6 +7,8 @@ from accounts.views import (
     impersonate,
     impersonate_exit,
     members,
+    organization_api_key,
+    organization_api_key_copy,
     organization_delete,
     organization_settings,
     organization_setup,
@@ -47,7 +49,10 @@ from meli.views import (
     mercadolibre_token,
     mercadolibre_webhook,
 )
+from meli.token_api import router as meli_token_router
 from tasks.api import api
+
+api.add_router("/meli", meli_token_router)
 from tasks.views import (
     cashflow_csv,
     cashflow_drive_token,
@@ -74,6 +79,8 @@ urlpatterns = [
     path("organization/members/", members, name="members"),
     path("organization/switch/", organization_switch, name="organization_switch"),
     path("organization/delete/", organization_delete, name="organization_delete"),
+    path("organization/api-key/", organization_api_key, name="organization_api_key"),
+    path("organization/api-key/copy/", organization_api_key_copy, name="organization_api_key_copy"),
     path("cashflow/", cashflow_list, name="cashflow"),
     path("cashflow/export.csv", cashflow_csv, name="cashflow_csv"),
     path("cashflow/settings/", cashflow_settings, name="cashflow_settings"),

@@ -5,6 +5,7 @@ import re
 import time
 from datetime import datetime, timezone as dt_timezone
 
+from django.contrib import messages
 from django.contrib.auth import get_user_model, login
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse, HttpResponseBadRequest, HttpResponseForbidden, JsonResponse
@@ -16,6 +17,7 @@ from .models import (
     AppAccess,
     Invitation,
     Membership,
+    OrganizationApiKey,
     Profile,
     add_organization_member,
     can_manage_members,
@@ -206,11 +208,18 @@ def organization_setup(request):
 
 def _organization_context(membership, error=""):
     organization = membership.organization
+    is_owner = membership.role == Membership.Role.OWNER
     return {
         "organization": organization,
         "member_count": organization.memberships.count(),
         "error": error,
-        "is_owner": membership.role == Membership.Role.OWNER,
+        "is_owner": is_owner,
+        # Only owners see the key, and only masked: Copy fetches it.
+        "api_key": (
+            OrganizationApiKey.objects.select_related("created_by").filter(organization=organization).first()
+            if is_owner
+            else None
+        ),
     }
 
 
@@ -257,6 +266,53 @@ def organization_delete(request):
         )
     membership.organization.delete()
     return redirect("organization_setup")
+
+
+def _owner_or_403(request):
+    """The owner's membership, or the response to send instead."""
+    membership = membership_for(request.user)
+    if membership is None:
+        return None, redirect("organization_setup")
+    if membership.role != Membership.Role.OWNER:
+        return None, HttpResponseForbidden("Only the owner can manage the API key.")
+    return membership, None
+
+
+@login_required
+@require_POST
+def organization_api_key(request):
+    """Create, regenerate or delete the organization's API key. Owners only."""
+    membership, refused = _owner_or_403(request)
+    if refused:
+        return refused
+    organization = membership.organization
+    action = request.POST.get("action")
+    if action in ("create", "regenerate"):
+        OrganizationApiKey.generate(organization, request.user)
+        messages.success(
+            request,
+            "API key regenerated: the old key no longer works." if action == "regenerate" else "API key created.",
+        )
+    elif action == "delete":
+        OrganizationApiKey.objects.filter(organization=organization).delete()
+        messages.success(request, "API key deleted: calls with it are refused.")
+    return redirect("organization")
+
+
+@login_required
+@require_POST
+def organization_api_key_copy(request):
+    """The raw key as text, for the Copy button. Owners only; never in the page itself."""
+    membership, refused = _owner_or_403(request)
+    if refused:
+        return refused
+    key = OrganizationApiKey.objects.filter(organization=membership.organization).first()
+    raw = key.value() if key else ""
+    if not raw:
+        return HttpResponse(status=404)
+    response = HttpResponse(raw, content_type="text/plain")
+    response["Cache-Control"] = "no-store"
+    return response
 
 
 def _member_emails(raw):
