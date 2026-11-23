@@ -2736,7 +2736,7 @@ def unreadable_token():
     MELI_CLIENT_ID=str(SAMPLE["application_id"]),
 )
 class SeparateEnvironmentTests(TestCase):
-    """A laptop and Render share Upstash and Neon but not SECRET_KEY."""
+    """A laptop and Render share Upstash and Postgres but not SECRET_KEY."""
 
     def setUp(self):
         self.organization = shared_seller("Test Seller")

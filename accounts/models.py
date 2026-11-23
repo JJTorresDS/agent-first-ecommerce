@@ -311,7 +311,7 @@ def _forget_memberships(**kwargs):
 def memberships_for(user):
     """The user's memberships by organization name, in one query, kept on the user for the request.
 
-    Each Neon query costs a network round trip; the view, apps_for and the nav all read these.
+    Each Postgres query costs a network round trip; the view, apps_for and the nav all read these.
     """
     if not getattr(user, "is_authenticated", False):
         return []

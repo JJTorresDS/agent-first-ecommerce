@@ -1,6 +1,6 @@
 # Vimple
 
-Vimple is the backend. Scent is the first tenant. Django is the system of record for one `tasks` table on Neon Postgres. Humans use the admin. A separate agents project creates and updates tasks through the HTTP API. Agents never touch the database.
+Vimple is the backend. Scent is the first tenant. Django is the system of record, on Postgres on our own server. Humans use the admin. A separate agents project creates and updates tasks through the HTTP API. Agents never touch the database.
 
 ## Run locally
 
@@ -9,7 +9,7 @@ uv sync
 cp .env.example .env
 ```
 
-Put your Neon connection string in `DATABASE_URL` in `.env`. Include `sslmode=require`. The pooled Neon host is the one to use.
+Put the Postgres connection string in `DATABASE_URL` in `.env`. Include `sslmode=require`: the server refuses connections without SSL, and its certificate is self-signed, so `verify-ca` and `verify-full` fail.
 
 ```bash
 uv run python manage.py migrate
@@ -27,16 +27,16 @@ Connect the GitHub repo in the [Render dashboard](https://dashboard.render.com/b
 
 Paste these values when Render asks:
 
-- `DATABASE_URL`: the Neon connection string, with `sslmode=require`.
+- `DATABASE_URL`: the Postgres connection string, with `sslmode=require`.
 - `CSRF_TRUSTED_ORIGINS`: the service origin only, `https://vimple-backend.onrender.com`, with no path. If Render assigns a different host, use that origin instead.
 - `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`: the OAuth client from Google Cloud. Authorized redirect URIs are `http://127.0.0.1:8000/accounts/google/login/callback/` and `https://vimple-backend.onrender.com/accounts/google/login/callback/`.
 
 People sign in with Google at `/`. That opens their profile at `/profile/`. New Google accounts are not staff, so `/admin/` stays on the existing username and password.
 
-Render generates `SECRET_KEY` and `TASKS_API_TOKEN`. Copy `TASKS_API_TOKEN` into the agents project. Leave `DEBUG` unset. Leave `DJANGO_SUPERUSER_USERNAME`, `DJANGO_SUPERUSER_EMAIL`, and `DJANGO_SUPERUSER_PASSWORD` unset. The admin user already in Neon is the login. Startup creates a superuser only when `DJANGO_SUPERUSER_PASSWORD` is set, and it does not change an existing user's password.
+Render generates `SECRET_KEY` and `TASKS_API_TOKEN`. Copy `TASKS_API_TOKEN` into the agents project. Leave `DEBUG` unset. Leave `DJANGO_SUPERUSER_USERNAME`, `DJANGO_SUPERUSER_EMAIL`, and `DJANGO_SUPERUSER_PASSWORD` unset. The admin user already in the database is the login. Startup creates a superuser only when `DJANGO_SUPERUSER_PASSWORD` is set, and it does not change an existing user's password.
 
 After the first deploy, open `/admin/` and call `/api/tasks` with `Authorization: Bearer <TASKS_API_TOKEN>`.
 
 `GET /health/` returns `ok` and does not touch the database. Ping that URL from an outside scheduler every 10 minutes so the free instance does not spin down.
 
-A free Render web service spins down after inactivity. The first request after idle waits through a cold start. Tasks stay in Neon either way.
+A free Render web service spins down after inactivity. The first request after idle waits through a cold start. Data stays in Postgres either way.

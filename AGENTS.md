@@ -35,7 +35,7 @@ Organization is the tenant. Its UUID does not change. The name can.
 - A #chat-list swap replaces the scrolling aside. Restore its scrollTop after the swap. Only a click moves a row to the top.
 - On phones (max-width 768px) the inbox shows one pane at a time, chosen by #inbox data-view (list or thread). A row click and inboxShowList set it in the browser, so no request may replace #inbox. Check layout changes at 390px as well as on desktop.
 - Writing a chat (inbox.services.upsert_thread) is bulk: one read of its messages, one bulk_create, one bulk_update (set updated_at yourself; bulk_update skips auto_now), one delete. Never one query per message: a 35-message chat once took 154 queries, 6-10 s on Render. A sent reply is one row (meli.postsale.remember_reply), about 6 queries.
-- Every query and Redis call crosses the network to Neon or Upstash. Keep the Postgres pool and the shared Redis client, and count queries when adding to an inbox request.
+- Every query and Redis call crosses the network to Postgres (our own server) or Upstash. Keep the Postgres pool and the shared Redis client, and count queries when adding to an inbox request.
 - When a UI fix does not hold, find where the wrong value first appears before adding another guard. Log the value read and the value expected side by side.
 - Remove debug logging, such as #region agent log blocks and .cursor/debug-*.log writers, before finishing.
 
@@ -46,7 +46,7 @@ Organization is the tenant. Its UUID does not change. The name can.
 - A webhook for a seller fans out: one MercadoLibreNotification row per connected organization, and each organization gets its own ItemQuestion and Conversation rows. Look up questions and packs by organization plus id, never by id alone.
 - Check the resource format in stored MercadoLibreNotification rows before writing a parser. Questions arrive as /questions/<id>. Post-sale messages arrive as a bare message id with no slash. GET /messages/<id> can return the message inside a messages list, like a thread; read it with postsale._message_in, and take the pack id, or the order id when the sale has no pack.
 - Each server process runs two worker threads: one takes only replies (REPLY_LANE), the other everything else (WORKER_QUEUES) with one BRPOP over its queues (run_next_job). A reply never waits behind a sync or refresh; each logs 'sent in … after waiting …'. Never put a slow job on the reply lane. Redis reads a BRPOP timeout of 0 as wait forever, so never pass 0. A new queue goes in WORKER_QUEUES and the handler map.
-- A laptop and Render share Neon and Upstash. Every Redis key goes through jobs._key, under REDIS_PREFIX: Render uses vimple, a laptop uses vimple-dev. With the same prefix, either worker takes the other's jobs.
+- A laptop and Render share Postgres and Upstash. Every Redis key goes through jobs._key, under REDIS_PREFIX: Render uses vimple, a laptop uses vimple-dev. With the same prefix, either worker takes the other's jobs.
 - The laptop's SECRET_KEY differs from Render's, so Mercado Libre tokens and the parser key saved on Render can't be decrypted locally (InvalidToken), and the other way round. Don't connect Mercado Libre or save the parser key from a laptop against the shared database.
 - Background jobs log every failure with describe_failure (error class and Mercado Libre's reason, never a token). Never pass silently on an exception.
 - The webhook stores the row and calls dispatch_notification. It makes no Mercado Libre calls, because Mercado Libre expects an answer in about 500 ms. The worker loads the notification.
@@ -170,7 +170,7 @@ Organization is the tenant. Its UUID does not change. The name can.
 
 ## Tests
 
-- With DATABASE_URL set, manage.py test runs on the remote Neon database and is slow. Run DATABASE_URL= uv run python manage.py test --noinput to use in-memory SQLite.
+- With DATABASE_URL set, manage.py test runs on the remote Postgres database and is slow. Run DATABASE_URL= uv run python manage.py test --noinput to use in-memory SQLite.
 - Always pass --noinput. Without it, a leftover test database makes Django wait for an answer that never comes.
 
 ## Error reports

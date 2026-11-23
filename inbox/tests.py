@@ -39,7 +39,7 @@ def project(organization, messages, external_id="2000015861321589"):
 
 
 class ThreadWriteTests(TestCase):
-    """Every query is a round trip to Neon, so writing a chat must not cost one query per message."""
+    """Every query is a round trip to Postgres, so writing a chat must not cost one query per message."""
 
     def setUp(self):
         self.organization = Organization.objects.create(name="Test Seller")

@@ -43,7 +43,7 @@ def upsert_thread(
         },
     )
     # One query reads the chat, then one bulk insert, one bulk update and one delete.
-    # Each query is a round trip to Neon, so never one query per message.
+    # Each query is a round trip to Postgres, so never one query per message.
     wanted = {}
     for item in messages:
         wanted[_clip(item["external_id"], 80)] = item

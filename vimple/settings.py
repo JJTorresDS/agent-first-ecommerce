@@ -159,7 +159,7 @@ def database_from_url(url):
         raise ImproperlyConfigured("DATABASE_URL is missing the database name")
     options = {key: values[-1] for key, values in parse_qs(parsed.query).items()}
     options.setdefault("sslmode", "require")
-    # Reuse connections across requests and threads; a new Neon connection costs over a second.
+    # Reuse connections across requests and threads; a new connection to the remote server costs a TLS handshake.
     options["pool"] = {"min_size": 1, "max_size": 8, "timeout": 10}
     return {
         "ENGINE": "django.db.backends.postgresql",
@@ -189,7 +189,7 @@ elif _COMMAND in {"test", "collectstatic"}:
     }
 else:
     raise ImproperlyConfigured(
-        "Set DATABASE_URL in .env to your Neon connection string."
+        "Set DATABASE_URL in .env to the Postgres connection string."
     )
 
 # Upstash connection string. Empty means post-sale sync runs inside the request.
