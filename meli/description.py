@@ -13,7 +13,8 @@ from catalog.models import Combo, CopyBlock
 from .drafts import description_of
 
 LIMIT = 50000
-TEXT_LIMIT = 5000
+# A free-text piece can hold a whole description, such as a scraped listing's.
+TEXT_LIMIT = 50000
 SEPARATOR = "\n\n"
 EMPTY = "Write a description first: it's empty."
 _LINK = re.compile(r"(https?://|www\.)\S+|\b[\w-]+\.(com|ar|net|org)(\.ar)?\b", re.IGNORECASE)
@@ -42,6 +43,17 @@ def blocks_for(organization, listed):
 def default_parts(organization, listed):
     """A new draft's description: the product's own text, then the blocks marked "Add to new listings"."""
     return [{"product": True}] + [{"block": row.pk} for row in blocks_for(organization, listed) if row.default_on]
+
+
+def with_scraped(parts, prospect, listed):
+    """A new draft's pieces with the scraped listing's description: in place of the product's when the
+    product has none, else nothing changes (the composer offers it)."""
+    text = prospect.description()[:TEXT_LIMIT] if prospect else ""
+    if not text:
+        return parts
+    if listed is not None and description_of(listed).strip():
+        return parts
+    return [{"text": text}] + [part for part in parts if not part.get("product")]
 
 
 def clean_parts(organization, parts):

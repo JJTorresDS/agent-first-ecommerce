@@ -578,3 +578,46 @@ class PictureHostTests(TestCase):
             self.assertFalse(from_another_listing(url), url)
         with self.assertRaises(ValueError):
             download_picture("http://169.254.169.254/latest/meta-data")
+
+
+@override_settings(MISTRAL_API_KEY="")
+class ScrapedDescriptionTests(PerfumeDraftCase):
+    """A scraped listing's description fills a draft whose product has none, and is offered in the composer."""
+
+    TEXT = "<p>Kit completo para pestañas.</p>"
+
+    def setUp(self):
+        super().setUp()
+        self.meli.category_attributes = [*PERFUME_ATTRIBUTES, NAME, GENDER]
+        self.prospect = prospect_for(self.organization, product=self.product, payload={**SCRAPED[0], "description": self.TEXT})
+
+    def draft_from_scraped(self):
+        self.client.post(f"/catalog/meli/new/scraped/{self.prospect.pk}/")
+        return ListingDraft.objects.get(organization=self.organization)
+
+    def test_a_product_without_a_description_starts_from_the_scraped_one(self):
+        model = self.product.product_model
+        model.description = ""
+        model.save()
+        draft = self.draft_from_scraped()
+        self.assertEqual(draft.description_parts[0], {"text": "Kit completo para pestañas."})
+        self.assertNotIn({"product": True}, draft.description_parts)
+
+    def test_a_product_with_a_description_keeps_it_and_the_composer_offers_the_scraped_one(self):
+        draft = self.draft_from_scraped()
+        self.assertEqual(draft.description_parts[0], {"product": True})
+        page = self.client.get(f"/catalog/meli/new/{draft.pk}/")
+        self.assertContains(page, "Scraped listing's description")
+        self.assertContains(page, 'data-text="Kit completo para pestañas."', html=False)
+
+    def test_fast_publish_starts_from_the_scraped_description(self):
+        self.client.post(f"/catalog/meli/new/scraped/{self.prospect.pk}/fast/")
+        draft = ListingDraft.objects.get(organization=self.organization, kind=ListingDraft.Kind.FAST)
+        self.assertEqual(draft.description_parts[0], {"text": "Kit completo para pestañas."})
+
+    def test_without_a_scraped_description_nothing_changes(self):
+        self.prospect.payload = SCRAPED[0]
+        self.prospect.save()
+        draft = self.draft_from_scraped()
+        self.assertEqual(draft.description_parts[0], {"product": True})
+        self.assertNotContains(self.client.get(f"/catalog/meli/new/{draft.pk}/"), "Scraped listing's description")

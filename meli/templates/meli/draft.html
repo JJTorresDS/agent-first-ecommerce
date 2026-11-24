@@ -19,10 +19,16 @@
     {% if draft.fast %}
       <p class="muted">Fast listing: not linked to a Vimple product, so stock isn't tracked until you link one{% if scraped %} on its scraped listing{% endif %}. · {{ draft.get_status_display }} · Draft #{{ draft.pk }}</p>
     {% else %}
-      <p class="muted">{% if draft.regular %}{% if draft.combo_id %}Combo listing of{% else %}Regular listing of{% endif %} <a href="{{ draft.listed_url }}">{{ draft.listed.sku }}</a>{% else %}<a href="{{ draft.catalog_url }}" target="_blank" rel="noopener">{{ draft.catalog_product_id }}</a>{% endif %} · {{ available }} {% if draft.combo_id %}can be made from the Depósito{% else %}in stock in the Depósito{% endif %} · {{ draft.get_status_display }} · Draft #{{ draft.pk }}</p>
+      <p class="muted">{% if draft.regular %}{% if draft.combo_id %}Combo listing of{% else %}Regular listing of{% endif %} <a href="{{ draft.listed_url }}">{{ draft.listed.sku }}</a>{% else %}<a href="{{ draft.catalog_url }}" target="_blank" rel="noopener">{{ draft.catalog_product_id }}</a>{% endif %} · <span id="draft-available">{{ available }}</span> {% if draft.combo_id %}can be made from the Depósito{% else %}in stock in the Depósito{% endif %} · {{ draft.get_status_display }} · Draft #{{ draft.pk }}</p>
     {% endif %}
     {% if scraped %}
       <p class="muted competitor-line">Competitor: {% if scraped.url %}<a href="{{ scraped.url }}" target="_blank" rel="noopener">{{ scraped.title|default:scraped.external_id }}</a>{% else %}{{ scraped.title|default:scraped.external_id }}{% endif %}{% if scraped.seller %} · {{ scraped.seller }}{% endif %}{% if scraped.price is not None %} · ARS {{ scraped.price }}{% endif %}</p>
+    {% endif %}
+    {% if ready_missing %}
+      <p class="ready-notice" id="ready-notice">
+        <span id="ready-notice-text">Before posting, the product needs {{ ready_missing|join:" and " }}.</span>
+        <button type="button" class="link-button" data-ready hx-get="{% url 'meli_product_ready' draft.product_id %}?place=draft" hx-target="#ready-dialog-body" hx-swap="innerHTML">Fill in</button>
+      </p>
     {% endif %}
     {% if draft.error %}<p class="{% if draft.status == 'ready' or draft.status == 'published' %}muted{% else %}error{% endif %}">{{ draft.error }}</p>{% endif %}
     {% include "meli/_error_details.html" %}
@@ -42,13 +48,13 @@
         {% if picture_options %}
           <fieldset class="wide picture-pick">
             <legend>Pictures</legend>
-            <p class="muted">Tick the ones to post, up to 10; the first ticked is the main one.{% if scraped %} Scraped ones are another seller's photos: Mercado Libre can moderate or pause a listing that reuses them.{% endif %}</p>
+            <p class="muted">Tick the ones to post, up to 10; the first ticked is the main one. Click a picture to see it larger.{% if scraped %} Scraped ones are another seller's photos: Mercado Libre can moderate or pause a listing that reuses them.{% endif %}</p>
             {% for error in form.picture.errors %}<p class="error">{{ error }}</p>{% endfor %}
-            <div class="picture-grid">
+            <div class="picture-grid" data-zoom-group>
               {% for row in picture_options %}
                 <label class="picture-option">
                   <input type="checkbox" name="picture" value="{{ row.url }}"{% if row.checked %} checked{% endif %}>
-                  <img src="{{ row.url }}" alt="" loading="lazy">
+                  <img src="{{ row.url }}" alt="{{ row.source }} picture {{ forloop.counter }}" loading="lazy" data-zoom>
                   <span class="muted">{{ row.source }}</span>
                 </label>
               {% endfor %}
@@ -87,6 +93,7 @@
       {% endif %}
     </form>
   </section>
+  {% if ready_missing %}{% include "meli/_ready_dialog.html" %}{% endif %}
   {% if can_edit %}
     <dialog class="modal delete-dialog" id="delete-dialog" aria-labelledby="delete-dialog-title">
       <h2 id="delete-dialog-title">Delete draft #{{ draft.pk }}?</h2>
@@ -161,7 +168,7 @@
         var hasProduct = !!list.querySelector('.piece[data-part="product"]');
         document.querySelectorAll('.copy-chip[data-part="product"]').forEach(function (chip) { chip.hidden = hasProduct; });
       }
-      function makePiece(part, title) {
+      function makePiece(part, title, text) {
         var piece = document.createElement("li");
         piece.className = "piece";
         piece.draggable = true;
@@ -179,7 +186,9 @@
         piece.appendChild(head);
         if (part === "text") {
           var area = document.createElement("textarea");
-          area.name = "desc_text"; area.rows = 3; area.maxLength = 5000;
+          area.name = "desc_text"; area.maxLength = {{ text_limit|default:50000 }};
+          area.value = text || "";
+          area.rows = area.value.length > 300 ? 8 : 3;
           piece.appendChild(area);
           setTimeout(function () { area.focus(); });
         } else {
@@ -204,7 +213,7 @@
         var add = event.target.closest(".chip-add");
         if (add) {
           var chip = add.closest(".copy-chip");
-          stack().appendChild(makePiece(chip.getAttribute("data-part"), chip.getAttribute("data-title")));
+          stack().appendChild(makePiece(chip.getAttribute("data-part"), chip.getAttribute("data-title"), chip.getAttribute("data-text")));
           render();
           return;
         }
@@ -237,7 +246,7 @@
         event.preventDefault();
         var list = stack();
         list.classList.remove("drop-target");
-        var piece = dragged.classList.contains("piece") ? dragged : makePiece(dragged.getAttribute("data-part"), dragged.getAttribute("data-title"));
+        var piece = dragged.classList.contains("piece") ? dragged : makePiece(dragged.getAttribute("data-part"), dragged.getAttribute("data-title"), dragged.getAttribute("data-text"));
         var after = placeAt(event);
         if (after !== piece) list.insertBefore(piece, after);
         dragged = null;

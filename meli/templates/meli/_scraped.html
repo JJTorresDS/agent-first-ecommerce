@@ -30,7 +30,7 @@
           {% for prospect in prospects %}
             <tr>
               {% include "_bulk_check.html" with value=prospect.pk label=prospect.external_id %}
-              <td class="thumb-cell">{% if prospect.picture %}<img class="thumb" src="{{ prospect.picture }}" alt="" loading="lazy">{% else %}<span class="thumb"></span>{% endif %}</td>
+              <td class="thumb-cell">{% if prospect.picture %}<img class="thumb" src="{{ prospect.picture }}" alt="{{ prospect.title }}" loading="lazy" data-zoom>{% else %}<span class="thumb"></span>{% endif %}</td>
               <td>
                 {% if prospect.url %}<a href="{{ prospect.url }}" target="_blank" rel="noopener">{{ prospect.title|default:prospect.external_id }}</a>{% else %}{{ prospect.title|default:prospect.external_id }}{% endif %}
                 <br><span class="mono muted">{{ prospect.external_id }}</span>{% if prospect.seller %} <span class="muted">· {{ prospect.seller }}</span>{% endif %}
@@ -68,7 +68,9 @@
                 {% elif prospect.draft_id %}<a href="{% url 'meli_draft' prospect.draft_id %}">Draft #{{ prospect.draft_id }}</a>
                 {% elif prospect.status == "drafted" %}<span class="muted">Draft deleted</span>{% endif %}
                 {% if prospect.product and prospect.status != "dismissed" %}
-                  {% if prospect.reason %}<p class="muted">{{ prospect.reason }}</p>
+                  {% if prospect.reason %}
+                    <p class="muted">{{ prospect.reason }}{% if prospect.fillable %}
+                      <button type="button" class="link-button" hx-get="{% url 'meli_product_ready' prospect.product_id %}" hx-target="#ready-dialog-body" hx-swap="innerHTML">Fill in</button>{% endif %}</p>
                   {% else %}
                     <form method="post" action="{% url 'meli_draft_from_prospect' prospect.pk %}">
                       {% csrf_token %}
@@ -103,6 +105,7 @@
         </tbody>
       </table>
     </div>
+    {% include "meli/_ready_dialog.html" %}
     {% if more %}<p class="muted">Showing the newest 200. Search to find older ones.</p>{% endif %}
   {% else %}
     <p>{% if filtered %}No scraped listings match.{% else %}Nothing pending. Dismissed ones are under Show → Dismissed.{% endif %}</p>

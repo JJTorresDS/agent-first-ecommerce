@@ -1,0 +1,38 @@
+{% comment %}
+  The Fill in dialog (meli/ready_views.py). A [data-ready] button loads its form by htmx into
+  #ready-dialog-body and opens it. On a draft page a save fires product-ready: the dialog closes,
+  #ready-notice says what's left, and the quantity's max follows the new stock.
+{% endcomment %}
+<dialog class="modal" id="ready-dialog" aria-labelledby="ready-dialog-title">
+  <div id="ready-dialog-body"></div>
+</dialog>
+<script>
+  (function () {
+    if (window.vimpleReadyDialog) return;
+    window.vimpleReadyDialog = true;
+    document.body.addEventListener("htmx:afterSwap", function (event) {
+      if (event.detail.target.id !== "ready-dialog-body") return;
+      var dialog = document.getElementById("ready-dialog");
+      if (!dialog.open) dialog.showModal();
+      var first = dialog.querySelector(".needs-attention input, input:not([type=hidden])");
+      if (first) first.focus();
+    });
+    document.body.addEventListener("product-ready", function (event) {
+      var dialog = document.getElementById("ready-dialog");
+      if (dialog) dialog.close();
+      var available = event.detail.available;
+      var count = document.getElementById("draft-available");
+      if (count) count.textContent = available;
+      var quantity = document.getElementById("id_quantity");
+      if (quantity) quantity.max = Math.max(available, 1);
+      var text = document.getElementById("ready-notice-text");
+      if (text) {
+        text.textContent = event.detail.done
+          ? "Saved to the product. Save and check to use it."
+          : "Saved. Something is still missing.";
+      }
+      var button = document.querySelector("#ready-notice [data-ready]");
+      if (button) button.hidden = event.detail.done;
+    });
+  })();
+</script>

@@ -525,7 +525,7 @@
     .error-details pre { max-height: 18rem; overflow: auto; white-space: pre-wrap; word-break: break-word; font-size: 0.75rem; background: var(--gray-1); border: 1px solid var(--line); border-radius: 6px; padding: 0.6rem; margin: 0.4rem 0; }
     a.button { display: inline-block; border: 1px solid var(--line-strong); background: var(--surface); color: var(--text); border-radius: 6px; padding: 0.45rem 0.8rem; text-decoration: none; }
     a.button:active { background: var(--gray-2); }
-    .head-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    .head-actions { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
     .card-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
     .card-head h2 { margin: 0; }
     .ai-button { display: inline-flex; align-items: center; gap: 0.4rem; }
@@ -560,6 +560,13 @@
     dialog.modal h2 { font-size: 1rem; margin: 0 0 0.9rem; }
     .modal-form { display: grid; gap: 0.9rem; }
     .modal-form .actions { margin-top: 0.25rem; gap: 0.5rem; }
+    img[data-zoom] { cursor: zoom-in; }
+    dialog.zoom-modal { width: min(900px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 0.75rem; }
+    .zoom-modal figure { margin: 0; display: grid; gap: 0.5rem; }
+    .zoom-modal img { width: 100%; max-height: calc(100vh - 140px); object-fit: contain; background: var(--gray-1); border-radius: 8px; }
+    .zoom-modal .actions { justify-content: space-between; align-items: center; gap: 0.5rem; }
+    .ready-notice { display: flex; flex-wrap: wrap; gap: 0.25rem 0.5rem; align-items: baseline; padding: 0.5rem 0.75rem; border: 1px solid var(--line); border-left: 3px solid var(--neon-strong); border-radius: 6px; }
+    #ready-dialog fieldset.form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     fieldset:disabled input, fieldset:disabled select, fieldset:disabled textarea { background: var(--gray-1); color: var(--text); }
     .facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem 1rem; margin: 0; }
     .facts dt { margin: 0; }
@@ -1467,6 +1474,67 @@
       });
       // Back/forward from the browser's cache shows the page as it was left: clear the busy state.
       window.addEventListener("pageshow", reset);
+    })();
+  </script>
+  <script>
+    // Clicking an img[data-zoom] shows it large. Pictures inside one [data-zoom-group] page with
+    // Previous/Next and the arrow keys. Inside a label (the draft's picture picker) the click
+    // doesn't tick the box: the checkbox does that.
+    // The dialog is made on the first click, so pages carry no dialog they don't use.
+    (function () {
+      var dialog = null;
+      var image = null;
+      var group = [];
+      var index = 0;
+      function show() {
+        var source = group[index];
+        image.src = source.currentSrc || source.src;
+        image.alt = source.alt || "";
+        document.getElementById("zoom-count").textContent = group.length > 1 ? (index + 1) + " of " + group.length : "";
+        document.getElementById("zoom-prev").hidden = group.length < 2;
+        document.getElementById("zoom-next").hidden = group.length < 2;
+      }
+      function step(by) {
+        if (group.length < 2) return;
+        index = (index + by + group.length) % group.length;
+        show();
+      }
+      document.addEventListener("click", function (event) {
+        var picture = event.target.closest && event.target.closest("img[data-zoom]");
+        if (!picture || (dialog && dialog.contains(picture))) return;
+        event.preventDefault();
+        var holder = picture.closest("[data-zoom-group]");
+        group = holder ? Array.prototype.slice.call(holder.querySelectorAll("img[data-zoom]")) : [picture];
+        index = Math.max(0, group.indexOf(picture));
+        make();
+        show();
+        dialog.showModal();
+      });
+      function make() {
+        if (dialog) return;
+        dialog = document.createElement("dialog");
+        dialog.className = "modal zoom-modal";
+        dialog.id = "zoom-dialog";
+        dialog.setAttribute("aria-label", "Picture");
+        dialog.innerHTML =
+          '<figure><img id="zoom-image" src="" alt="">' +
+          '<figcaption class="actions">' +
+          '<button type="button" id="zoom-prev" aria-label="Previous picture">‹ Previous</button>' +
+          '<span class="muted" id="zoom-count"></span>' +
+          '<button type="button" id="zoom-next" aria-label="Next picture">Next ›</button>' +
+          '<button type="button" data-close-dialog>Close</button>' +
+          '</figcaption></figure>';
+        document.body.appendChild(dialog);
+        image = document.getElementById("zoom-image");
+        document.getElementById("zoom-prev").addEventListener("click", function () { step(-1); });
+        document.getElementById("zoom-next").addEventListener("click", function () { step(1); });
+        dialog.addEventListener("keydown", function (event) {
+          if (event.key === "ArrowLeft") step(-1);
+          if (event.key === "ArrowRight") step(1);
+        });
+        // A click on the backdrop closes it.
+        dialog.addEventListener("click", function (event) { if (event.target === dialog) dialog.close(); });
+      }
     })();
   </script>
 </body>

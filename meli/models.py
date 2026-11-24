@@ -962,6 +962,17 @@ class MeliListingProspect(models.Model):
                     found.update(group)
         return {str(name): str(value) for name, value in found.items() if str(value).strip()}
 
+    def description(self):
+        """The listing's description as the scraper sent it (description, descriptionText or
+        description.plain_text), as plain text, or ""."""
+        from django.utils.html import strip_tags
+
+        payload = self.payload if isinstance(self.payload, dict) else {}
+        found = payload.get("description") or payload.get("descriptionText") or payload.get("description_text")
+        if isinstance(found, dict):
+            found = found.get("plain_text") or found.get("plainText") or found.get("text")
+        return strip_tags(found).strip() if isinstance(found, str) else ""
+
     def gallery(self):
         images = self.payload.get("images") if isinstance(self.payload, dict) else None
         gallery = images.get("gallery") if isinstance(images, dict) else None

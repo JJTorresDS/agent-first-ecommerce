@@ -6,7 +6,10 @@
   {% include "catalog/_tabs.html" %}
   <div class="page-head">
     <h1>{% if model %}{{ model.name }}{% else %}New model{% endif %}</h1>
-    <span class="sku sku-lg" id="family-preview" data-model="{% if model %}{{ model.code }}{% endif %}">{% if model %}{{ model.family_code }}{% else %}CATEGORY-BRAND-MODEL{% endif %}</span>
+    <div class="head-actions">
+      <span class="sku sku-lg" id="family-preview" data-model="{% if model %}{{ model.code }}{% endif %}">{% if model %}{{ model.family_code }}{% else %}CATEGORY-BRAND-MODEL{% endif %}</span>
+      {% if model and can_edit %}<a class="button" href="{% url 'catalog_model_new' %}">New model</a>{% endif %}
+    </div>
   </div>
 
   <section class="card">

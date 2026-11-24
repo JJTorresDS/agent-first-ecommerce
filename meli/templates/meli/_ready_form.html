@@ -1,0 +1,21 @@
+{% comment %}The Fill in dialog's form (meli/ready_views.py). Errors come back as this form.{% endcomment %}
+<h2 id="ready-dialog-title">Fill in <span class="sku">{{ product.sku }}</span></h2>
+<p class="muted">Saved to the product, so its next listings have it too.</p>
+<form class="modal-form" hx-post="{% url 'meli_product_ready' product.pk %}" hx-target="#ready-dialog-body" hx-swap="innerHTML">
+  {% csrf_token %}
+  <input type="hidden" name="place" value="{{ place }}">
+  {% for error in form.non_field_errors %}<p class="error">{{ error }}</p>{% endfor %}
+  {% if form.list_price %}{% include "_field.html" with field=form.list_price attention=True %}{% endif %}
+  <fieldset class="form-grid">
+    <legend>Package</legend>
+    {% for field, empty in package_rows %}{% include "_field.html" with field=field attention=empty %}{% endfor %}
+  </fieldset>
+  {% if form.units %}
+    {% include "_field.html" with field=form.units attention=True %}
+    {% if found.first_count %}<p class="muted">This is your first stock count: Mercado Libre sales come off stock from now on.</p>{% endif %}
+  {% endif %}
+  <div class="actions">
+    <button type="button" data-close-dialog>Cancel</button>
+    <button type="submit" class="primary">Save</button>
+  </div>
+</form>

@@ -13,7 +13,7 @@ from catalog.forms import attribute_rows, attributes_from
 from catalog.validators import validate_attributes
 from vimple.ai import enabled as ai_enabled
 
-from .description import LIMIT, blocks_for, compose, default_parts, parts_from
+from .description import LIMIT, TEXT_LIMIT, blocks_for, compose, default_parts, parts_from, with_scraped
 from .description import warnings as description_warnings
 from catalog.models import PACKAGE_FIELDS
 
@@ -201,6 +201,7 @@ def meli_draft(request, pk):
             # The scraped listing this draft started from: the competitor shown under the price.
             "scraped": scraped,
             "picture_options": _picture_rows(draft, pictures),
+            "ready_missing": _ready_missing(organization, draft) if can_edit and not draft.locked() else [],
             **(_fix_context(draft) if fix_offered(draft, can_edit and not draft.locked()) else {}),
             "fix_count": sum(
                 len(value) if key == "attributes" and isinstance(value, dict) else 1
@@ -213,6 +214,30 @@ def meli_draft(request, pk):
             "active_tab": "meli_new",
         },
     )
+
+
+def _ready_missing(organization, draft):
+    """What the draft's product still lacks before it can post, in words, for the Fill in notice.
+
+    Product drafts only: a combo's stock is its components', and a fast draft has its own fields.
+    A catalog draft whose catalog product gave the whole package doesn't need the product's.
+    """
+    from .ready_views import gaps
+
+    if not draft.product_id or draft.kind == ListingDraft.Kind.FAST:
+        return []
+    found = gaps(organization, draft.product)
+    package = found["package"]
+    if draft.kind == ListingDraft.Kind.CATALOG and all(key in (draft.catalog_package or {}) for key, _f, _u in PACKAGE):
+        package = []
+    missing = []
+    if package:
+        missing.append("the package weight and size")
+    if found["first_count"]:
+        missing.append("a first stock count")
+    elif found["stock"]:
+        missing.append("stock in the Depósito")
+    return missing
 
 
 def _description_context(organization, draft, parts):
@@ -245,6 +270,7 @@ def _description_context(organization, draft, parts):
         "preview": preview,
         "description_warnings": description_warnings(preview),
         "description_limit": LIMIT,
+        "text_limit": TEXT_LIMIT,
     }
 
 
@@ -401,6 +427,7 @@ def _ids(values):
 
 
 PACKAGE_FIRST = "Fill in the package weight and size first."
+CONNECT_FIRST = "Connect Mercado Libre to list it."
 
 
 def _actions_context(organization, listed, can_edit, **objects):
@@ -431,7 +458,7 @@ def _listable(organization, listed, stock=None, connected=None, started=None):
     if connected is None:
         connected = MercadoLibreAccount.objects.filter(organization=organization).exists()
     if not connected:
-        return "Connect Mercado Libre to list it."
+        return CONNECT_FIRST
     if not (inventory_started(organization) if started is None else started):
         return "Count your stock first to list it."
     if not listed.list_price:
@@ -593,7 +620,7 @@ def meli_draft_from_product(request, pk):
     return _open_draft(organization, draft, template)
 
 
-def product_draft(organization, product, user, template=None, in_catalog=False, category_id="", price=None):
+def product_draft(organization, product, user, template=None, in_catalog=False, category_id="", price=None, prospect=None):
     """A new draft for one product, saved and sent to be checked: a regular listing, or in its catalog.
 
     category_id and price (a scraped listing's) win over the product's.
@@ -617,7 +644,8 @@ def product_draft(organization, product, user, template=None, in_catalog=False, 
     elif category_id and not in_catalog:
         draft.category_id = category_id
     if not in_catalog:
-        draft.description_parts = default_parts(organization, product)
+        # A product with no description of its own starts from the scraped listing's, when there is one.
+        draft.description_parts = with_scraped(default_parts(organization, product), prospect, product)
     draft.status = ListingDraft.Status.CHECKING
     draft.save()
     dispatch_drafts(organization, "check", [draft.pk])

@@ -50,6 +50,7 @@ from meli.views import (
     mercadolibre_webhook,
 )
 from meli.prospect_api import router as meli_prospect_router
+from meli.ready_views import meli_product_ready
 from meli.prospect_views import (
     meli_draft_fast,
     meli_draft_from_prospect,
@@ -114,6 +115,7 @@ urlpatterns = [
     path("catalog/meli/new/<int:pk>/fix/remove/", meli_draft_fix_remove, name="meli_draft_fix_remove"),
     path("catalog/meli/products/<uuid:pk>/", meli_product_actions, name="meli_product_actions"),
     path("catalog/meli/products/<uuid:pk>/competitors/", meli_product_competitors, name="meli_product_competitors"),
+    path("catalog/meli/products/<uuid:pk>/ready/", meli_product_ready, name="meli_product_ready"),
     path("catalog/meli/products/<uuid:pk>/draft/", meli_draft_from_product, name="meli_draft_from_product"),
     path("catalog/meli/combos/<int:pk>/", meli_combo_actions, name="meli_combo_actions"),
     path("catalog/meli/categories/", meli_categories, name="meli_categories"),

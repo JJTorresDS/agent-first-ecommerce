@@ -19,7 +19,7 @@ from accounts.access import require_app
 from accounts.models import AppAccess
 from vimple import deletion
 
-from .draft_views import READ_ONLY, _listable, _scope, product_draft
+from .draft_views import CONNECT_FIRST, READ_ONLY, _listable, _scope, product_draft
 from .models import MeliListingProspect
 from .prospects import category_in, request_categories
 
@@ -115,6 +115,8 @@ def scraped_context(request, organization, stock, connected, started):
             _listable(organization, prospect.product, stock=stock, connected=connected, started=started)
             if prospect.product else ""
         )
+        # Price, package and stock can be filled in from a dialog here; a connection can't.
+        prospect.fillable = bool(prospect.reason) and prospect.reason != CONNECT_FIRST
     return {
         "prospects": prospects,
         "more": more,
@@ -155,7 +157,8 @@ def meli_draft_from_prospect(request, pk):
         return redirect(_back(request))
     # The competitor's price is the suggestion; the product's list price when the scrape had none.
     draft = product_draft(
-        organization, prospect.product, request.user, category_id=prospect.category_id, price=prospect.price
+        organization, prospect.product, request.user, category_id=prospect.category_id, price=prospect.price,
+        prospect=prospect,
     )
     prospect.draft = draft
     prospect.status = Status.DRAFTED
@@ -204,7 +207,7 @@ def meli_draft_fast(request, pk):
     Starts with the scraped title, photos (editable, another seller's), price and category; the page copies its
     characteristics once the category's fields load. Package and a quantity are typed on the draft.
     """
-    from .description import default_parts
+    from .description import default_parts, with_scraped
     from .jobs import dispatch_drafts
     from .models import FastListed, ListingDraft, MercadoLibreAccount
 
@@ -227,7 +230,10 @@ def meli_draft_fast(request, pk):
         created_by=request.user,
     )
     # The copy blocks marked for new listings; there's no product description to start from.
-    draft.description_parts = [part for part in default_parts(organization, FastListed(draft)) if not part.get("product")]
+    # The scraped description first, when the scraper sent one.
+    draft.description_parts = with_scraped(
+        [part for part in default_parts(organization, FastListed(draft)) if not part.get("product")], prospect, None
+    )
     draft.save()
     dispatch_drafts(organization, "check", [draft.pk])
     prospect.draft = draft

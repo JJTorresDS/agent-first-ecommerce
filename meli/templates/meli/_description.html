@@ -17,6 +17,12 @@
             <button type="button" class="chip-add" aria-label="Add {{ row.title }}">+</button>
           </li>
         {% endfor %}
+        {% with scraped_text=scraped.description %}{% if scraped_text %}
+          <li class="copy-chip text-chip" draggable="true" data-part="text" data-title="Scraped listing's description" data-text="{{ scraped_text }}" title="Another seller's text: read it and change what doesn't fit your product.">
+            <span>Scraped listing's description</span>
+            <button type="button" class="chip-add" aria-label="Add the scraped listing's description">+</button>
+          </li>
+        {% endif %}{% endwith %}
         <li class="copy-chip text-chip" draggable="true" data-part="text" data-title="Free text">
           <span>Free text</span>
           <button type="button" class="chip-add" aria-label="Add free text">+</button>
@@ -40,7 +46,7 @@
             </span>
           </div>
           {% if piece.type == 'text' %}
-            <textarea name="desc_text" rows="3" maxlength="5000">{{ piece.text }}</textarea>
+            <textarea name="desc_text" rows="{% if piece.text|length > 300 %}8{% else %}3{% endif %}" maxlength="{{ text_limit }}">{{ piece.text }}</textarea>
           {% elif piece.type == 'product' %}
             <p class="piece-body muted">{{ product_text|default:"The product has no description yet." }}</p>
           {% else %}

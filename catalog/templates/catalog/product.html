@@ -7,7 +7,10 @@
   <p class="crumb"><a href="{% url 'catalog_model' product.product_model.pk %}">{{ product.product_model.name }}</a></p>
   <div class="page-head">
     <h1>{{ product.title }}</h1>
-    <span class="sku sku-lg">{{ product.sku }}</span>
+    <div class="head-actions">
+      <span class="sku sku-lg">{{ product.sku }}</span>
+      {% if can_edit %}<a class="button" href="{% url 'catalog_model_new' %}">New model</a>{% endif %}
+    </div>
   </div>
   {% if saved %}<p class="notice">Product saved.</p>{% endif %}
 
