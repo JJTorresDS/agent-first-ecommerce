@@ -120,6 +120,17 @@
     .thread-loading-box { display: flex; align-items: center; gap: 0.6rem; padding: 0.8rem 1.1rem; border-radius: 10px; background: #fff; border: 1px solid var(--line); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12); }
     .spinner { width: 1rem; height: 1rem; border: 2px solid var(--neon-soft); border-top-color: var(--neon); border-radius: 50%; animation: spin 0.7s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
+    /* Click feedback (script at the end): the pressed button spins until the answer, and a thin bar runs
+       while a page or a clicked request loads. Background polls show neither. */
+    #page-progress { position: fixed; top: 0; left: 0; height: 3px; width: 0; background: var(--neon); z-index: 1000; opacity: 0; pointer-events: none; transition: width 0.3s ease, opacity 0.3s ease; }
+    #page-progress.on { opacity: 1; width: 80%; transition: width 8s cubic-bezier(0.1, 0.7, 0.2, 1), opacity 0.1s; }
+    #page-progress.done { opacity: 0; width: 100%; transition: width 0.15s ease, opacity 0.3s ease 0.15s; }
+    button.is-busy { cursor: progress; opacity: 0.75; }
+    button.is-busy::before { content: ""; display: inline-block; width: 0.8em; height: 0.8em; margin-right: 0.4em; vertical-align: -0.1em; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 0.7s linear infinite; }
+    @media (prefers-reduced-motion: reduce) {
+      #page-progress.on { transition: opacity 0.1s; width: 100%; }
+      button.is-busy::before { animation: none; border-right-color: currentColor; opacity: 0.5; }
+    }
     .chat-list strong, .chat-list span { display: block; }
     .chat-list span { color: var(--muted); font-size: 0.85rem; margin-top: 0.2rem; }
     .chat-list .open-dot { display: inline-block; margin-top: 0; }
@@ -1369,6 +1380,93 @@
       document.addEventListener("input", function (event) {
         if (event.target.matches && event.target.matches("input[list='category-suggestions']")) show(event.target);
       });
+    })();
+  </script>
+  <div id="page-progress" aria-hidden="true"></div>
+  <script>
+    // Click feedback. A submitted form or a followed link runs the top bar and marks the pressed button busy
+    // (a spinner; no second submit) until the next page shows. An htmx request started by a click, submit or
+    // change does the same until it answers. Polls (hx-trigger every …) and typing don't.
+    (function () {
+      var bar = document.getElementById("page-progress");
+      var running = 0;
+      var lastButton = null;
+      var lastClickAt = 0;
+      function start() {
+        running += 1;
+        bar.classList.remove("done");
+        void bar.offsetWidth;
+        bar.classList.add("on");
+      }
+      function stop() {
+        running = Math.max(0, running - 1);
+        if (running) return;
+        bar.classList.remove("on");
+        bar.classList.add("done");
+      }
+      function busy(button) {
+        if (!button || button.classList.contains("is-busy")) return;
+        // Buttons with their own spinner (AI buttons) keep theirs.
+        if (button.querySelector(".htmx-indicator")) return;
+        button.classList.add("is-busy");
+        button.setAttribute("aria-busy", "true");
+      }
+      function idle(button) {
+        if (!button) return;
+        button.classList.remove("is-busy");
+        button.removeAttribute("aria-busy");
+      }
+      function reset() {
+        running = 0;
+        bar.classList.remove("on", "done");
+        document.querySelectorAll("button.is-busy").forEach(idle);
+        document.querySelectorAll("form[data-submitting]").forEach(function (form) { form.removeAttribute("data-submitting"); });
+      }
+      document.addEventListener("click", function (event) {
+        var button = event.target.closest && event.target.closest("button");
+        if (button) { lastButton = button; lastClickAt = Date.now(); }
+        var link = event.target.closest && event.target.closest("a[href]");
+        if (!link || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        if (link.target || link.hasAttribute("download") || link.hasAttribute("hx-get") || link.hasAttribute("hx-post")) return;
+        var href = link.getAttribute("href") || "";
+        if (href.charAt(0) === "#" || link.origin !== window.location.origin) return;
+        if (link.pathname === window.location.pathname && link.search === window.location.search && link.hash) return;
+        start();
+      });
+      // On window, so it runs after every other submit handler: a cancelled confirm or an htmx form is skipped.
+      window.addEventListener("submit", function (event) {
+        var form = event.target;
+        if (event.defaultPrevented) return;
+        if (form.hasAttribute("data-submitting")) { event.preventDefault(); return; }
+        form.setAttribute("data-submitting", "");
+        // Not disabled: a disabled submitter would drop its name and value from the request.
+        busy(event.submitter);
+        start();
+        // A download or a slow answer: give the page back after a while.
+        setTimeout(reset, 15000);
+      });
+      var USER = { click: 1, submit: 1, change: 1 };
+      document.body.addEventListener("htmx:beforeRequest", function (event) {
+        var trigger = event.detail.requestConfig && event.detail.requestConfig.triggeringEvent;
+        if (!trigger || !USER[trigger.type]) return;
+        var element = event.detail.elt;
+        var button = trigger.submitter || (element.tagName === "BUTTON" ? element : null);
+        if (!button && lastButton && Date.now() - lastClickAt < 1000 && (element === lastButton || element.contains(lastButton))) button = lastButton;
+        event.detail.elt.__feedbackButton = button;
+        busy(button);
+        event.detail.elt.__feedbackBar = true;
+        start();
+      });
+      document.body.addEventListener("htmx:afterRequest", function (event) {
+        var element = event.detail.elt;
+        if (!element.__feedbackBar) return;
+        element.__feedbackBar = false;
+        idle(element.__feedbackButton);
+        element.__feedbackButton = null;
+        stop();
+      });
+      // Back/forward from the browser's cache shows the page as it was left: clear the busy state.
+      window.addEventListener("pageshow", reset);
     })();
   </script>
 </body>
