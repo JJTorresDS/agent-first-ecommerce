@@ -1,7 +1,8 @@
 import json
+import uuid
 from datetime import timedelta, timezone as dt_timezone
 from urllib.error import HTTPError
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from django.conf import settings
@@ -397,6 +398,68 @@ def predict_category(access_token, site_id, text):
         f"https://api.mercadolibre.com/sites/{site}/domain_discovery/search?{query}",
         expect=list,
     )
+
+
+PICTURE_LIMIT = 10 * 1024 * 1024
+PICTURE_HOST = "mlstatic.com"
+
+
+def from_another_listing(url):
+    """A picture on Mercado Libre's own image servers (another listing's): uploaded, not sent by URL."""
+    parsed = urlparse(str(url or ""))
+    host = (parsed.hostname or "").lower()
+    return parsed.scheme in ("http", "https") and (host == PICTURE_HOST or host.endswith("." + PICTURE_HOST))
+
+
+def download_picture(url):
+    """A picture's bytes and type, only from Mercado Libre's image servers, up to 10 MB."""
+    if not from_another_listing(url):
+        raise ValueError("Only pictures on Mercado Libre's image servers are downloaded.")
+    request = Request(url, headers={"Accept": "image/*", "User-Agent": "Vimple"})
+    with urlopen(request, timeout=15) as response:
+        # A redirect must not lead anywhere but Mercado Libre's image servers.
+        final = response.geturl() if hasattr(response, "geturl") else url
+        if not from_another_listing(final):
+            raise ValueError("The picture's address led outside Mercado Libre's image servers.")
+        content = response.read(PICTURE_LIMIT + 1)
+        kind = (getattr(response, "headers", {}) or {}).get("Content-Type", "") or ""
+    if len(content) > PICTURE_LIMIT:
+        raise ValueError("The picture is larger than 10 MB.")
+    if not content:
+        raise ValueError("The picture is empty.")
+    kind = kind.split(";")[0].strip() or "image/jpeg"
+    if not kind.startswith("image/"):
+        raise ValueError(f"Not a picture ({kind}).")
+    return content, kind
+
+
+def upload_picture(access_token, content, content_type):
+    """POST /pictures/items/upload (multipart): Mercado Libre's own copy of a picture, {id, variations, …}."""
+    boundary = f"vimple{uuid.uuid4().hex}"
+    extension = {"image/png": "png", "image/webp": "webp", "image/gif": "gif"}.get(content_type, "jpg")
+    body = (
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"picture.{extension}\"\r\n"
+        f"Content-Type: {content_type}\r\n\r\n"
+    ).encode() + content + f"\r\n--{boundary}--\r\n".encode()
+    request = Request(
+        "https://api.mercadolibre.com/pictures/items/upload",
+        data=body,
+        headers={
+            "Accept": "application/json",
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=30) as response:
+            parsed = json.loads(response.read().decode() or "null")
+    except HTTPError as error:
+        payload = _error_payload(error)
+        raise MercadoLibreError(_error_reason(error, payload), error.code, payload) from None
+    if not isinstance(parsed, dict) or not parsed.get("id"):
+        raise ValueError("Mercado Libre didn't return a picture id.")
+    return parsed
 
 
 def fetch_category(access_token, category_id):

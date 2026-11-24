@@ -393,7 +393,7 @@ class FastPublishTests(PerfumeDraftCase):
         self.assertEqual(sent["BRAND"]["value_name"], "City Girl")
         self.assertEqual(sent["SELLER_PACKAGE_WEIGHT"]["value_name"], "120 g")
         # Ticked scraped photo first, then the added URL; the unticked one is left out.
-        self.assertEqual(body["pictures"], [{"source": "https://http2.mlstatic.com/b.jpg"}, {"source": "https://img.example/mine.jpg"}])
+        self.assertEqual(body["pictures"], [{"id": "PIC-2"}, {"source": "https://img.example/mine.jpg"}])
         self.assertEqual((body["available_quantity"], body["title"]), (5, "Kit pestañas descartables"))
 
         self.client.post("/catalog/meli/new/", {"action": "post", "draft": [draft.pk]})
@@ -416,7 +416,9 @@ class FastPublishTests(PerfumeDraftCase):
 
 
 @override_settings(MISTRAL_API_KEY="")
-class ScrapedPictureTests(PerfumeDraftCase):
+class ScrapedDraftCase(PerfumeDraftCase):
+    """A product draft started from a scraped listing with two photos on Mercado Libre's image servers."""
+
     def setUp(self):
         super().setUp()
         self.meli.category_attributes = [*PERFUME_ATTRIBUTES, NAME, GENDER]
@@ -434,15 +436,19 @@ class ScrapedPictureTests(PerfumeDraftCase):
             "attr_key": ["PERFUME_TYPE", "PERFUME_NAME", "GENDER"], "attr_value": ["Eau de parfum", "Kit", "Mujer"],
         })
         self.draft_row.refresh_from_db()
-        return [picture["source"] for picture in build_item(self.draft_row, defaults_for(self.organization))["pictures"]]
+        pictures = build_item(self.draft_row, defaults_for(self.organization))["pictures"]
+        return [picture.get("source") or picture.get("id") for picture in pictures]
 
+
+class ScrapedPictureTests(ScrapedDraftCase):
     def test_the_scraped_listings_pictures_can_be_picked(self):
         page = self.client.get(f"/catalog/meli/new/{self.draft_row.pk}/")
         self.assertContains(page, 'name="picture" value="https://img.example/a.jpg" checked', html=False)
         self.assertContains(page, 'name="picture" value="https://http2.mlstatic.com/s1.webp"', html=False)
         self.assertNotContains(page, 'value="https://http2.mlstatic.com/s1.webp" checked', html=False)
         sent = self.save(picture=["https://http2.mlstatic.com/s2.webp", "https://img.example/a.jpg"])
-        self.assertEqual(sent, ["https://http2.mlstatic.com/s2.webp", "https://img.example/a.jpg"])
+        # The scraped photo goes as its uploaded copy.
+        self.assertEqual(sent, ["PIC-1", "https://img.example/a.jpg"])
         # Exactly the product's again: the draft follows the product's pictures.
         self.save(picture=["https://img.example/a.jpg", "https://img.example/b.jpg"])
         self.assertEqual(self.draft_row.pictures, [])
@@ -504,3 +510,55 @@ class CategoryNameAndSuggestedPriceTests(PerfumeDraftCase):
 
 def other_product(organization):
     return product(organization, variant="99ML")
+
+
+@override_settings(MISTRAL_API_KEY="")
+class UploadAndPauseTests(ScrapedDraftCase):
+    def recheck(self):
+        from .drafts import check
+
+        ListingDraft.objects.filter(pk=self.draft_row.pk).update(status=ListingDraft.Status.CHECKING)
+        check(self.organization, [self.draft_row.pk])
+        self.draft_row.refresh_from_db()
+
+    def test_another_listings_pictures_are_uploaded_once_and_sent_by_id(self):
+        self.save(picture=["https://http2.mlstatic.com/s2.webp", "https://img.example/a.jpg"])
+        self.assertEqual(self.draft_row.status, ListingDraft.Status.READY, self.draft_row.error)
+        self.assertEqual(self.meli.downloaded, ["https://http2.mlstatic.com/s2.webp"])
+        self.assertTrue(self.meli.uploaded[0].startswith("multipart/form-data; boundary="))
+        self.assertEqual(self.draft_row.picture_ids, {"https://http2.mlstatic.com/s2.webp": "PIC-1"})
+        self.assertEqual(self.meli.validated[-1]["pictures"], [{"id": "PIC-1"}, {"source": "https://img.example/a.jpg"}])
+        self.recheck()
+        self.assertEqual(len(self.meli.uploaded), 1)
+
+        self.client.post("/catalog/meli/new/", {"action": "post", "draft": [self.draft_row.pk], "pause_after": "1"})
+        self.draft_row.refresh_from_db()
+        self.assertEqual(self.draft_row.status, ListingDraft.Status.PUBLISHED, self.draft_row.error)
+        self.assertEqual(self.meli.created[-1]["pictures"], [{"id": "PIC-1"}, {"source": "https://img.example/a.jpg"}])
+        self.assertEqual(self.meli.paused, ["MLA900"])
+        self.assertIn("Posted paused for review", self.draft_row.error)
+
+    def test_a_refused_upload_stops_the_check_with_mercado_libres_reason(self):
+        self.meli.refuse_upload = "File too small"
+        self.save(picture=["https://http2.mlstatic.com/s1.webp"])
+        self.assertEqual(self.draft_row.status, ListingDraft.Status.NEEDS_FIX)
+        self.assertEqual(self.draft_row.error, "Picture 1 couldn't be uploaded to Mercado Libre: File too small")
+        self.assertEqual(self.meli.validated, [])
+
+    def test_posting_without_the_box_ticked_leaves_it_active(self):
+        self.save(picture=["https://img.example/a.jpg"])
+        self.client.post("/catalog/meli/new/", {"action": "post", "draft": [self.draft_row.pk]})
+        self.draft_row.refresh_from_db()
+        self.assertEqual((self.draft_row.status, self.meli.paused, self.meli.downloaded), (ListingDraft.Status.PUBLISHED, [], []))
+        self.assertContains(self.client.get("/catalog/meli/new/"), 'name="pause_after"', html=False)
+
+
+class PictureHostTests(TestCase):
+    def test_only_mercado_libres_image_servers_count(self):
+        from .client import download_picture, from_another_listing
+
+        self.assertTrue(from_another_listing("https://http2.mlstatic.com/D_NQ_NP_2X_904658-F.webp"))
+        for url in ("https://mlstatic.com.evil.io/x.jpg", "https://img.example/a.jpg", "file:///etc/passwd", "ftp://http2.mlstatic.com/x"):
+            self.assertFalse(from_another_listing(url), url)
+        with self.assertRaises(ValueError):
+            download_picture("http://169.254.169.254/latest/meta-data")

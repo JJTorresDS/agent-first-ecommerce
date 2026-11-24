@@ -51,6 +51,9 @@ class FakeSellFlow:
         self.paused = []
         self.refuse_pause = False
         self.skus_set = []
+        self.downloaded = []
+        self.uploaded = []
+        self.refuse_upload = ""
 
     def _refused(self, request):
         if self.refuse_text:
@@ -85,6 +88,15 @@ class FakeSellFlow:
         url = urlparse(request.full_url)
         method = request.get_method()
         self.calls.append((method, url.path))
+        if url.hostname == "http2.mlstatic.com":
+            self.downloaded.append(request.full_url)
+            return PictureResponse(request.full_url)
+        if url.path == "/pictures/items/upload" and method == "POST":
+            if self.refuse_upload:
+                raise HTTPError(request.full_url, 400, "Bad Request", {},
+                                BytesIO(json.dumps({"message": self.refuse_upload, "error": "bad_request"}).encode()))
+            self.uploaded.append(request.headers.get("Content-type", ""))
+            return TokenResponse({"id": f"PIC-{len(self.uploaded)}", "variations": []})
         body = json.loads(request.data.decode()) if request.data else None
         if url.path == f"/products/{CATALOG}":
             return TokenResponse(
@@ -149,6 +161,27 @@ class FakeSellFlow:
             status = "paused" if "MLA900" in self.paused else "active"
             return TokenResponse([{"code": 200, "body": item("MLA900", sku=sku, status=status, catalog_listing=True)}])
         raise AssertionError(f"{method} {request.full_url}")
+
+
+class PictureResponse:
+    """An image from Mercado Libre's image servers."""
+
+    headers = {"Content-Type": "image/webp"}
+
+    def __init__(self, url):
+        self.url = url
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def geturl(self):
+        return self.url
+
+    def read(self, limit=None):
+        return b"RIFF....WEBPVP8 picture"
 
 
 class CatalogUrlTests(TestCase):

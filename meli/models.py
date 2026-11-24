@@ -628,6 +628,13 @@ class ListingDraft(ListingSettings):
     # A fast listing (kind fast, from a scraped listing) has no product: these stand in for the product's.
     title = models.CharField(max_length=255, blank=True)
     pictures = models.JSONField(default=list, blank=True, help_text="Picture URLs in order, up to 10.")
+    picture_ids = models.JSONField(
+        default=dict, blank=True,
+        help_text="Pictures uploaded to Mercado Libre, by URL: {url: picture id}. Sent by id instead of the URL.",
+    )
+    pause_after = models.BooleanField(
+        default=False, help_text="Posted, then paused at once so the seller reviews it on Mercado Libre first."
+    )
     weight_g = models.PositiveIntegerField("Weight (g)", null=True, blank=True)
     length_cm = models.DecimalField("Length (cm)", max_digits=7, decimal_places=1, null=True, blank=True)
     width_cm = models.DecimalField("Width (cm)", max_digits=7, decimal_places=1, null=True, blank=True)

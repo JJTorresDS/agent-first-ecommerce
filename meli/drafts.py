@@ -20,6 +20,7 @@ from .client import (
     fetch_catalog_product,
     fetch_category_attributes,
     only_warnings,
+    pause_item,
     post_item_description,
     predict_category,
     remove_flex,
@@ -141,8 +142,12 @@ def build_item(draft, settings, user_products=False, overrides=True):
             body["family_name"] = listed.title
         else:
             body["title"] = listed.title
-        # The draft's own pick (fast listings, or chosen from a scraped listing), else the product's.
-        body["pictures"] = [{"source": url} for url in (draft.pictures or pictures_of(listed))[:10]]
+        # The draft's own pick (fast listings, or chosen from a scraped listing), else the product's. One
+        # uploaded from another listing goes by its own picture id (upload_pictures), the rest by URL.
+        uploaded = draft.picture_ids or {}
+        body["pictures"] = [
+            {"id": uploaded[url]} if url in uploaded else {"source": url} for url in picture_urls(draft)
+        ]
         attributes.extend(package_attributes(listed))
         attributes.extend(product_attributes(draft))
     if draft.category_id:
@@ -363,6 +368,36 @@ def pictures_of(listed):
     images = getattr(listed, "images", None)
     urls = list(images.filter(organization_id=listed.organization_id).values_list("url", flat=True)) if images else []
     return urls or [listed.image_url]
+
+
+def picture_urls(draft):
+    """The pictures a regular draft posts, in order: its own pick, else its product's. Up to 10."""
+    return [url for url in (draft.pictures or pictures_of(draft.listed())) if url][:10]
+
+
+def upload_pictures(token, draft):
+    """Upload the draft's pictures that live on another listing (mlstatic.com) to Mercado Libre, once each,
+    and keep their ids on the draft, so the listing gets its own copies. Raises DraftError naming the picture."""
+    from .client import download_picture, from_another_listing, upload_picture
+
+    if draft.kind == ListingDraft.Kind.CATALOG:
+        return
+    uploaded = dict(draft.picture_ids or {})
+    changed = False
+    for position, url in enumerate(picture_urls(draft), start=1):
+        if url in uploaded or not from_another_listing(url):
+            continue
+        try:
+            content, kind = download_picture(url)
+            uploaded[url] = str(upload_picture(token, content, kind)["id"])[:64]
+        except Exception as error:
+            logger.warning("Picture %s of draft %s not uploaded: %s", position, draft.pk, describe_failure(error))
+            reason = _reason(error) if isinstance(error, (MercadoLibreError, OSError)) else str(error)
+            raise DraftError(f"Picture {position} couldn't be uploaded to Mercado Libre: {reason}") from None
+        changed = True
+    if changed:
+        draft.picture_ids = uploaded
+        draft.save(update_fields=["picture_ids", "updated_at"])
 
 
 def description_of(listed):
@@ -670,6 +705,8 @@ def _check_one(draft, token, defaults, stock, site, user_products=False):
     if problem:
         _set(draft, ListingDraft.Status.NEEDS_FIX, problem)
         return
+    # Another listing's pictures get their own copies before Mercado Libre sees the body.
+    upload_pictures(token, draft)
     body = build_item(draft, settings_of(draft, defaults), user_products)
     # All four, from the catalog product, the product's Package or an applied AI fix.
     sent = {attribute["id"] for attribute in body["attributes"]}
@@ -743,8 +780,11 @@ def _category_for(token, site, product):
     return ""
 
 
-def queue_for_posting(organization, draft_ids):
-    """Ready drafts among these become queued. Returns the ids that did; a repeated click queues nothing twice."""
+def queue_for_posting(organization, draft_ids, pause=False):
+    """Ready drafts among these become queued. Returns the ids that did; a repeated click queues nothing twice.
+
+    pause: post them paused, so the seller reviews them on Mercado Libre before they sell.
+    """
     with transaction.atomic():
         ids = list(
             ListingDraft.objects.select_for_update()
@@ -752,7 +792,7 @@ def queue_for_posting(organization, draft_ids):
             .values_list("pk", flat=True)
         )
         ListingDraft.objects.filter(pk__in=ids).update(
-            status=ListingDraft.Status.QUEUED, error="", error_details={}, updated_at=timezone.now()
+            status=ListingDraft.Status.QUEUED, error="", error_details={}, pause_after=pause, updated_at=timezone.now()
         )
     return ids
 
@@ -793,6 +833,11 @@ def publish(organization, draft_ids):
             _set(draft, ListingDraft.Status.FAILED, problem)
             continue
         settings = settings_of(draft, defaults)
+        try:
+            upload_pictures(token, draft)
+        except DraftError as error:
+            _set(draft, ListingDraft.Status.FAILED, str(error))
+            continue
         body = build_item(draft, settings, user_products)
         try:
             item = create_item(token, body)
@@ -821,6 +866,15 @@ def publish(organization, draft_ids):
             note = posted(organization, draft, token)
             if note:
                 notes.append(note)
+        elif draft.pause_after:
+            # Paused before anything else, so it doesn't sell before the seller has looked at it.
+            try:
+                pause_item(token, draft.item_id)
+            except Exception as error:
+                logger.warning("Listing %s was posted but not paused for review: %s", draft.item_id, describe_failure(error))
+                notes.append(f"Posted, but it couldn't be paused for review: {_reason(error)} It's live: pause it on Mercado Libre if it isn't ready.")
+            else:
+                notes.append("Posted paused for review: reactivate it from Listings when it looks right.")
         if description:
             draft.posted_description = description
             draft.save(update_fields=["posted_description", "updated_at"])

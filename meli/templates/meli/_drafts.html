@@ -44,6 +44,9 @@
       {% if can_edit %}
         <div class="actions drafts-actions">
           <button type="button" class="danger-link link-button" data-dialog="delete-drafts-dialog">Delete selected</button>
+          <label class="check-label pause-after" title="Each listing is paused right after it's posted, so nothing sells until you reactivate it from Listings.">
+            <input type="checkbox" name="pause_after" value="1"> Post paused, to review on Mercado Libre first
+          </label>
           <button type="submit" name="action" value="post"{% if not ready_count %} disabled{% endif %}>Post selected</button>
           <button class="accent" type="submit" name="action" value="post_all"{% if not ready_count %} disabled{% endif %}>Post all ready ({{ ready_count }})</button>
         </div>

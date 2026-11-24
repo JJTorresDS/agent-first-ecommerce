@@ -98,7 +98,9 @@ def meli_drafts(request):
         rows = ListingDraft.objects.filter(organization=organization, status=ListingDraft.Status.READY)
         if action == "post":
             rows = rows.filter(pk__in=_ids(request.POST.getlist("draft")))
-        queued = queue_for_posting(organization, list(rows.values_list("pk", flat=True)))
+        queued = queue_for_posting(
+            organization, list(rows.values_list("pk", flat=True)), pause=bool(request.POST.get("pause_after"))
+        )
         dispatch_drafts(organization, "publish", queued)
         return redirect("meli_drafts")
     drafts = list(
