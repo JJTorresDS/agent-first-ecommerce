@@ -760,6 +760,11 @@ def _run_drafts_payload(payload):
 
             apply_change(organization, job.get("change_id"))
             return
+        if job.get("action") == "prospect_categories":
+            from .prospects import find_categories
+
+            find_categories(organization, [int(pk) for pk in job.get("prospect_ids") or []])
+            return
         if job.get("action") == "template":
             from .listing_templates import pause_marked
 

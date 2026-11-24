@@ -865,6 +865,14 @@ class MeliListingProspect(models.Model):
     picture = models.CharField(max_length=1024, blank=True)
     seller = models.CharField(max_length=128, blank=True, help_text="Who sells it on Mercado Libre.")
     scraped_at = models.DateTimeField(null=True, blank=True)
+    category_id = models.CharField(
+        max_length=32, blank=True, help_text="Its Mercado Libre category: the scraper's categoryId, else Mercado Libre's guess from the title."
+    )
+    category_path = models.CharField(max_length=500, blank=True, help_text="Belleza y Cuidado Personal > Maquillaje > …")
+    category_checked_at = models.DateTimeField(
+        null=True, blank=True, help_text="When the worker last looked the category up; empty means it's still to do."
+    )
+    category_error = models.CharField(max_length=300, blank=True, help_text="Mercado Libre's reason, never a token.")
     payload = models.JSONField(default=dict)
     product = models.ForeignKey(
         "catalog.MasterProduct",

@@ -34,6 +34,14 @@
               <td>
                 {% if prospect.url %}<a href="{{ prospect.url }}" target="_blank" rel="noopener">{{ prospect.title|default:prospect.external_id }}</a>{% else %}{{ prospect.title|default:prospect.external_id }}{% endif %}
                 <br><span class="mono muted">{{ prospect.external_id }}</span>{% if prospect.seller %} <span class="muted">· {{ prospect.seller }}</span>{% endif %}
+                <p class="scraped-category">
+                  {% if prospect.category_id %}<span class="mono">{{ prospect.category_id }}</span>{% if prospect.category_path %} <span class="muted">· {{ prospect.category_path }}</span>{% endif %}{% endif %}
+                  {% if prospect.category_error %}<span class="error">{{ prospect.category_error }}</span>
+                  {% elif not prospect.category_checked_at %}<span class="muted">Finding its category…</span>{% endif %}
+                  {% if prospect.category_error or prospect.category_checked_at and not prospect.category_id %}
+                    <button type="submit" form="scraped-category-{{ prospect.pk }}" class="link-button">Try again</button>
+                  {% endif %}
+                </p>
                 {% with characteristics=prospect.characteristics %}
                   {% if characteristics %}
                     <details>
@@ -69,6 +77,12 @@
                     </form>
                   {% endif %}
                 {% endif %}
+                <form method="post" action="{% url 'meli_drafts' %}" id="scraped-category-{{ prospect.pk }}" hidden>
+                  {% csrf_token %}
+                  <input type="hidden" name="action" value="scraped_category">
+                  <input type="hidden" name="prospect" value="{{ prospect.pk }}">
+                  <input type="hidden" name="next" value="{{ back }}">
+                </form>
                 <form method="post" action="{% url 'meli_drafts' %}">
                   {% csrf_token %}
                   <input type="hidden" name="action" value="{% if prospect.status == 'dismissed' %}scraped_restore{% else %}scraped_dismiss{% endif %}">

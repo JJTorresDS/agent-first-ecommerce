@@ -200,8 +200,6 @@ def adapt_attributes(source_title, source, target, schema):
     source: [{id, name, value}] from one of the seller's listings; target: the new product's own data;
     schema: {id: {type, values}} from Mercado Libre. Only values on its list (in its spelling) are kept.
     """
-    from meli.drafts import NUMBER_UNIT
-
     answer = ai.complete_json(
         ADAPT_PROMPT,
         {
@@ -214,7 +212,17 @@ def adapt_attributes(source_title, source, target, schema):
             },
         },
     )
-    asked = {item["id"] for item in source}
+    values, dropped = _allowed(answer, {item["id"] for item in source}, schema)
+    reasons = answer.get("dropped") if isinstance(answer.get("dropped"), dict) else {}
+    for key in {item["id"] for item in source} - set(values) - set(dropped):
+        dropped[key] = " ".join(str(reasons.get(key) or "describes the other product").split())[:120]
+    return values, dropped
+
+
+def _allowed(answer, asked, schema):
+    """The answer's values Mercado Libre takes: ({id: value}, {id: why one was refused})."""
+    from meli.drafts import NUMBER_UNIT
+
     values, dropped = {}, {}
     answered = answer.get("values") if isinstance(answer.get("values"), dict) else {}
     for key, raw in answered.items():
@@ -232,10 +240,34 @@ def adapt_attributes(source_title, source, target, schema):
             dropped[key] = "needs a number and a unit"
             continue
         values[key] = value
-    reasons = answer.get("dropped") if isinstance(answer.get("dropped"), dict) else {}
-    for key in asked - set(values) - set(dropped):
-        dropped[key] = " ".join(str(reasons.get(key) or "describes the other product").split())[:120]
     return values, dropped
+
+
+SCRAPED_PROMPT = (
+    "You fill Mercado Libre listing attributes, in Spanish (Argentina), for a seller's product from a listing "
+    "of the same product that another seller has on Mercado Libre.\n"
+    "You get scraped_listing (its title and characteristics, as the page shows them: name and value), "
+    "target_product (the seller's own title, brand, description and attributes) and attributes (the empty "
+    "fields of the category: id, name, value_type, allowed_values).\n"
+    "Fill every attribute the scraped listing states, by its characteristics or its title: match by meaning, "
+    "not only by name (\"Es un producto hipoalergénico: Sí\" fills an attribute about being hypoallergenic). "
+    "Where the target product's own data differs, it wins. Never invent facts neither gives.\n"
+    "When allowed_values is not empty, use exactly one of them, copied as written. A number_unit value is a "
+    "number and a unit, like 30 mL. A boolean is Sí or No.\n"
+    "Return ONLY a JSON object: {\"values\": {attribute id: value}}."
+)
+
+
+def fill_from_scraped(scraped, target, attributes, schema):
+    """Values for the empty attributes from a scraped listing: ({id: value}, {id: why a value was refused}).
+
+    scraped: {title, characteristics}; attributes: [{id, name, value_type, allowed_values}] still empty;
+    schema: {id: {type, values}} from Mercado Libre. Only values on its list (in its spelling) are kept.
+    """
+    answer = ai.complete_json(
+        SCRAPED_PROMPT, {"scraped_listing": scraped, "target_product": target, "attributes": attributes}
+    )
+    return _allowed(answer, {item["id"] for item in attributes}, schema)
 
 
 FIX_PROMPT = (

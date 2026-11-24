@@ -399,6 +399,12 @@ def predict_category(access_token, site_id, text):
     )
 
 
+def fetch_category(access_token, category_id):
+    """One category: id, name and path_from_root [{id, name}, …]."""
+    category = quote(str(category_id), safe="")
+    return _api_request(access_token, f"https://api.mercadolibre.com/categories/{category}", expect=dict)
+
+
 def fetch_category_attributes(access_token, category_id):
     category = quote(str(category_id), safe="")
     return _api_request(

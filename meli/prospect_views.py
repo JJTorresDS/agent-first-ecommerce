@@ -7,7 +7,7 @@ scraped listing's characteristics once its category's attributes load.
 
 from django.contrib import messages
 from django.db.models import Q
-from django.http import HttpResponseForbidden
+from django.http import HttpResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -19,6 +19,7 @@ from vimple import deletion
 
 from .draft_views import READ_ONLY, _listable, _scope, product_draft
 from .models import MeliListingProspect
+from .prospects import category_in, request_categories
 
 Status = MeliListingProspect.Status
 SHOWN = [(Status.PENDING, "Pending"), (Status.DRAFTED, "Draft started"), (Status.DISMISSED, "Dismissed"), ("all", "All")]
@@ -68,6 +69,12 @@ def scraped_post(request, organization):
     prospect = get_object_or_404(rows, pk=request.POST.get("prospect"))
     if action == "scraped_link":
         _link(request, organization, prospect)
+    elif action == "scraped_category":
+        # Look it up again: the scraper's category, else a new guess from the title.
+        prospect.category_id = category_in(prospect.payload) if isinstance(prospect.payload, dict) else ""
+        prospect.category_path, prospect.category_checked_at, prospect.category_error = "", None, ""
+        prospect.save(update_fields=["category_id", "category_path", "category_checked_at", "category_error", "updated_at"])
+        request_categories(organization, [prospect])
     else:
         prospect.status = Status.DISMISSED if action == "scraped_dismiss" else (
             Status.DRAFTED if prospect.draft_id else Status.PENDING
@@ -90,6 +97,8 @@ def scraped_context(request, organization, stock, connected, started):
     prospects = list(rows.select_related("product", "draft")[:PAGE + 1])
     more = len(prospects) > PAGE
     prospects = prospects[:PAGE]
+    # Rows stored before categories were looked up, or whose job was lost, are queued again.
+    request_categories(organization, prospects)
     for prospect in prospects:
         # stock, connected and started are read once for every row.
         prospect.reason = (
@@ -134,8 +143,41 @@ def meli_draft_from_prospect(request, pk):
     if reason:
         messages.warning(request, f"{prospect.product.sku}: {reason}")
         return redirect(_back(request))
-    draft = product_draft(organization, prospect.product, request.user)
+    draft = product_draft(organization, prospect.product, request.user, category_id=prospect.category_id)
     prospect.draft = draft
     prospect.status = Status.DRAFTED
     prospect.save(update_fields=["draft", "status", "updated_at"])
     return redirect(f"{reverse('meli_draft', args=[draft.pk])}?prospect={prospect.pk}")
+
+
+@require_app(AppAccess.App.CATALOG)
+@require_POST
+def meli_draft_scraped_copy(request, pk):
+    """Copy from a listing → the scraped listing: its category, then (once the fields load) its characteristics.
+
+    Keeps what the user typed. A new category is checked again in the worker; the draft page waits for its
+    fields and copies (?prospect=). Same category: the page copies at once.
+    """
+    from .draft_views import posted_attributes
+    from .jobs import dispatch_drafts
+    from .models import ListingDraft
+
+    organization, can_edit = _scope(request)
+    if not can_edit:
+        return HttpResponseForbidden(READ_ONLY)
+    draft = get_object_or_404(ListingDraft, organization=organization, pk=pk)
+    if draft.locked() or not draft.regular():
+        return HttpResponseForbidden("Posted drafts can't change.")
+    prospect = get_object_or_404(MeliListingProspect, organization=organization, pk=request.POST.get("prospect"))
+    draft.attributes = posted_attributes(request.POST)
+    fields = ["attributes", "updated_at"]
+    if prospect.category_id and prospect.category_id != draft.category_id and not draft.template:
+        draft.category_id, draft.category_schema = prospect.category_id, []
+        draft.status, draft.error, draft.error_details = ListingDraft.Status.CHECKING, "", {}
+        fields += ["category_id", "category_schema", "status", "error", "error_details"]
+    draft.save(update_fields=fields)
+    if "status" in fields:
+        dispatch_drafts(organization, "check", [draft.pk])
+    response = HttpResponse(status=204)
+    response["HX-Redirect"] = f"{reverse('meli_draft', args=[draft.pk])}?prospect={prospect.pk}"
+    return response

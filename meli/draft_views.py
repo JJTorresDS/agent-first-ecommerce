@@ -36,7 +36,7 @@ from .models import ListingDraft, ListingTemplate, MercadoLibreAccount, MeliList
 
 READ_ONLY = "Only owners and admins can create Mercado Libre listings."
 # Create listing → From a scraped listing posts these here (meli/prospect_views.py).
-SCRAPED_ACTIONS = {"scraped_link", "scraped_dismiss", "scraped_restore", "dismiss_selected", "restore_selected", "delete_selected"}
+SCRAPED_ACTIONS = {"scraped_category", "scraped_link", "scraped_dismiss", "scraped_restore", "dismiss_selected", "restore_selected", "delete_selected"}
 
 
 def _scope(request):
@@ -347,7 +347,7 @@ def _attributes_context(organization, draft, attributes, error, **extra):
         "copy_sources": copy_sources(organization, draft) if ai and not draft.template else [],
         # A draft started from a prospect can copy it again, e.g. after its category changed.
         "copy_prospect": MeliListingProspect.objects.filter(organization=organization, draft=draft)
-        .only("pk", "title", "external_id").first() if ai and not draft.template else None,
+        .only("pk", "title", "external_id", "category_id", "category_path").first() if ai and not draft.template else None,
         "attributes": free,
         "guided_required": required,
         "guided_recommended": recommended,
@@ -567,8 +567,11 @@ def meli_draft_from_product(request, pk):
     return _open_draft(organization, draft, template)
 
 
-def product_draft(organization, product, user, template=None, in_catalog=False):
-    """A new draft for one product, saved and sent to be checked: a regular listing, or in its catalog."""
+def product_draft(organization, product, user, template=None, in_catalog=False, category_id=""):
+    """A new draft for one product, saved and sent to be checked: a regular listing, or in its catalog.
+
+    category_id (a scraped listing's) wins over the product's.
+    """
     from .jobs import dispatch_drafts
 
     draft = ListingDraft(
@@ -585,6 +588,8 @@ def product_draft(organization, product, user, template=None, in_catalog=False):
         draft.catalog_url = f"https://www.mercadolibre.com.ar/p/{product.meli_catalog_product_id}"
     if template is not None:
         draft.category_id = template.category_id
+    elif category_id and not in_catalog:
+        draft.category_id = category_id
     if not in_catalog:
         draft.description_parts = default_parts(organization, product)
     draft.status = ListingDraft.Status.CHECKING
@@ -713,9 +718,9 @@ def _save_to_product(product, attributes):
 @require_app(AppAccess.App.CATALOG)
 @require_POST
 def meli_draft_copy(request, pk):
-    """Values for the draft's empty attributes, adapted by AI from one of this organization's listings.
+    """Values for the draft's empty attributes, by AI from one of this organization's listings or a scraped listing.
 
-    Reads the listing as stored by the sync: no Mercado Libre call. Nothing is saved.
+    Reads the listing as stored by the sync, or the scraped JSON: no Mercado Libre call. Nothing is saved.
     """
     from catalog.suggest import adapt_attributes
     from vimple import ai
@@ -733,45 +738,61 @@ def meli_draft_copy(request, pk):
     attributes = posted_attributes(request.POST)
     draft.attributes = attributes
     schema = {item["id"]: item for item in draft.category_schema or []}
-    if request.POST.get("prospect"):
-        # A scraped listing: its characteristics by name ("Color"), matched to this category's attributes.
-        from .prospects import offered_from
-
-        source = get_object_or_404(MeliListingProspect, organization=organization, pk=request.POST["prospect"])
-        candidates = offered_from(source, schema)
-    else:
-        source = get_object_or_404(MeliListing, organization=organization, pk=request.POST.get("listing"))
-        candidates = []
-        for attribute in source.payload.get("attributes") or []:
-            key = str(attribute.get("id") or "") if isinstance(attribute, dict) else ""
-            if key in schema:
-                candidates.append((key, str(attribute.get("name") or schema[key]["name"])[:100],
-                                   " ".join(str(attribute.get("value_name") or "").split())[:200]))
     listed = draft.listed()
     current = {**(getattr(listed, "attributes", None) or {}), **attributes}
-    offered = []
-    for key, name, value in candidates:
+    brand, _model = brand_and_model(listed)
+    model = getattr(listed, "product_model", None)
+    target = {
+        "title": listed.title[:300],
+        "brand": brand,
+        "description": ((model.description if model else listed.description) or "")[:1500],
+        "attributes": current,
+    }
+
+    def empty(key):
         # Only what this category asks for and the draft doesn't have yet; never the other item's identity.
-        if (not value or key in OWN_ATTRIBUTES or key in NOT_GUIDED
-                or schema[key].get("hidden") or current.get(key) not in (None, "")):
-            continue
-        offered.append({"id": key, "name": name, "value": value})
+        return (key in schema and key not in OWN_ATTRIBUTES and key not in NOT_GUIDED
+                and not schema[key].get("hidden") and current.get(key) in (None, ""))
+
     copied, dropped, note = {}, {}, ""
-    if not offered:
-        note = f"Nothing to copy from “{source.title}”: it has no values for the fields still empty here."
+    if request.POST.get("prospect"):
+        # A scraped listing: AI fills every empty field its title and characteristics state.
+        from catalog.suggest import fill_from_scraped
+
+        source = get_object_or_404(MeliListingProspect, organization=organization, pk=request.POST["prospect"])
+        offered = [
+            {"id": key, "name": item["name"], "value_type": item.get("type", ""), "allowed_values": (item.get("values") or [])[:150]}
+            for key, item in schema.items() if empty(key)
+        ]
+        characteristics = source.characteristics()
+        if not offered:
+            note = "Every field here already has a value."
+        elif not characteristics and not source.title:
+            note = f"Nothing to copy from “{source.external_id}”: it has no title or characteristics."
+        else:
+            try:
+                copied, dropped = fill_from_scraped(
+                    {"title": source.title[:300], "characteristics": characteristics}, target, offered, schema
+                )
+            except ai.SuggestionFailed:
+                note = "The copy didn't come through; try again or fill them in yourself."
+            if not note and not copied and not dropped:
+                note = f"Nothing to copy from “{source.title}”: it doesn't state any of the fields still empty here."
     else:
-        brand, _model = brand_and_model(listed)
-        model = getattr(listed, "product_model", None)
-        target = {
-            "title": listed.title[:300],
-            "brand": brand,
-            "description": ((model.description if model else listed.description) or "")[:1500],
-            "attributes": current,
-        }
-        try:
-            copied, dropped = adapt_attributes(source.title, offered, target, schema)
-        except ai.SuggestionFailed:
-            note = "The copy didn't come through; try again or fill them in yourself."
+        source = get_object_or_404(MeliListing, organization=organization, pk=request.POST.get("listing"))
+        offered = []
+        for attribute in source.payload.get("attributes") or []:
+            key = str(attribute.get("id") or "") if isinstance(attribute, dict) else ""
+            value = " ".join(str(attribute.get("value_name") or "").split())[:200] if key else ""
+            if value and empty(key):
+                offered.append({"id": key, "name": str(attribute.get("name") or schema[key]["name"])[:100], "value": value})
+        if not offered:
+            note = f"Nothing to copy from “{source.title}”: it has no values for the fields still empty here."
+        else:
+            try:
+                copied, dropped = adapt_attributes(source.title, offered, target, schema)
+            except ai.SuggestionFailed:
+                note = "The copy didn't come through; try again or fill them in yourself."
     names = {item["id"]: item["name"] for item in offered}
     rows = {**attributes, **copied}
     return render(

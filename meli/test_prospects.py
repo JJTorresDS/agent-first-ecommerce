@@ -74,6 +74,19 @@ class ProspectApiTests(TestCase):
         self.assertEqual((prospect.price, prospect.status), (Decimal("14000"), MeliListingProspect.Status.DISMISSED))
         self.assertEqual(MeliListingProspect.objects.count(), 1)
 
+    def test_the_same_product_id_replaces_the_json(self):
+        self.assertEqual(self.post(SCRAPED).status_code, 201)
+        newer = {"id": "another-id", "productId": "MLAU3250631132", "title": "Kit nuevo", "currentPrice": 9000}
+        response = self.post([newer])
+        self.assertEqual((response.status_code, response.json()["updated"]), (200, 1))
+        prospect = MeliListingProspect.objects.get()
+        self.assertEqual(prospect.payload, newer)
+        self.assertEqual((prospect.title, prospect.price), ("Kit nuevo", Decimal("9000")))
+        # Any productId keys it, as sent; snake_case too.
+        self.assertEqual(self.post({"product_id": "sku-123", "title": "Otro"}).status_code, 201)
+        self.assertEqual(MeliListingProspect.objects.filter(external_id="sku-123").count(), 1)
+        self.assertEqual(self.post({"productId": "x" * 33}).status_code, 422)
+
     def test_the_id_can_come_from_the_page_url(self):
         entry = {"title": "Item page", "pageUrl": "https://articulo.mercadolibre.com.ar/MLA-1234567890-perfume-_JM"}
         self.assertEqual(self.post(entry).status_code, 201)
@@ -169,13 +182,22 @@ class ProspectPageTests(PerfumeDraftCase):
         page = self.client.get(f"/catalog/meli/new/{draft.pk}/?prospect={self.prospect.pk}")
         self.assertContains(page, f'hx-vals=\'{{"prospect": "{self.prospect.pk}"}}\'', html=False)
 
-        fake = FakeMistral({"values": {"PERFUME_NAME": "885", "GENDER": "Mujer"}, "dropped": {}})
+        # The scraped listing's category, looked up when the tab opened (a guess from its title here).
+        self.assertEqual(draft.category_id, self.prospect.category_id)
+        self.assertEqual(self.prospect.category_path, "Belleza y Cuidado Personal > Perfumes")
+
+        fake = FakeMistral({"values": {"PERFUME_NAME": "Yara", "GENDER": "mujer", "PERFUME_TYPE": "Colonia"}})
         with patch("vimple.ai.urlopen", side_effect=fake):
             copied = self.client.post(f"/catalog/meli/new/{draft.pk}/copy/", {"prospect": self.prospect.pk})
         sent = json.loads(fake.asked[0]["messages"][1]["content"])
-        # Matched by name; never the other seller's brand, and nothing the category doesn't have.
-        self.assertEqual(sorted(item["id"] for item in sent["source_listing"]["attributes"]), ["GENDER", "PERFUME_NAME"])
+        # Every characteristic goes; the AI fills the empty fields by meaning, never brand or what the product has.
+        self.assertEqual(sent["scraped_listing"]["characteristics"]["Material"], "Vidrio")
+        asked = {item["id"] for item in sent["attributes"]}
+        self.assertTrue({"GENDER", "PERFUME_NAME", "PERFUME_TYPE"} <= asked)
+        self.assertFalse(asked & {"BRAND", "MODEL", "GTIN", "UNIT_VOLUME", "OLFACTORY_NOTES", "SELLER_SKU"})
         self.assertContains(copied, "Copied 2 values")
+        self.assertContains(copied, '<option value="Mujer" selected>Mujer</option>', html=False)
+        self.assertContains(copied, "<strong>Tipo de perfume</strong>: not one of Mercado Libre&#x27;s values", html=False)
 
         other = shared_seller("Other", user_id="777")
         theirs = prospect_for(other, external_id="MLAU999")
@@ -204,6 +226,66 @@ class ProspectPageTests(PerfumeDraftCase):
         self.prospect.save()
         self.assertNotContains(self.client.get(f"/catalog/meli/new/{draft.pk}/"), '<span class="pill">Scraped listing</span>', html=False)
         empty = prospect_for(self.organization, external_id="MLAU5", payload={"characteristics": {"Marca": "Lattafa"}})
-        copied = self.client.post(f"/catalog/meli/new/{draft.pk}/copy/", {"prospect": empty.pk})
+        with patch("vimple.ai.urlopen", side_effect=FakeMistral({"values": {}})):
+            copied = self.client.post(f"/catalog/meli/new/{draft.pk}/copy/", {"prospect": empty.pk})
         self.assertContains(copied, "Nothing to copy from")
         self.assertNotContains(copied, "Copied 0 values")
+
+    def test_copying_from_the_scraped_listing_switches_to_its_category_then_copies(self):
+        self.prospect.product = self.product
+        self.prospect.save()
+        self.client.post(f"/catalog/meli/new/scraped/{self.prospect.pk}/")
+        draft = self.draft()
+        MeliListingProspect.objects.filter(pk=self.prospect.pk).update(category_id="MLA5555", category_path="Belleza > Pestañas")
+        page = self.client.get(f"/catalog/meli/new/{draft.pk}/")
+        self.assertContains(page, "Switches this draft to its category, MLA5555 (Belleza &gt; Pestañas)")
+        response = self.client.post(
+            f"/catalog/meli/new/{draft.pk}/scraped/", {"prospect": self.prospect.pk, "attr_key": ["PERFUME_NAME"], "attr_value": ["Mío"]}
+        )
+        self.assertEqual(response["HX-Redirect"], f"/catalog/meli/new/{draft.pk}/?prospect={self.prospect.pk}")
+        draft.refresh_from_db()
+        self.assertEqual(draft.category_id, "MLA5555")
+        self.assertEqual(draft.attributes, {"PERFUME_NAME": "Mío"})
+        self.assertIn("MLA5555", self.meli.categories_read)
+        other = shared_seller("Other", user_id="777")
+        theirs = prospect_for(other, external_id="MLAU999", category_id="MLA7777")
+        self.assertEqual(self.client.post(f"/catalog/meli/new/{draft.pk}/scraped/", {"prospect": theirs.pk}).status_code, 404)
+        draft.refresh_from_db()
+        self.assertEqual(draft.category_id, "MLA5555")
+
+
+class ScrapedCategoryTests(PerfumeDraftCase):
+    def store(self, entry):
+        from .prospects import store
+
+        with self.captureOnCommitCallbacks(execute=True):
+            return store(self.organization, entry)[0][0]
+
+    def test_the_scrapers_category_is_used_and_its_path_read(self):
+        prospect = self.store({**SCRAPED[0], "categoryId": "mla5555"})
+        prospect.refresh_from_db()
+        self.assertEqual((prospect.category_id, prospect.category_path), ("MLA5555", "Belleza y Cuidado Personal > Perfumes"))
+        self.assertEqual(self.meli.discovered, [])
+
+    def test_without_one_mercado_libre_guesses_from_the_title_and_the_tab_shows_it(self):
+        prospect = self.store(SCRAPED[0])
+        prospect.refresh_from_db()
+        self.assertEqual(self.meli.discovered, [SCRAPED[0]["title"]])
+        self.assertEqual(prospect.category_id, "MLA9999")
+        page = self.client.get(PAGE_URL)
+        self.assertContains(page, '<span class="mono">MLA9999</span> <span class="muted">· Belleza y Cuidado Personal &gt; Perfumes</span>', html=False)
+        # The same page again keeps it; a new title looks it up again.
+        self.store(SCRAPED[0])
+        self.assertEqual(len(self.meli.discovered), 1)
+        self.store({**SCRAPED[0], "title": "Pestañas pelo a pelo"})
+        self.assertEqual(self.meli.discovered[-1], "Pestañas pelo a pelo")
+
+    def test_a_failed_lookup_shows_why_and_can_be_tried_again(self):
+        with patch("meli.drafts._token", side_effect=OSError("down")):
+            prospect = self.store(SCRAPED[0])
+        prospect.refresh_from_db()
+        self.assertEqual(prospect.category_error, "Couldn't look it up: Mercado Libre didn't answer. Try again.")
+        self.assertContains(self.client.get(PAGE_URL), "Try again")
+        self.client.post("/catalog/meli/new/", {"action": "scraped_category", "prospect": prospect.pk})
+        prospect.refresh_from_db()
+        self.assertEqual((prospect.category_id, prospect.category_error), ("MLA9999", ""))

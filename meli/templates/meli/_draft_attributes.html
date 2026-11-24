@@ -28,8 +28,9 @@
       <h2 id="copy-dialog-title">Copy from a listing</h2>
       <p class="muted">AI keeps what's true of this product too, rewrites what described the other one (name, volume), and leaves out the rest. It only fills empty fields; you review before saving.</p>
       {% if copy_prospect %}
-        <p><button type="button" class="link-button" hx-post="{% url 'meli_draft_copy' draft.pk %}" hx-include="#draft-form" hx-vals='{"prospect": "{{ copy_prospect.pk }}"}' hx-target="#draft-attributes" hx-swap="outerHTML" hx-sync="closest dialog:drop">{{ copy_prospect.title|default:copy_prospect.external_id }}</button>
+        <p><button type="button" class="link-button" hx-post="{% url 'meli_draft_scraped_copy' draft.pk %}" hx-include="#draft-form" hx-vals='{"prospect": "{{ copy_prospect.pk }}"}' hx-swap="none" hx-sync="closest dialog:drop">{{ copy_prospect.title|default:copy_prospect.external_id }}</button>
           <span class="pill">Scraped listing</span> <span class="spinner htmx-indicator" aria-hidden="true"></span></p>
+        {% if copy_prospect.category_id and copy_prospect.category_id != draft.category_id %}<p class="muted">Switches this draft to its category, {{ copy_prospect.category_id }}{% if copy_prospect.category_path %} ({{ copy_prospect.category_path }}){% endif %}, then copies once that category's fields load.</p>{% endif %}
       {% endif %}
       {% if copy_sources %}
         <input type="search" class="copy-filter" placeholder="Filter by title or SKU" aria-label="Filter listings">

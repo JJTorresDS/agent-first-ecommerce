@@ -5,8 +5,8 @@ A scrape of the same page again (organization + Mercado Libre's id) replaces the
 user did with it: its status, product and draft.
 """
 
+import logging
 import re
-import unicodedata
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
@@ -15,8 +15,11 @@ from django.utils.dateparse import parse_datetime
 
 from .models import MeliListingProspect
 
+logger = logging.getLogger(__name__)
+
 # MLAU3250631132 (a user product page, /up/…) or MLA1234567 / MLA-1234567 (an item page).
 MELI_ID = re.compile(r"\b(ML[A-Z]U?)-?(\d{6,})\b")
+CATEGORY = re.compile(r"ML[A-Z]\d+")
 LIMIT = 100
 
 
@@ -29,10 +32,18 @@ def _text(value, limit):
 
 
 def _meli_id(entry):
-    for key in ("id", "productId"):
-        found = MELI_ID.fullmatch(str(entry.get(key) or "").strip().upper())
-        if found:
-            return found.group(1) + found.group(2)
+    """The scraped listing's key: productId (or product_id) as sent, else a Mercado Libre id in id or the page's URL.
+
+    A second listing with the same key replaces the stored JSON.
+    """
+    for key in ("productId", "product_id"):
+        value = str(entry.get(key) or "").strip()
+        if value:
+            found = MELI_ID.fullmatch(value.upper())
+            return found.group(1) + found.group(2) if found else value
+    found = MELI_ID.fullmatch(str(entry.get("id") or "").strip().upper())
+    if found:
+        return found.group(1) + found.group(2)
     for key in ("pageUrl", "productUrl", "url", "permalink"):
         found = MELI_ID.search(str(entry.get(key) or "").upper())
         if found:
@@ -66,11 +77,13 @@ def fields_of(entry):
         raise ProspectError("Each listing must be a JSON object.")
     external_id = _meli_id(entry)
     if not external_id:
-        raise ProspectError("No Mercado Libre id: send id (MLAU… or MLA…) or the page's pageUrl.")
+        raise ProspectError("No product id: send productId (MLAU… or MLA…), or id, or the page's pageUrl.")
+    if len(external_id) > 32:
+        raise ProspectError("productId is longer than 32 characters.")
     images = entry.get("images") if isinstance(entry.get("images"), dict) else {}
     gallery = images.get("gallery") if isinstance(images.get("gallery"), list) else []
     return {
-        "external_id": external_id[:32],
+        "external_id": external_id,
         "title": _text(entry.get("title"), 255),
         "price": _price(entry.get("currentPrice", entry.get("price"))),
         "url": str(entry.get("pageUrl") or entry.get("productUrl") or entry.get("permalink") or "")[:1024],
@@ -78,6 +91,16 @@ def fields_of(entry):
         "seller": _text(entry.get("seller"), 128),
         "scraped_at": _when(entry.get("scrapedAt")),
     }
+
+
+def category_in(entry):
+    """The category the scraper read from the page (categoryId, category_id or category.id), or ""."""
+    category = entry.get("category")
+    for value in (entry.get("categoryId"), entry.get("category_id"), category.get("id") if isinstance(category, dict) else category):
+        value = str(value or "").strip().upper()
+        if CATEGORY.fullmatch(value):
+            return value
+    return ""
 
 
 def store(organization, entries):
@@ -111,33 +134,68 @@ def store(organization, entries):
             created = prospect is None
             if created:
                 prospect = MeliListingProspect(organization=organization)
+            category = category_in(entry)
+            if created or prospect.title != fields["title"] or (category and category != prospect.category_id):
+                # Looked up again in the worker: the scraper's category, else a guess from the new title.
+                prospect.category_id, prospect.category_path = category, ""
+                prospect.category_checked_at, prospect.category_error = None, ""
             for name, value in fields.items():
                 setattr(prospect, name, value)
             prospect.payload = entry
             prospect.save()
             existing[prospect.external_id] = prospect
             results.append((prospect, created))
+        transaction.on_commit(lambda: request_categories(organization, [prospect for prospect, _ in results]))
     return results
 
 
-def _name(value):
-    """ "Línea" and "linea" match: Mercado Libre's attribute names as the page shows them."""
-    plain = unicodedata.normalize("NFKD", str(value)).encode("ascii", "ignore").decode()
-    return " ".join(plain.lower().split())
+def request_categories(organization, prospects):
+    """Queue the category lookup for those not looked up yet. One job; pages never call Mercado Libre."""
+    from .jobs import dispatch_drafts_job
+
+    ids = sorted({prospect.pk for prospect in prospects if prospect.category_checked_at is None})
+    if ids:
+        dispatch_drafts_job(organization, "prospect_categories", prospect_ids=ids)
 
 
-def offered_from(prospect, schema):
-    """The prospect's characteristics as [(attribute id, name, value)], matched by name to the category's attributes.
+def find_categories(organization, prospect_ids):
+    """The worker's half: each scraped listing's category and its path. A failure stays on its row."""
+    from django.utils import timezone
 
-    The page shows each attribute under the name the category schema has ("Color", "Material"), so the name
-    is the link; characteristics with no attribute of that name in the category are left out.
-    """
-    by_name = {}
-    for item in schema.values():
-        by_name.setdefault(_name(item.get("name") or ""), item)
-    offered = []
-    for name, value in prospect.characteristics().items():
-        item = by_name.get(_name(name))
-        if item:
-            offered.append((item["id"], str(item.get("name") or name)[:100], " ".join(value.split())[:200]))
-    return offered
+    from .client import describe_failure, fetch_category, predict_category
+    from .drafts import _reason, _site, _token
+
+    rows = list(
+        MeliListingProspect.objects.filter(organization=organization, pk__in=list(prospect_ids), category_checked_at=None)
+    )
+    if not rows:
+        return
+    try:
+        token, site = _token(organization), _site(organization)
+    except Exception as error:
+        logger.warning("Scraped listing categories of %s not found: %s", organization.pk, describe_failure(error))
+        MeliListingProspect.objects.filter(pk__in=[row.pk for row in rows]).update(
+            category_checked_at=timezone.now(), category_error=f"Couldn't look it up: {_reason(error)}"[:300]
+        )
+        return
+    for row in rows:
+        row.category_error = ""
+        try:
+            if not row.category_id and row.title:
+                guess = next(
+                    (item for item in predict_category(token, site, row.title) if isinstance(item, dict) and item.get("category_id")),
+                    {},
+                )
+                row.category_id = str(guess.get("category_id") or "")[:32]
+            if row.category_id:
+                category = fetch_category(token, row.category_id)
+                path = [str(step.get("name") or "") for step in category.get("path_from_root") or [] if isinstance(step, dict)]
+                row.category_path = " > ".join(name for name in path if name)[:500] or str(category.get("name") or "")[:500]
+            else:
+                row.category_error = "Mercado Libre didn't suggest a category for this title."
+        except Exception as error:
+            logger.warning("Category of scraped listing %s not found: %s", row.external_id, describe_failure(error))
+            row.category_error = f"Couldn't look it up: {_reason(error)}"[:300]
+        row.category_checked_at = timezone.now()
+        row.save(update_fields=["category_id", "category_path", "category_checked_at", "category_error", "updated_at"])
+

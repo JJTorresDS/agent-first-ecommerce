@@ -108,6 +108,10 @@ class FakeSellFlow:
                     {"domain_id": "MLA-PERFUMES", "category_id": "MLA1271"},
                 ]
             )
+        if url.path.startswith("/categories/") and url.path.count("/") == 2:
+            category = url.path.split("/")[2]
+            return TokenResponse({"id": category, "name": "Perfumes", "path_from_root": [
+                {"id": "MLA1246", "name": "Belleza y Cuidado Personal"}, {"id": category, "name": "Perfumes"}]})
         if url.path.startswith("/categories/") and url.path.endswith("/attributes"):
             self.categories_read.append(url.path.split("/")[2])
             return TokenResponse(self.category_attributes)
