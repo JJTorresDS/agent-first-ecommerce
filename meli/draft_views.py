@@ -189,7 +189,8 @@ def meli_draft(request, pk):
                 len(value) if key == "attributes" and isinstance(value, dict) else 1
                 for key, value in (draft.overrides or {}).items()
             ),
-            **(_attributes_context(organization, draft, attributes, attributes_error, copy_pending=_copy_pending(request))
+            **(_attributes_context(organization, draft, attributes, attributes_error, copy_pending=_copy_pending(request),
+                                   prospect_pending=_copy_pending(request, "prospect"))
                if regular else {}),
             **(_description_context(organization, draft, parts) if regular else {}),
             "active_tab": "meli_new",
@@ -310,9 +311,9 @@ def copy_sources(organization, draft):
     return sources[:30]
 
 
-def _copy_pending(request):
-    """The listing a draft started from a template copies once its attributes load (?copy=<pk>)."""
-    value = request.GET.get("copy") if request.method == "GET" else ""
+def _copy_pending(request, name="copy"):
+    """What a new draft copies once its attributes load: a template's listing (?copy=<pk>) or a prospect (?prospect=<pk>)."""
+    value = request.GET.get(name) if request.method == "GET" else ""
     return int(value) if value and value.isdigit() else None
 
 
@@ -540,8 +541,6 @@ def meli_draft_from_product(request, pk):
     """A draft for one product: a regular listing, or in its catalog when it came from one."""
     from catalog.models import MasterProduct
 
-    from .jobs import dispatch_drafts
-
     organization, can_edit = _scope(request)
     if not can_edit:
         return HttpResponseForbidden(READ_ONLY)
@@ -551,6 +550,14 @@ def meli_draft_from_product(request, pk):
         return HttpResponseBadRequest(reason)
     template = _chosen_template(organization, request)
     in_catalog = request.POST.get("kind") == "catalog" and product.meli_catalog_product_id and template is None
+    draft = product_draft(organization, product, request.user, template, in_catalog)
+    return _open_draft(organization, draft, template)
+
+
+def product_draft(organization, product, user, template=None, in_catalog=False):
+    """A new draft for one product, saved and sent to be checked: a regular listing, or in its catalog."""
+    from .jobs import dispatch_drafts
+
     draft = ListingDraft(
         organization=organization,
         kind=ListingDraft.Kind.CATALOG if in_catalog else ListingDraft.Kind.PRODUCT,
@@ -558,7 +565,7 @@ def meli_draft_from_product(request, pk):
         price=product.list_price,
         quantity=1,
         category_id=product.meli_category_id,
-        created_by=request.user,
+        created_by=user,
     )
     if in_catalog:
         draft.catalog_product_id = product.meli_catalog_product_id
@@ -570,7 +577,7 @@ def meli_draft_from_product(request, pk):
     draft.status = ListingDraft.Status.CHECKING
     draft.save()
     dispatch_drafts(organization, "check", [draft.pk])
-    return _open_draft(organization, draft, template)
+    return draft
 
 
 @require_app(AppAccess.App.CATALOG)
@@ -710,21 +717,33 @@ def meli_draft_copy(request, pk):
     )
     if draft.locked() or not draft.regular():
         return HttpResponseForbidden("Posted drafts can't change.")
-    source = get_object_or_404(MeliListing, organization=organization, pk=request.POST.get("listing"))
     attributes = posted_attributes(request.POST)
     draft.attributes = attributes
     schema = {item["id"]: item for item in draft.category_schema or []}
+    if request.POST.get("prospect"):
+        # A scraped listing: its characteristics by name ("Color"), matched to this category's attributes.
+        from .models import MeliListingProspect
+        from .prospects import offered_from
+
+        source = get_object_or_404(MeliListingProspect, organization=organization, pk=request.POST["prospect"])
+        candidates = offered_from(source, schema)
+    else:
+        source = get_object_or_404(MeliListing, organization=organization, pk=request.POST.get("listing"))
+        candidates = []
+        for attribute in source.payload.get("attributes") or []:
+            key = str(attribute.get("id") or "") if isinstance(attribute, dict) else ""
+            if key in schema:
+                candidates.append((key, str(attribute.get("name") or schema[key]["name"])[:100],
+                                   " ".join(str(attribute.get("value_name") or "").split())[:200]))
     listed = draft.listed()
     current = {**(getattr(listed, "attributes", None) or {}), **attributes}
     offered = []
-    for attribute in source.payload.get("attributes") or []:
-        key = str(attribute.get("id") or "") if isinstance(attribute, dict) else ""
-        value = " ".join(str(attribute.get("value_name") or "").split()) if key else ""
+    for key, name, value in candidates:
         # Only what this category asks for and the draft doesn't have yet; never the other item's identity.
-        if (not value or key not in schema or key in OWN_ATTRIBUTES or key in NOT_GUIDED
+        if (not value or key in OWN_ATTRIBUTES or key in NOT_GUIDED
                 or schema[key].get("hidden") or current.get(key) not in (None, "")):
             continue
-        offered.append({"id": key, "name": str(attribute.get("name") or schema[key]["name"])[:100], "value": value[:200]})
+        offered.append({"id": key, "name": name, "value": value})
     copied, dropped, note = {}, {}, ""
     if not offered:
         note = f"Nothing to copy from “{source.title}”: it has no values for the fields still empty here."

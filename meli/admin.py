@@ -29,3 +29,14 @@ class ListingChangeAdmin(admin.ModelAdmin):
     list_filter = ("state", "reason", "new_value")
     search_fields = ("item_id", "title", "note")
     readonly_fields = [field.name for field in ListingChange._meta.fields]
+
+
+from .models import MeliListingProspect  # noqa: E402
+
+
+@admin.register(MeliListingProspect)
+class MeliListingProspectAdmin(admin.ModelAdmin):
+    list_display = ("external_id", "title", "status", "seller", "product", "organization", "created_at")
+    list_filter = ("status",)
+    search_fields = ("external_id", "title", "seller")
+    raw_id_fields = ("product", "draft")

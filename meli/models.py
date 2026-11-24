@@ -837,3 +837,73 @@ class CatalogCompetition(models.Model):
 
     def we_win(self):
         return self.status == "winning" or (self.winner_item_id and self.winner_item_id == self.item_id)
+
+
+class MeliListingProspect(models.Model):
+    """A Mercado Libre listing someone else sells, scraped and sent to POST /api/meli/prospects.
+
+    payload is the scraper's JSON as sent. external_id is Mercado Libre's id on the page (a user product,
+    MLAU…, or an item, MLA…): a second scrape of it in the same organization replaces the payload and keeps
+    the status, product and draft. The other columns are read from payload for the list (meli.prospects.fields_of).
+    """
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        DRAFTED = "drafted", "Draft started"
+        DISMISSED = "dismissed", "Dismissed"
+
+    organization = models.ForeignKey(
+        "accounts.Organization",
+        on_delete=models.CASCADE,
+        related_name="meli_listing_prospects",
+    )
+    external_id = models.CharField(max_length=32)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    title = models.CharField(max_length=255, blank=True)
+    price = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    url = models.CharField(max_length=1024, blank=True)
+    picture = models.CharField(max_length=1024, blank=True)
+    seller = models.CharField(max_length=128, blank=True, help_text="Who sells it on Mercado Libre.")
+    scraped_at = models.DateTimeField(null=True, blank=True)
+    payload = models.JSONField(default=dict)
+    product = models.ForeignKey(
+        "catalog.MasterProduct",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="meli_prospects",
+        help_text="The catalog product to list it as.",
+    )
+    draft = models.ForeignKey(
+        ListingDraft, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "meli_listing_prospect"
+        ordering = ["-created_at", "-pk"]
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "external_id"], name="uniq_meli_prospect_org_external"),
+        ]
+        indexes = [
+            models.Index(fields=["organization", "status", "-created_at"], name="meli_prospect_org_status"),
+        ]
+
+    def __str__(self):
+        return f"{self.external_id} {self.title}".strip()
+
+    def characteristics(self):
+        """The page's characteristics as {name: value}, as the scraper read them."""
+        found = self.payload.get("characteristics") if isinstance(self.payload, dict) else None
+        if not isinstance(found, dict):
+            found = {}
+            for group in (self.payload.get("characteristicGroups") or {}).values() if isinstance(self.payload, dict) else []:
+                if isinstance(group, dict):
+                    found.update(group)
+        return {str(name): str(value) for name, value in found.items() if str(value).strip()}
+
+    def gallery(self):
+        images = self.payload.get("images") if isinstance(self.payload, dict) else None
+        gallery = images.get("gallery") if isinstance(images, dict) else None
+        return [str(url) for url in gallery if url] if isinstance(gallery, list) else []

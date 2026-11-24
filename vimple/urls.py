@@ -49,10 +49,13 @@ from meli.views import (
     mercadolibre_token,
     mercadolibre_webhook,
 )
+from meli.prospect_api import router as meli_prospect_router
+from meli.prospect_views import meli_draft_from_prospect, meli_prospects
 from meli.token_api import router as meli_token_router
 from tasks.api import api
 
 api.add_router("/meli", meli_token_router)
+api.add_router("/meli", meli_prospect_router)
 from tasks.views import (
     cashflow_csv,
     cashflow_drive_token,
@@ -93,6 +96,8 @@ urlpatterns = [
     path("catalog/meli/row/<int:pk>/", meli_listing_row, name="meli_listing_row"),
     path("catalog/import/", catalog_import, name="catalog_import"),
     path("catalog/meli/new/", meli_drafts, name="meli_drafts"),
+    path("catalog/meli/prospects/", meli_prospects, name="meli_prospects"),
+    path("catalog/meli/prospects/<int:pk>/draft/", meli_draft_from_prospect, name="meli_draft_from_prospect"),
     path("catalog/meli/new/pick/", meli_listing_pick, name="meli_listing_pick"),
     path("catalog/meli/listed/", meli_listed, name="meli_listed"),
     path("catalog/meli/new/<int:pk>/", meli_draft, name="meli_draft"),

@@ -3,5 +3,6 @@
   {% if can_open_catalog %}
     <a class="tab{% if active_tab == 'meli' %} active{% endif %}" href="{% url 'meli_listings' %}">Listings</a>
     <a class="tab{% if active_tab == 'meli_new' %} active{% endif %}" href="{% url 'meli_drafts' %}">Create listing</a>
+    <a class="tab{% if active_tab == 'meli_prospects' %} active{% endif %}" href="{% url 'meli_prospects' %}">Prospects</a>
   {% endif %}
 </nav>
