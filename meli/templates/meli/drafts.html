@@ -7,7 +7,7 @@
   <div class="page-head">
     <h1>Create a Mercado Libre listing</h1>
   </div>
-  <p class="page-lead">Start a draft from a product, a template or a catalog link, then check and post it below.</p>
+  <p class="page-lead">Start a draft from a product, a template, a catalog link or a scraped listing, then check and post it below.</p>
 
   {% if not connected %}
     <div class="card empty">
@@ -24,6 +24,7 @@
       <a class="{% if start == 'product' %}active{% endif %}" href="?start=product"{% if start == 'product' %} aria-current="page"{% endif %}>From a Vimple product</a>
       <a class="{% if start == 'template' %}active{% endif %}" href="?start=template"{% if start == 'template' %} aria-current="page"{% endif %}>From a template</a>
       <a class="{% if start == 'link' %}active{% endif %}" href="?start=link"{% if start == 'link' %} aria-current="page"{% endif %}>From a catalog link</a>
+      <a class="{% if start == 'scraped' %}active{% endif %}" href="?start=scraped"{% if start == 'scraped' %} aria-current="page"{% endif %}>From a scraped listing</a>
     </nav>
     <section class="card create-start">
       {% if start == 'template' %}
@@ -45,6 +46,8 @@
       {% else %}
         <p>No templates yet. A template is one listing per category, filled in carefully and kept paused, that new listings copy from. Make one with <strong>Make template</strong> on a listing in <a href="{% url 'meli_listings' %}">Listings</a>, or tick <strong>Template for this category</strong> on a draft.</p>
       {% endif %}
+      {% elif start == 'scraped' %}
+      {% include "meli/_scraped.html" %}
       {% elif start == 'link' %}
       <p class="muted">Paste the URL of a Mercado Libre catalog page (the one with "Vender uno igual") to compete for that product.</p>
       {% for error in add_form.non_field_errors %}<p class="error">{{ error }}</p>{% endfor %}

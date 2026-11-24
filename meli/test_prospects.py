@@ -15,6 +15,7 @@ from .test_product_drafts import PERFUME_ATTRIBUTES, PerfumeDraftCase
 from .tests import shared_seller
 
 URL = "/api/meli/prospects"
+PAGE_URL = "/catalog/meli/new/?start=scraped"
 
 # As the scraper sends it (ml-products.json): a list of pages.
 SCRAPED = [
@@ -122,44 +123,44 @@ class ProspectPageTests(PerfumeDraftCase):
         other = shared_seller("Other", user_id="777")
         prospect_for(other, external_id="MLAU999", title="Theirs")
         prospect_for(self.organization, external_id="MLAU2", title="Old one", status=MeliListingProspect.Status.DISMISSED)
-        page = self.client.get("/catalog/meli/prospects/")
-        self.assertContains(page, "Prospect listings")
+        page = self.client.get(PAGE_URL)
+        self.assertContains(page, "From a scraped listing")
         self.assertContains(page, self.prospect.title)
         self.assertNotContains(page, "Theirs")
         self.assertNotContains(page, "Old one")
-        self.assertContains(self.client.get("/catalog/meli/prospects/?status=dismissed"), "Old one")
-        self.assertNotContains(self.client.get("/catalog/meli/prospects/?status=all"), "Theirs")
-        self.assertContains(self.client.get("/catalog/meli/"), ">Prospects</a>", html=False)
+        self.assertContains(self.client.get("/catalog/meli/new/?start=scraped&status=dismissed"), "Old one")
+        self.assertNotContains(self.client.get("/catalog/meli/new/?start=scraped&status=all"), "Theirs")
+        self.assertNotContains(self.client.get("/catalog/meli/"), "Prospects")
 
     def test_linking_by_sku_stays_in_the_organization(self):
         other = shared_seller("Other", user_id="777")
         theirs = product(other, variant="50ML")
-        self.client.post("/catalog/meli/prospects/", {"action": "link", "prospect": self.prospect.pk, "sku": theirs.sku})
+        self.client.post(PAGE_URL, {"action": "scraped_link", "prospect": self.prospect.pk, "sku": theirs.sku})
         self.prospect.refresh_from_db()
         self.assertIsNone(self.prospect.product)
-        self.client.post("/catalog/meli/prospects/", {"action": "link", "prospect": self.prospect.pk, "sku": self.product.sku.lower()})
+        self.client.post(PAGE_URL, {"action": "scraped_link", "prospect": self.prospect.pk, "sku": self.product.sku.lower()})
         self.prospect.refresh_from_db()
         self.assertEqual(self.prospect.product, self.product)
         their_prospect = prospect_for(other, external_id="MLAU999")
-        response = self.client.post("/catalog/meli/prospects/", {"action": "dismiss", "prospect": their_prospect.pk})
+        response = self.client.post(PAGE_URL, {"action": "scraped_dismiss", "prospect": their_prospect.pk})
         self.assertEqual(response.status_code, 404)
-        self.client.post("/catalog/meli/prospects/", {"action": "dismiss_selected", "selected": [their_prospect.pk]})
+        self.client.post(PAGE_URL, {"action": "dismiss_selected", "selected": [their_prospect.pk]})
         their_prospect.refresh_from_db()
         self.assertEqual(their_prospect.status, MeliListingProspect.Status.PENDING)
 
-    def test_contributors_see_but_cannot_change(self):
+    def test_contributors_neither_see_nor_change_them(self):
         self.client.force_login(member(self.organization, role=Membership.Role.CONTRIBUTOR, username="bea"))
-        self.assertContains(self.client.get("/catalog/meli/prospects/"), self.prospect.title)
-        self.assertEqual(self.client.post("/catalog/meli/prospects/", {"action": "dismiss", "prospect": self.prospect.pk}).status_code, 403)
-        self.assertEqual(self.client.post(f"/catalog/meli/prospects/{self.prospect.pk}/draft/").status_code, 403)
+        self.assertNotContains(self.client.get(PAGE_URL), self.prospect.title)
+        self.assertEqual(self.client.post(PAGE_URL, {"action": "scraped_dismiss", "prospect": self.prospect.pk}).status_code, 403)
+        self.assertEqual(self.client.post(f"/catalog/meli/new/scraped/{self.prospect.pk}/").status_code, 403)
 
     def test_create_listing_starts_a_draft_that_copies_the_characteristics_by_name(self):
         # Not linked yet: no draft.
-        self.assertEqual(self.client.post(f"/catalog/meli/prospects/{self.prospect.pk}/draft/").status_code, 404)
+        self.assertEqual(self.client.post(f"/catalog/meli/new/scraped/{self.prospect.pk}/").status_code, 404)
         self.prospect.product = self.product
         self.prospect.save()
-        self.assertContains(self.client.get("/catalog/meli/prospects/"), "Create listing")
-        response = self.client.post(f"/catalog/meli/prospects/{self.prospect.pk}/draft/")
+        self.assertContains(self.client.get(PAGE_URL), "Create listing")
+        response = self.client.post(f"/catalog/meli/new/scraped/{self.prospect.pk}/")
         draft = self.draft()
         self.assertRedirects(response, f"/catalog/meli/new/{draft.pk}/?prospect={self.prospect.pk}", fetch_redirect_response=False)
         self.assertEqual((draft.kind, draft.product), (ListingDraft.Kind.PRODUCT, self.product))
@@ -186,6 +187,23 @@ class ProspectPageTests(PerfumeDraftCase):
         self.product.save()
         self.prospect.product = self.product
         self.prospect.save()
-        self.assertContains(self.client.get("/catalog/meli/prospects/"), "Set a price first.")
-        self.client.post(f"/catalog/meli/prospects/{self.prospect.pk}/draft/")
+        self.assertContains(self.client.get(PAGE_URL), "Set a price first.")
+        self.client.post(f"/catalog/meli/new/scraped/{self.prospect.pk}/")
         self.assertFalse(ListingDraft.objects.exists())
+
+    def test_the_copy_dialog_offers_the_prospect_again_and_nothing_to_copy_says_only_that(self):
+        self.prospect.product = self.product
+        self.prospect.save()
+        self.client.post(f"/catalog/meli/new/scraped/{self.prospect.pk}/")
+        draft = self.draft()
+        page = self.client.get(f"/catalog/meli/new/{draft.pk}/")
+        self.assertContains(page, f'hx-vals=\'{{"prospect": "{self.prospect.pk}"}}\'', html=False)
+        self.assertContains(page, '<span class="pill">Scraped listing</span>', html=False)
+        # Another draft of the same product doesn't offer this prospect.
+        self.prospect.draft = None
+        self.prospect.save()
+        self.assertNotContains(self.client.get(f"/catalog/meli/new/{draft.pk}/"), '<span class="pill">Scraped listing</span>', html=False)
+        empty = prospect_for(self.organization, external_id="MLAU5", payload={"characteristics": {"Marca": "Lattafa"}})
+        copied = self.client.post(f"/catalog/meli/new/{draft.pk}/copy/", {"prospect": empty.pk})
+        self.assertContains(copied, "Nothing to copy from")
+        self.assertNotContains(copied, "Copied 0 values")

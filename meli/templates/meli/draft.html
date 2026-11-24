@@ -212,7 +212,7 @@
       document.addEventListener("input", function (event) { if (event.target.closest && event.target.closest("#composer-stack")) render(); });
       render();
     })();
-    // Started from a template or a prospect: once its attributes are copied, a reload must not copy them again.
+    // Started from a template or a scraped listing: once its attributes are copied, a reload must not copy them again.
     document.body.addEventListener("htmx:afterRequest", function (event) {
       if (!/\/copy\/$/.test(event.detail.requestConfig.path)) return;
       if (/[?&](copy|prospect)=/.test(window.location.search)) history.replaceState(null, "", window.location.pathname);

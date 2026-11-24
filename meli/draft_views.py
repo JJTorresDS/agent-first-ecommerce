@@ -32,9 +32,11 @@ from .drafts import (
     stock_by_product,
 )
 from .forms import CatalogDraftForm, DraftForm, ListingDefaultsForm
-from .models import ListingDraft, ListingTemplate, MercadoLibreAccount, MeliListing
+from .models import ListingDraft, ListingTemplate, MercadoLibreAccount, MeliListing, MeliListingProspect
 
 READ_ONLY = "Only owners and admins can create Mercado Libre listings."
+# Create listing → From a scraped listing posts these here (meli/prospect_views.py).
+SCRAPED_ACTIONS = {"scraped_link", "scraped_dismiss", "scraped_restore", "dismiss_selected", "restore_selected", "delete_selected"}
 
 
 def _scope(request):
@@ -57,6 +59,10 @@ def meli_drafts(request):
     defaults_form = ListingDefaultsForm(instance=defaults, prefix="defaults")
     add_form = CatalogDraftForm(organization=organization, stock=stock, prefix="add")
     action = request.POST.get("action") if request.method == "POST" else ""
+    if action in SCRAPED_ACTIONS:
+        from .prospect_views import scraped_post
+
+        return scraped_post(request, organization)
     if action == "defaults":
         defaults_form = ListingDefaultsForm(request.POST, instance=defaults, prefix="defaults")
         if defaults_form.is_valid():
@@ -117,10 +123,14 @@ def meli_drafts(request):
         "ai": ai_enabled(),
         # One way to start at a time: the other forms stay behind their tabs.
         "start": "link" if action == "add" else (
-            request.GET.get("start") if request.GET.get("start") in {"product", "template", "link"} else "product"
+            request.GET.get("start") if request.GET.get("start") in {"product", "template", "link", "scraped"} else "product"
         ),
         "active_tab": "meli_new",
     }
+    if context["start"] == "scraped" and can_edit and connected and started:
+        from .prospect_views import scraped_context
+
+        context.update(scraped_context(request, organization, stock, connected, started))
     if request.GET.get("poll") == "drafts" and request.headers.get("HX-Request") == "true":
         return render(request, "meli/_drafts.html", context)
     return render(request, "meli/drafts.html", context)
@@ -335,6 +345,9 @@ def _attributes_context(organization, draft, attributes, error, **extra):
     ai = enabled()
     return {
         "copy_sources": copy_sources(organization, draft) if ai and not draft.template else [],
+        # A draft started from a prospect can copy it again, e.g. after its category changed.
+        "copy_prospect": MeliListingProspect.objects.filter(organization=organization, draft=draft)
+        .only("pk", "title", "external_id").first() if ai and not draft.template else None,
         "attributes": free,
         "guided_required": required,
         "guided_recommended": recommended,
@@ -722,7 +735,6 @@ def meli_draft_copy(request, pk):
     schema = {item["id"]: item for item in draft.category_schema or []}
     if request.POST.get("prospect"):
         # A scraped listing: its characteristics by name ("Color"), matched to this category's attributes.
-        from .models import MeliListingProspect
         from .prospects import offered_from
 
         source = get_object_or_404(MeliListingProspect, organization=organization, pk=request.POST["prospect"])

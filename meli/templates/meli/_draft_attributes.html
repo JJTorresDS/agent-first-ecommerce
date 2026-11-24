@@ -18,15 +18,19 @@
       <span class="spinner htmx-indicator" aria-hidden="true"></span>Copying the template's attributes…
     </p>
   {% elif prospect_pending and ai and can_edit and draft.category_schema and not draft.template %}
-    {# Started from a prospect listing: copy its characteristics once, matched to the category's fields. #}
+    {# Started from a scraped listing: copy its characteristics once, matched to the category's fields. #}
     <p class="muted" id="template-copy" hx-post="{% url 'meli_draft_copy' draft.pk %}" hx-include="#draft-form" hx-vals='{"prospect": "{{ prospect_pending }}"}' hx-trigger="load" hx-target="#draft-attributes" hx-swap="outerHTML">
-      <span class="spinner htmx-indicator" aria-hidden="true"></span>Copying the prospect listing's characteristics…
+      <span class="spinner htmx-indicator" aria-hidden="true"></span>Copying the scraped listing's characteristics…
     </p>
   {% endif %}
   {% if ai and can_edit and draft.category_schema and not draft.template %}
     <dialog class="modal" id="copy-dialog" aria-labelledby="copy-dialog-title">
       <h2 id="copy-dialog-title">Copy from a listing</h2>
       <p class="muted">AI keeps what's true of this product too, rewrites what described the other one (name, volume), and leaves out the rest. It only fills empty fields; you review before saving.</p>
+      {% if copy_prospect %}
+        <p><button type="button" class="link-button" hx-post="{% url 'meli_draft_copy' draft.pk %}" hx-include="#draft-form" hx-vals='{"prospect": "{{ copy_prospect.pk }}"}' hx-target="#draft-attributes" hx-swap="outerHTML" hx-sync="closest dialog:drop">{{ copy_prospect.title|default:copy_prospect.external_id }}</button>
+          <span class="pill">Scraped listing</span> <span class="spinner htmx-indicator" aria-hidden="true"></span></p>
+      {% endif %}
       {% if copy_sources %}
         <input type="search" class="copy-filter" placeholder="Filter by title or SKU" aria-label="Filter listings">
         <ul class="plain lines copy-sources">
@@ -38,13 +42,13 @@
             </li>
           {% endfor %}
         </ul>
-      {% else %}
+      {% elif not copy_prospect %}
         <p>None of your listings is in {{ draft.category_id }} yet. Make one carefully with "Template for this category", or mark one on the <a href="{% url 'meli_listings' %}">Listings</a> page.</p>
       {% endif %}
       <div class="actions"><button type="button" data-close-dialog>Close</button></div>
     </dialog>
   {% endif %}
-  {% if copy_source %}<p class="muted">Copied {{ copy_count }} value{{ copy_count|pluralize }} from “{{ copy_source }}”. Check them, then Save and check.</p>{% endif %}
+  {% if copy_source and not copy_note %}<p class="muted">Copied {{ copy_count }} value{{ copy_count|pluralize }} from “{{ copy_source }}”. Check them, then Save and check.</p>{% endif %}
   {% if copy_note %}<p class="muted">{{ copy_note }}</p>{% endif %}
   {% if copy_dropped %}
     <p class="muted">Not copied:</p>

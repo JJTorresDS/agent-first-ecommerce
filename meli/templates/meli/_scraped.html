@@ -1,0 +1,89 @@
+{% comment %}
+  Create listing → From a scraped listing: listings scraped from Mercado Libre (POST /api/meli/prospects).
+  Its forms post to meli_drafts, which hands the scraped_* and *_selected actions to meli/prospect_views.py.
+{% endcomment %}
+<p class="muted">Link a scraped listing to your product, then create your own listing: it copies the scraped listing's characteristics.</p>
+{% if not any_scraped %}
+  <p>No scraped listings yet. Your scraper sends them to <span class="mono">POST /api/meli/prospects?organization={{ scraped_organization }}</span> with the organization's API key (Organization page); each one arrives here as pending.</p>
+{% else %}
+  <form class="filters" method="get" action="{% url 'meli_drafts' %}">
+    <input type="hidden" name="start" value="scraped">
+    <div class="grow">
+      <label for="scraped-q">Search</label>
+      <input id="scraped-q" type="search" name="q" value="{{ query }}" placeholder="Title, id or seller">
+    </div>
+    <div>
+      <label for="scraped-status">Show</label>
+      <select id="scraped-status" name="status" onchange="this.form.requestSubmit()">
+        {% for value, label in shown_choices %}<option value="{{ value }}"{% if value == shown %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+    </div>
+    <div><button type="submit">Search</button></div>
+  </form>
+  {% include "_bulk_bar.html" %}
+  {% if prospects %}
+    <datalist id="scraped-products">{% for sku, title in products %}<option value="{{ sku }}">{{ title|default:sku }}</option>{% endfor %}</datalist>
+    <div class="table-scroll">
+      <table class="list wide">
+        <thead><tr>{% include "_bulk_all.html" %}<th></th><th>Scraped listing</th><th class="num">Price</th><th>Your product</th><th></th></tr></thead>
+        <tbody>
+          {% for prospect in prospects %}
+            <tr>
+              {% include "_bulk_check.html" with value=prospect.pk label=prospect.external_id %}
+              <td class="thumb-cell">{% if prospect.picture %}<img class="thumb" src="{{ prospect.picture }}" alt="" loading="lazy">{% else %}<span class="thumb"></span>{% endif %}</td>
+              <td>
+                {% if prospect.url %}<a href="{{ prospect.url }}" target="_blank" rel="noopener">{{ prospect.title|default:prospect.external_id }}</a>{% else %}{{ prospect.title|default:prospect.external_id }}{% endif %}
+                <br><span class="mono muted">{{ prospect.external_id }}</span>{% if prospect.seller %} <span class="muted">· {{ prospect.seller }}</span>{% endif %}
+                {% with characteristics=prospect.characteristics %}
+                  {% if characteristics %}
+                    <details>
+                      <summary class="muted">{{ characteristics|length }} characteristic{{ characteristics|length|pluralize }}</summary>
+                      <ul class="plain lines">{% for name, value in characteristics.items %}<li><strong>{{ name }}</strong>: {{ value }}</li>{% endfor %}</ul>
+                    </details>
+                  {% endif %}
+                {% endwith %}
+              </td>
+              <td class="num">{% if prospect.price is not None %}ARS {{ prospect.price }}{% else %}—{% endif %}</td>
+              <td>
+                {% if prospect.product %}<a href="{% url 'catalog_product' prospect.product_id %}"><span class="sku">{{ prospect.product.sku }}</span></a>{% endif %}
+                <form method="post" action="{% url 'meli_drafts' %}" class="scraped-link">
+                  {% csrf_token %}
+                  <input type="hidden" name="action" value="scraped_link">
+                  <input type="hidden" name="prospect" value="{{ prospect.pk }}">
+                  <input type="hidden" name="next" value="{{ back }}">
+                  <input type="text" name="sku" list="scraped-products" value="{{ prospect.product.sku|default:'' }}" placeholder="SKU" aria-label="Your product's SKU for {{ prospect.external_id }}" autocomplete="off">
+                  <button type="submit">{% if prospect.product %}Change{% else %}Link{% endif %}</button>
+                </form>
+              </td>
+              <td>
+                {% if prospect.status == "dismissed" %}<span class="pill">Dismissed</span>
+                {% elif prospect.draft_id %}<a href="{% url 'meli_draft' prospect.draft_id %}">Draft #{{ prospect.draft_id }}</a>
+                {% elif prospect.status == "drafted" %}<span class="muted">Draft deleted</span>{% endif %}
+                {% if prospect.product and prospect.status != "dismissed" %}
+                  {% if prospect.reason %}<p class="muted">{{ prospect.reason }}</p>
+                  {% else %}
+                    <form method="post" action="{% url 'meli_draft_from_prospect' prospect.pk %}">
+                      {% csrf_token %}
+                      <input type="hidden" name="next" value="{{ back }}">
+                      <button type="submit">{% if prospect.draft_id %}Another listing{% else %}Create listing{% endif %}</button>
+                    </form>
+                  {% endif %}
+                {% endif %}
+                <form method="post" action="{% url 'meli_drafts' %}">
+                  {% csrf_token %}
+                  <input type="hidden" name="action" value="{% if prospect.status == 'dismissed' %}scraped_restore{% else %}scraped_dismiss{% endif %}">
+                  <input type="hidden" name="prospect" value="{{ prospect.pk }}">
+                  <input type="hidden" name="next" value="{{ back }}">
+                  <button type="submit" class="link-button">{% if prospect.status == "dismissed" %}Restore{% else %}Dismiss{% endif %}</button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if more %}<p class="muted">Showing the newest 200. Search to find older ones.</p>{% endif %}
+  {% else %}
+    <p>{% if filtered %}No scraped listings match.{% else %}Nothing pending. Dismissed ones are under Show → Dismissed.{% endif %}</p>
+  {% endif %}
+{% endif %}
