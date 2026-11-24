@@ -194,6 +194,8 @@ def meli_draft(request, pk):
             "defaults": defaults,
             "available": available,
             "can_edit": can_edit and not draft.locked(),
+            # The scraped listing this draft started from: the competitor shown under the price.
+            "scraped": MeliListingProspect.objects.filter(organization=organization, draft=draft).first(),
             **(_fix_context(draft) if fix_offered(draft, can_edit and not draft.locked()) else {}),
             "fix_count": sum(
                 len(value) if key == "attributes" and isinstance(value, dict) else 1
@@ -227,8 +229,8 @@ def _description_context(organization, draft, parts):
             pieces.append({"type": "block", "block": by_id[part["block"]]})
         elif "text" in part:
             pieces.append({"type": "text", "text": part["text"]})
-    preview = compose(ListingDraft(organization=organization, product=draft.product, combo=draft.combo,
-                                   description_parts=parts or [{"product": True}]), by_id)
+    preview = compose(ListingDraft(organization=organization, kind=draft.kind, product=draft.product, combo=draft.combo,
+                                   title=draft.title, description_parts=parts or [{"product": True}]), by_id)
     return {
         "copy_blocks": offered,
         "copy_kinds": CopyBlock.Kind.choices,
@@ -259,7 +261,19 @@ def posted_attributes(post):
         if unit and not isinstance(value, (bool, list)):
             value = f"{value} {unit}"
         attributes[key] = value
+    for key in post.getlist("attr_omit"):
+        # Left out: stored as null, so the product's value isn't sent either.
+        if isinstance(key, str) and key.strip():
+            attributes[key.strip()[:64]] = None
     return attributes
+
+
+def not_guided(draft):
+    """Attributes the guided form doesn't ask for: a product's brand, model and GTIN come from the product.
+
+    A fast listing has no product, so it asks for them too.
+    """
+    return set() if draft.fast() else NOT_GUIDED
 
 
 def guided_fields(draft, attributes):
@@ -272,14 +286,16 @@ def guided_fields(draft, attributes):
 
     listed = draft.listed()
     product_values = dict(getattr(listed, "attributes", None) or {})
+    skipped = not_guided(draft)
     required, recommended, guided = [], [], set()
     for item in draft.category_schema or []:
-        if item.get("hidden") or item["id"] in OWN_ATTRIBUTES or item["id"] in NOT_GUIDED:
+        if item.get("hidden") or item["id"] in OWN_ATTRIBUTES or item["id"] in skipped:
             continue
         guided.add(item["id"])
-        value = attributes.get(item["id"], product_values.get(item["id"], ""))
+        omitted = item["id"] in attributes and attributes[item["id"]] is None
+        value = "" if omitted else attributes.get(item["id"], product_values.get(item["id"], ""))
         text = attribute_rows({"value": value})[0][1]
-        field = {**item, "value": text, "number": "", "unit": ""}
+        field = {**item, "value": text, "number": "", "unit": "", "omitted": omitted}
         if item.get("type") == "number_unit" and item.get("units"):
             match = NUMBER_AND_UNIT.match(text)
             if match:
@@ -289,7 +305,7 @@ def guided_fields(draft, attributes):
         if item.get("values"):
             field["choice"] = next((option for option in item["values"] if option.lower() == text.lower()), "")
         (required if item.get("required") else recommended).append(field)
-    free = {key: value for key, value in attributes.items() if key not in guided}
+    free = {key: value for key, value in attributes.items() if key not in guided and value is not None}
     return required, recommended, attribute_rows(free)
 
 
@@ -541,10 +557,15 @@ def meli_product_actions(request, pk):
 
     organization, can_edit = _scope(request)
     product = get_object_or_404(MasterProduct, organization=organization, pk=pk)
+    competitors = (
+        MeliListingProspect.objects.filter(organization=organization, product=product)
+        .exclude(status=MeliListingProspect.Status.DISMISSED)
+        .only("title", "external_id", "url", "seller", "price")[:10]
+    )
     return render(
         request,
         "meli/_product_actions.html",
-        _actions_context(organization, product, can_edit, product=product),
+        {**_actions_context(organization, product, can_edit, product=product), "competitors": competitors},
     )
 
 
@@ -567,10 +588,10 @@ def meli_draft_from_product(request, pk):
     return _open_draft(organization, draft, template)
 
 
-def product_draft(organization, product, user, template=None, in_catalog=False, category_id=""):
+def product_draft(organization, product, user, template=None, in_catalog=False, category_id="", price=None):
     """A new draft for one product, saved and sent to be checked: a regular listing, or in its catalog.
 
-    category_id (a scraped listing's) wins over the product's.
+    category_id and price (a scraped listing's) win over the product's.
     """
     from .jobs import dispatch_drafts
 
@@ -578,7 +599,7 @@ def product_draft(organization, product, user, template=None, in_catalog=False, 
         organization=organization,
         kind=ListingDraft.Kind.CATALOG if in_catalog else ListingDraft.Kind.PRODUCT,
         product=product,
-        price=product.list_price,
+        price=price or product.list_price,
         quantity=1,
         category_id=product.meli_category_id,
         created_by=user,
@@ -640,7 +661,9 @@ def _to_fill(organization, draft):
 
     if not draft.regular():
         return []
-    return attributes_to_fill(draft, build_item(draft, settings_of(draft, defaults_for(organization))))
+    omitted = {key for key, value in (draft.attributes or {}).items() if value is None}
+    asked = attributes_to_fill(draft, build_item(draft, settings_of(draft, defaults_for(organization))))
+    return [item for item in asked if item["id"] not in omitted]
 
 
 def _problems(organization, draft):
@@ -707,7 +730,8 @@ def _save_to_product(product, attributes):
     from .drafts import OWN_ATTRIBUTES
 
     kept = {key: value for key, value in attributes.items() if key not in OWN_ATTRIBUTES and key not in NOT_GUIDED}
-    merged = {**(product.attributes or {}), **kept}
+    # A value left out on the draft leaves the product too.
+    merged = {key: value for key, value in {**(product.attributes or {}), **kept}.items() if value is not None}
     if merged == product.attributes:
         return
     validate_attributes(merged)
@@ -751,8 +775,8 @@ def meli_draft_copy(request, pk):
 
     def empty(key):
         # Only what this category asks for and the draft doesn't have yet; never the other item's identity.
-        return (key in schema and key not in OWN_ATTRIBUTES and key not in NOT_GUIDED
-                and not schema[key].get("hidden") and current.get(key) in (None, ""))
+        return (key in schema and key not in OWN_ATTRIBUTES and key not in not_guided(draft)
+                and not schema[key].get("hidden") and current.get(key) in (None, "") and key not in attributes)
 
     copied, dropped, note = {}, {}, ""
     if request.POST.get("prospect"):
@@ -931,7 +955,8 @@ def meli_draft_fix_apply(request, pk):
     if request.POST.get("save_package"):
         values, unread = package_from_fix(overrides)
         if values:
-            listed = draft.listed()
+            # A fast listing keeps its package on the draft itself.
+            listed = draft if draft.fast() else draft.listed()
             for field, value in values.items():
                 setattr(listed, field, value)
             listed.save(update_fields=[*values, "updated_at"])
@@ -948,7 +973,7 @@ def meli_draft_fix_apply(request, pk):
                     overrides["attributes"].pop(attribute_id, None)
             if not overrides.get("attributes"):
                 overrides.pop("attributes", None)
-            notes.append(f"Package saved to {listed.sku}.")
+            notes.append("Package saved to this draft." if draft.fast() else f"Package saved to {listed.sku}.")
         if unread:
             notes.append(f"Not saved to the product (no number and unit): {', '.join(unread)}.")
     draft.overrides = overrides

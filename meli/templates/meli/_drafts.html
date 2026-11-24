@@ -15,9 +15,9 @@
               <tr>
                 <td class="check-col">{% if can_edit and draft.status != "queued" and draft.status != "publishing" %}<input type="checkbox" name="draft" value="{{ draft.pk }}" aria-label="Select draft #{{ draft.pk }}">{% endif %}</td>
                 <td class="thumb-cell">{% if draft.regular %}<img class="thumb" src="{{ draft.listed.image_url }}" alt="" loading="lazy">{% elif draft.catalog_picture %}<img class="thumb" src="{{ draft.catalog_picture }}" alt="" loading="lazy">{% else %}<span class="thumb"></span>{% endif %}</td>
-                <td><span class="sku">{{ draft.listed.sku }}</span><p class="muted draft-number">Draft #{{ draft.pk }}</p></td>
+                <td>{% if draft.listed.sku %}<span class="sku">{{ draft.listed.sku }}</span>{% else %}<span class="pill">No product</span>{% endif %}<p class="muted draft-number">Draft #{{ draft.pk }}</p></td>
                 <td>
-                  {% if draft.regular %}<a href="{{ draft.listed_url }}">{{ draft.listed.title }}</a> <span class="muted">· {% if draft.combo_id %}combo{% else %}regular{% endif %}</span>{% else %}<a href="{{ draft.catalog_url }}" target="_blank" rel="noopener">{{ draft.catalog_name|default:draft.catalog_product_id }}</a>{% endif %}
+                  {% if draft.regular %}<a href="{{ draft.listed_url }}">{{ draft.listed.title }}</a> <span class="muted">· {% if draft.fast %}fast{% elif draft.combo_id %}combo{% else %}regular{% endif %}</span>{% else %}<a href="{{ draft.catalog_url }}" target="_blank" rel="noopener">{{ draft.catalog_name|default:draft.catalog_product_id }}</a>{% endif %}
                   {% if draft.error %}<p class="{% if draft.status == 'published' or draft.status == 'ready' %}muted{% else %}error{% endif %}">{{ draft.error }}</p>{% endif %}
                   {% include "meli/_error_details.html" %}
                   {% if ai and can_edit and draft.error_details.response and draft.error_details.sent %}{% if draft.status == "needs_fix" or draft.status == "failed" %}
@@ -26,7 +26,7 @@
                   {% endif %}{% endif %}
                 </td>
                 <td class="num">ARS {{ draft.price }}</td>
-                <td class="num">{{ draft.quantity }} / {{ draft.stock }}</td>
+                <td class="num">{{ draft.quantity }} / {% if draft.stock is None %}—{% else %}{{ draft.stock }}{% endif %}</td>
                 <td>
                   <span class="pill {% if draft.status == 'ready' or draft.status == 'published' %}active{% elif draft.status == 'needs_fix' or draft.status == 'failed' %}warn{% elif draft.status == 'draft' %}{% else %}partial{% endif %}">
                     {% if draft.status == "checking" or draft.status == "queued" or draft.status == "publishing" %}<span class="spinner" aria-hidden="true"></span>{% endif %}{{ draft.get_status_display }}

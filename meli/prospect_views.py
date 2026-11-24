@@ -51,6 +51,14 @@ def _link(request, organization, prospect):
             return
         prospect.product = product
     prospect.save(update_fields=["product", "updated_at"])
+    draft = prospect.draft
+    if prospect.product and draft and draft.fast() and draft.item_id:
+        # Its fast listing is on Mercado Libre: give it the product's SKU there, so the sync links it and its
+        # sales come off the product's stock from now on (the ones waiting apply then too).
+        from .jobs import dispatch_drafts_job
+
+        dispatch_drafts_job(organization, "listing_sku", item_id=draft.item_id, sku=prospect.product.sku)
+        messages.info(request, f"Linking {draft.item_id} to {prospect.product.sku} on Mercado Libre.")
 
 
 def scraped_post(request, organization):
@@ -143,7 +151,10 @@ def meli_draft_from_prospect(request, pk):
     if reason:
         messages.warning(request, f"{prospect.product.sku}: {reason}")
         return redirect(_back(request))
-    draft = product_draft(organization, prospect.product, request.user, category_id=prospect.category_id)
+    # The competitor's price is the suggestion; the product's list price when the scrape had none.
+    draft = product_draft(
+        organization, prospect.product, request.user, category_id=prospect.category_id, price=prospect.price
+    )
     prospect.draft = draft
     prospect.status = Status.DRAFTED
     prospect.save(update_fields=["draft", "status", "updated_at"])
@@ -181,3 +192,43 @@ def meli_draft_scraped_copy(request, pk):
     response = HttpResponse(status=204)
     response["HX-Redirect"] = f"{reverse('meli_draft', args=[draft.pk])}?prospect={prospect.pk}"
     return response
+
+
+@require_app(AppAccess.App.CATALOG)
+@require_POST
+def meli_draft_fast(request, pk):
+    """Fast publishing: a draft straight from a scraped listing, with no Vimple product (link one later).
+
+    Starts with the scraped title, photos (editable, another seller's), price and category; the page copies its
+    characteristics once the category's fields load. Package and a quantity are typed on the draft.
+    """
+    from .description import default_parts
+    from .jobs import dispatch_drafts
+    from .models import FastListed, ListingDraft, MercadoLibreAccount
+
+    organization, can_edit = _scope(request)
+    if not can_edit:
+        return HttpResponseForbidden(READ_ONLY)
+    prospect = get_object_or_404(MeliListingProspect, organization=organization, pk=pk)
+    if not MercadoLibreAccount.objects.filter(organization=organization).exists():
+        messages.warning(request, "Connect Mercado Libre to list it.")
+        return redirect(_back(request))
+    draft = ListingDraft(
+        organization=organization,
+        kind=ListingDraft.Kind.FAST,
+        title=prospect.title[:255],
+        pictures=(prospect.gallery() or ([prospect.picture] if prospect.picture else []))[:10],
+        price=prospect.price or 0,
+        quantity=1,
+        category_id=prospect.category_id,
+        status=ListingDraft.Status.CHECKING,
+        created_by=request.user,
+    )
+    # The copy blocks marked for new listings; there's no product description to start from.
+    draft.description_parts = [part for part in default_parts(organization, FastListed(draft)) if not part.get("product")]
+    draft.save()
+    dispatch_drafts(organization, "check", [draft.pk])
+    prospect.draft = draft
+    prospect.status = Status.DRAFTED
+    prospect.save(update_fields=["draft", "status", "updated_at"])
+    return redirect(f"{reverse('meli_draft', args=[draft.pk])}?prospect={prospect.pk}")

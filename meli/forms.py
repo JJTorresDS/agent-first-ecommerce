@@ -18,6 +18,9 @@ class ListingDefaultsForm(forms.ModelForm):
 
 
 def _quantity_problem(quantity, available):
+    if available is None:
+        # A fast listing has no product: no Depósito stock caps it.
+        return ""
     if available < 1:
         return "No stock left in the Depósito."
     if quantity > available:
@@ -102,7 +105,10 @@ class DraftForm(forms.ModelForm):
 
     class Meta:
         model = ListingDraft
-        fields = ["price", "quantity", "category_id", "template", "use_defaults", *ListingSettings.SETTING_FIELDS]
+        fields = [
+            "price", "quantity", "category_id", "template", "use_defaults", *ListingSettings.SETTING_FIELDS,
+            "title", "weight_g", "length_cm", "width_cm", "height_cm",
+        ]
         labels = {"category_id": "Mercado Libre category", "template": "Template for this category"}
         help_texts = {
             "category_id": "Pick one of Mercado Libre's suggestions; only the code (MLA…) is saved. "
@@ -114,7 +120,21 @@ class DraftForm(forms.ModelForm):
         self.available = available
         self.fields["price"].validators.append(MinValueValidator(MIN_PRICE))
         self.fields["quantity"].min_value = 1
-        self.fields["quantity"].widget.attrs.update({"min": 1, "max": max(available, 1)})
+        self.fields["quantity"].widget.attrs.update({"min": 1, **({"max": max(available, 1)} if available is not None else {})})
+        if self.instance.fast():
+            # A fast listing's own title, pictures and package stand in for a product's.
+            self.fields["title"].required = True
+            self.fields["title"].help_text = "Your listing's title on Mercado Libre."
+            self.fields["pictures_text"] = forms.CharField(
+                label="Pictures", required=False, widget=forms.Textarea(attrs={"rows": 4}),
+                initial="\n".join(self.instance.pictures or []),
+                help_text="One picture URL per line, the first is the main one; up to 10.",
+            )
+            for name in ("weight_g", "length_cm", "width_cm", "height_cm"):
+                self.fields[name].validators.append(MinValueValidator(0))
+        else:
+            for name in ("title", "weight_g", "length_cm", "width_cm", "height_cm"):
+                del self.fields[name]
         self.fields["use_defaults"].label = "Use the defaults"
         if self.instance.regular():
             self.fields["template"].help_text = (
@@ -131,6 +151,28 @@ class DraftForm(forms.ModelForm):
         from catalog.validators import clean_category_id
 
         return clean_category_id(self.cleaned_data.get("category_id"))
+
+    def clean_pictures_text(self):
+        from django.core.validators import URLValidator
+
+        urls = [line.strip() for line in self.cleaned_data.get("pictures_text", "").splitlines() if line.strip()]
+        if len(urls) > 10:
+            raise forms.ValidationError("Mercado Libre takes up to 10 pictures.")
+        check = URLValidator(schemes=["https", "http"])
+        for url in urls:
+            try:
+                check(url)
+            except forms.ValidationError:
+                raise forms.ValidationError(f"Not a picture URL: {url[:80]}") from None
+        return urls
+
+    def save(self, commit=True):
+        draft = super().save(commit=False)
+        if "pictures_text" in self.cleaned_data:
+            draft.pictures = self.cleaned_data["pictures_text"]
+        if commit:
+            draft.save()
+        return draft
 
     def clean_quantity(self):
         if self.data.get("template") and "template" in self.fields:

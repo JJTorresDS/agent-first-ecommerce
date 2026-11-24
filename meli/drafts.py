@@ -103,7 +103,8 @@ def build_item(draft, settings, user_products=False, overrides=True):
         sale_terms.append({"id": "WARRANTY_TYPE", "value_id": WARRANTY_TYPE[settings.warranty]})
         sale_terms.append({"id": "WARRANTY_TIME", "value_name": f"{settings.warranty_days} días"})
     listed = draft.listed()
-    attributes = [{"id": "SELLER_SKU", "value_name": listed.sku}]
+    # A fast listing has no SKU until it's linked to a product.
+    attributes = [{"id": "SELLER_SKU", "value_name": listed.sku}] if listed.sku else []
     if settings.condition == ListingSettings.Condition.NEW:
         attributes.append({"id": "ITEM_CONDITION", "value_id": CONDITION_NEW})
     else:
@@ -355,7 +356,9 @@ def package_missing(listed):
 
 
 def pictures_of(listed):
-    """A product's pictures in order; a combo has its one picture."""
+    """A product's pictures in order; a combo has its one picture; a fast listing its own list."""
+    if hasattr(listed, "picture_urls"):
+        return listed.picture_urls
     images = getattr(listed, "images", None)
     urls = list(images.filter(organization_id=listed.organization_id).values_list("url", flat=True)) if images else []
     return urls or [listed.image_url]
@@ -406,7 +409,12 @@ def product_attributes(draft):
         if key in known and key not in OWN_ATTRIBUTES and _text(value):
             values[key] = _text(value)
     for key, value in (draft.attributes or {}).items():
-        if key not in OWN_ATTRIBUTES and _text(value):
+        if key in OWN_ATTRIBUTES:
+            continue
+        if value is None:
+            # Left out on the draft: not sent, even when the product has a value.
+            values.pop(key, None)
+        elif _text(value):
             values[key] = _text(value)
     schema = {attribute["id"]: attribute for attribute in draft.category_schema or []}
     attributes = []
@@ -576,7 +584,12 @@ def _log_refusal(what, draft, error):
 
 
 def available_for(draft, stock):
-    """Units this draft can sell: the product's Depósito stock, or how many complete combos it makes."""
+    """Units this draft can sell: the product's Depósito stock, or how many complete combos it makes.
+
+    None for a fast listing: it has no product, so the quantity typed is what's posted.
+    """
+    if draft.kind == ListingDraft.Kind.FAST:
+        return None
     if draft.combo_id:
         return draft.combo.can_make(stock)
     return stock.get(draft.product_id, 0)
@@ -584,6 +597,8 @@ def available_for(draft, stock):
 
 def _stock_problem(draft, stock):
     available = available_for(draft, stock)
+    if available is None:
+        return ""
     if available < 1:
         return "No stock left in the Depósito."
     if draft.quantity > available:
@@ -650,6 +665,10 @@ def _check_one(draft, token, defaults, stock, site, user_products=False):
     if draft.kind != ListingDraft.Kind.CATALOG and not draft.category_id:
         _set(draft, ListingDraft.Status.NEEDS_FIX, "Mercado Libre didn't suggest a category: enter one (MLA…).")
         return
+    problem = _fast_problem(draft)
+    if problem:
+        _set(draft, ListingDraft.Status.NEEDS_FIX, problem)
+        return
     body = build_item(draft, settings_of(draft, defaults), user_products)
     # All four, from the catalog product, the product's Package or an applied AI fix.
     sent = {attribute["id"] for attribute in body["attributes"]}
@@ -660,6 +679,8 @@ def _check_one(draft, token, defaults, stock, site, user_products=False):
             "This catalog product has no package measures on Mercado Libre: fill in Package on the product, "
             "then Save and check."
             if draft.kind == ListingDraft.Kind.CATALOG
+            else "Mercado Libre needs the package weight and size: fill in Package below, then Save and check."
+            if draft.kind == ListingDraft.Kind.FAST
             else "Mercado Libre needs the package weight and size: fill in Package on the product, then Save and check.",
         )
         return
@@ -683,6 +704,19 @@ def _check_one(draft, token, defaults, stock, site, user_products=False):
         error.details = details
         raise
     _set(draft, ListingDraft.Status.READY)
+
+
+def _fast_problem(draft):
+    """What a fast listing still needs before Mercado Libre can validate it: price, title, a picture."""
+    if draft.kind != ListingDraft.Kind.FAST:
+        return ""
+    if not draft.price or draft.price <= 0:
+        return "Set a price, then Save and check."
+    if not draft.title.strip():
+        return "Give it a title, then Save and check."
+    if not [url for url in draft.pictures or [] if url]:
+        return "Add at least one picture, then Save and check."
+    return ""
 
 
 def _category_for(token, site, product):

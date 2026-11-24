@@ -199,3 +199,24 @@ def find_categories(organization, prospect_ids):
         row.category_checked_at = timezone.now()
         row.save(update_fields=["category_id", "category_path", "category_checked_at", "category_error", "updated_at"])
 
+
+
+def link_listing(organization, item_id, sku):
+    """The worker's half of linking a fast listing to a product: its SKU on Mercado Libre, then the item read
+    again, so the sync links it by SKU and applies its waiting sales. A refusal shows on its Listings row."""
+    from .client import describe_failure, update_item
+    from .drafts import _reason, _token
+    from .listings import refresh_listing
+    from .models import MeliListing
+
+    try:
+        token = _token(organization)
+        update_item(token, item_id, {"attributes": [{"id": "SELLER_SKU", "value_name": sku}]})
+        refresh_listing(organization, item_id)
+    except Exception as error:
+        logger.warning("Listing %s not linked to %s: %s", item_id, sku, describe_failure(error))
+        MeliListing.objects.filter(organization=organization, item_id=item_id).update(
+            action_error=f"Couldn't set SKU {sku}: {_reason(error)}"[:300]
+        )
+        return
+    logger.info("Listing %s linked to %s", item_id, sku)

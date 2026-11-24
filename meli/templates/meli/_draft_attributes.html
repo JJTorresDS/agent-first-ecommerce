@@ -78,7 +78,7 @@
   {% if draft.category_schema %}
     <fieldset class="form-grid guided"{% if not can_edit %} disabled{% endif %}>
       <legend>Required by Mercado Libre</legend>
-      {% for field in guided_required %}{% include "meli/_guided_field.html" %}{% empty %}<p class="muted wide">Nothing beyond the brand, model and GTIN, which come from the product.</p>{% endfor %}
+      {% for field in guided_required %}{% include "meli/_guided_field.html" %}{% empty %}<p class="muted wide">{% if draft.fast %}Nothing for this category.{% else %}Nothing beyond the brand, model and GTIN, which come from the product.{% endif %}</p>{% endfor %}
     </fieldset>
     {% if guided_recommended %}
       <details class="guided-more">
@@ -88,7 +88,7 @@
         </fieldset>
       </details>
     {% endif %}
-    <p class="muted">Brand, model and GTIN come from the product. Values here win over the product's for this listing.</p>
+    <p class="muted">{% if draft.fast %}Without a brand it's listed as Generic.{% else %}Brand, model and GTIN come from the product. Values here win over the product's for this listing.{% endif %} Leave out sends nothing for a field{% if not draft.fast %}, even when the product has a value{% endif %}.</p>
     {% if draft.product_id and can_edit %}
       <div class="field check-field">
         <label class="check-label"><input type="checkbox" name="save_to_product" checked> Also save these to the product</label>

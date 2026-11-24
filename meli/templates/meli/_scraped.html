@@ -2,7 +2,7 @@
   Create listing → From a scraped listing: listings scraped from Mercado Libre (POST /api/meli/prospects).
   Its forms post to meli_drafts, which hands the scraped_* and *_selected actions to meli/prospect_views.py.
 {% endcomment %}
-<p class="muted">Link a scraped listing to your product, then create your own listing: it copies the scraped listing's characteristics.</p>
+<p class="muted">Link a scraped listing to your product and create your listing from it, or fast publish it now and link a product later.</p>
 {% if not any_scraped %}
   <p>No scraped listings yet. Your scraper sends them to <span class="mono">POST /api/meli/prospects?organization={{ scraped_organization }}</span> with the organization's API key (Organization page); each one arrives here as pending.</p>
 {% else %}
@@ -76,6 +76,13 @@
                       <button type="submit">{% if prospect.draft_id %}Another listing{% else %}Create listing{% endif %}</button>
                     </form>
                   {% endif %}
+                {% endif %}
+                {% if prospect.status != "dismissed" %}
+                  <form method="post" action="{% url 'meli_draft_fast' prospect.pk %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="next" value="{{ back }}">
+                    <button type="submit" title="Post it without a Vimple product: its title, photos, price and category, your quantity and package. Link a product later.">Fast publish</button>
+                  </form>
                 {% endif %}
                 <form method="post" action="{% url 'meli_drafts' %}" id="scraped-category-{{ prospect.pk }}" hidden>
                   {% csrf_token %}

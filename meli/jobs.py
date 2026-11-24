@@ -760,6 +760,11 @@ def _run_drafts_payload(payload):
 
             apply_change(organization, job.get("change_id"))
             return
+        if job.get("action") == "listing_sku":
+            from .prospects import link_listing
+
+            link_listing(organization, str(job.get("item_id") or ""), str(job.get("sku") or ""))
+            return
         if job.get("action") == "prospect_categories":
             from .prospects import find_categories
 

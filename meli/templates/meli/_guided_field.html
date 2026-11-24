@@ -1,6 +1,6 @@
-<div class="field{% if field.required and not field.value %} needs-attention{% endif %}">
+<div class="field{% if field.required and not field.value %} needs-attention{% endif %}{% if field.omitted %} omitted{% endif %}">
   <input type="hidden" name="attr_key" value="{{ field.id }}">
-  <label for="ga-{{ field.id }}">{{ field.name }}{% if field.required %} <span class="req" aria-hidden="true">*</span>{% endif %}</label>
+  <label for="ga-{{ field.id }}">{{ field.name }}{% if field.required %} <span class="req-tag">Required</span>{% endif %}</label>
   {% if field.values %}
     <select name="attr_value" id="ga-{{ field.id }}">
       <option value="">—</option>
@@ -16,6 +16,10 @@
     </div>
   {% else %}
     <input type="text" name="attr_value" id="ga-{{ field.id }}" value="{{ field.value }}"{% if field.type == "number_unit" %} placeholder="30 mL"{% endif %}>
+  {% endif %}
+  {% if not field.required %}
+    {# Not sent at all, even when the product has a value: for a value Mercado Libre refuses. #}
+    <label class="check-label omit-label"><input type="checkbox" name="attr_omit" value="{{ field.id }}"{% if field.omitted %} checked{% endif %}> Leave out</label>
   {% endif %}
   {% if field.hint %}<p class="help">{{ field.hint }}</p>{% endif %}
   {% if field.copied %}<p class="help">From “{{ field.copied }}”</p>{% endif %}

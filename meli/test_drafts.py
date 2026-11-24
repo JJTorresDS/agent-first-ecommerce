@@ -50,6 +50,7 @@ class FakeSellFlow:
         self.refuse_description = False
         self.paused = []
         self.refuse_pause = False
+        self.skus_set = []
 
     def _refused(self, request):
         if self.refuse_text:
@@ -139,8 +140,12 @@ class FakeSellFlow:
                 raise self._refused(request)
             self.paused.append(url.path.split("/")[2])
             return TokenResponse({"id": url.path.split("/")[2], "status": "paused"})
+        if url.path.startswith("/items/") and method == "PUT" and "attributes" in (body or {}):
+            self.skus_set.append((url.path.split("/")[2], body["attributes"][0]["value_name"]))
+            return TokenResponse({"id": url.path.split("/")[2]})
         if url.path == "/items" and method == "GET":
-            sku = self.created[-1]["attributes"][0]["value_name"]
+            sku = self.skus_set[-1][1] if self.skus_set else next(
+                (a.get("value_name", "") for a in self.created[-1]["attributes"] if a["id"] == "SELLER_SKU"), "")
             status = "paused" if "MLA900" in self.paused else "active"
             return TokenResponse([{"code": 200, "body": item("MLA900", sku=sku, status=status, catalog_listing=True)}])
         raise AssertionError(f"{method} {request.full_url}")

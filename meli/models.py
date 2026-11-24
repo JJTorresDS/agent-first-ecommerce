@@ -536,6 +536,7 @@ class ListingDraft(ListingSettings):
         CATALOG = "catalog", "Catalog"
         PRODUCT = "product", "Regular listing"
         COMBO = "combo", "Combo listing"
+        FAST = "fast", "Fast listing"
 
     class Status(models.TextChoices):
         DRAFT = "draft", "Draft"
@@ -624,6 +625,13 @@ class ListingDraft(ListingSettings):
         help_text='An applied AI fix, merged over the body build_item makes: {"title": …, "attributes": {ID: {…} or null}}. '
         "Price, quantity, SKU and the other fields Vimple owns never change.",
     )
+    # A fast listing (kind fast, from a scraped listing) has no product: these stand in for the product's.
+    title = models.CharField(max_length=255, blank=True)
+    pictures = models.JSONField(default=list, blank=True, help_text="Picture URLs in order, up to 10.")
+    weight_g = models.PositiveIntegerField("Weight (g)", null=True, blank=True)
+    length_cm = models.DecimalField("Length (cm)", max_digits=7, decimal_places=1, null=True, blank=True)
+    width_cm = models.DecimalField("Width (cm)", max_digits=7, decimal_places=1, null=True, blank=True)
+    height_cm = models.DecimalField("Height (cm)", max_digits=7, decimal_places=1, null=True, blank=True)
     item_id = models.CharField(max_length=32, blank=True)
     published_at = models.DateTimeField(null=True, blank=True)
     created_by = models.ForeignKey(
@@ -645,16 +653,23 @@ class ListingDraft(ListingSettings):
         return self.status in self.LOCKED
 
     def regular(self):
-        """A listing Vimple describes itself (product or combo), not one in a catalog product."""
-        return self.kind in (self.Kind.PRODUCT, self.Kind.COMBO)
+        """A listing Vimple describes itself (product, combo or fast), not one in a catalog product."""
+        return self.kind in (self.Kind.PRODUCT, self.Kind.COMBO, self.Kind.FAST)
+
+    def fast(self):
+        return self.kind == self.Kind.FAST
 
     def listed(self):
-        """What the listing sells: the combo, else the product."""
+        """What the listing sells: the combo, else the product; a fast listing stands in for itself."""
+        if self.kind == self.Kind.FAST:
+            return FastListed(self)
         return self.combo if self.combo_id else self.product
 
     def listed_url(self):
         from django.urls import reverse
 
+        if self.kind == self.Kind.FAST:
+            return reverse("meli_draft", args=[self.pk])
         if self.combo_id:
             return reverse("catalog_combo", args=[self.combo_id])
         return reverse("catalog_product", args=[self.product_id])
@@ -670,6 +685,35 @@ class ListingDraft(ListingSettings):
 
     def item_url(self):
         return f"https://articulo.mercadolibre.com.ar/{self.item_id[:3]}-{self.item_id[3:]}" if self.item_id else ""
+
+
+class FastListed:
+    """A fast listing's stand-in for a product: its own title, pictures and package, no SKU or stock.
+
+    Brand, model and GTIN are the draft's own attributes (BRAND, MODEL, GTIN); without a BRAND it's Generic.
+    """
+
+    sku = ""
+    gtin = ""
+    attributes = {}
+    product_model = None
+    description = ""
+    list_price = None
+    meli_category_id = ""
+    pk = None
+
+    def __init__(self, draft):
+        self.draft = draft
+        self.organization_id = draft.organization_id
+        self.title = draft.title
+        self.picture_urls = [url for url in draft.pictures or [] if url][:10]
+        self.image_url = self.picture_urls[0] if self.picture_urls else ""
+        self.gtin = str((draft.attributes or {}).get("GTIN") or "")
+        for name in ("weight_g", "length_cm", "width_cm", "height_cm"):
+            setattr(self, name, getattr(draft, name))
+
+    def __str__(self):
+        return self.title
 
 
 class ListingTemplate(models.Model):

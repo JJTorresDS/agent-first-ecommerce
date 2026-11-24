@@ -19,7 +19,7 @@
       <label for="fix-body">Body to send (you can edit it)</label>
       <textarea id="fix-body" name="fix_body" rows="14" spellcheck="false">{{ fix_text }}</textarea>
       {% if fix.package %}
-        <label class="check-label"><input type="checkbox" name="save_package" value="1" checked> Also save package size and weight to the product</label>
+        <label class="check-label"><input type="checkbox" name="save_package" value="1" checked> Also save package size and weight to {% if draft.fast %}this draft{% else %}the product{% endif %}</label>
       {% endif %}
       <div class="ai-row">
         <button type="submit">Use this and check</button>

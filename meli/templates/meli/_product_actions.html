@@ -13,4 +13,14 @@
       </form>
     {% endif %}
   {% endif %}
+  {% if competitors %}
+    <div class="competitors">
+      <p class="muted">Competitors on Mercado Libre (linked scraped listings):</p>
+      <ul class="plain lines">
+        {% for row in competitors %}
+          <li>{% if row.url %}<a href="{{ row.url }}" target="_blank" rel="noopener">{{ row.title|default:row.external_id }}</a>{% else %}{{ row.title|default:row.external_id }}{% endif %}{% if row.seller %} <span class="muted">· {{ row.seller }}</span>{% endif %}{% if row.price is not None %} <span class="muted">· ARS {{ row.price }}</span>{% endif %}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endif %}
 </div>
