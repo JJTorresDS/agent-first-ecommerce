@@ -550,7 +550,15 @@ class UploadAndPauseTests(ScrapedDraftCase):
         self.client.post("/catalog/meli/new/", {"action": "post", "draft": [self.draft_row.pk]})
         self.draft_row.refresh_from_db()
         self.assertEqual((self.draft_row.status, self.meli.paused, self.meli.downloaded), (ListingDraft.Status.PUBLISHED, [], []))
-        self.assertContains(self.client.get("/catalog/meli/new/"), 'name="pause_after"', html=False)
+        # The list reloads while a draft is busy: the box and the ticked rows are kept through it.
+        page = self.client.get("/catalog/meli/new/")
+        self.assertContains(page, 'name="pause_after" value="1" id="pause-after" hx-preserve', html=False)
+
+    def test_post_all_ready_can_pause_too(self):
+        self.save(picture=["https://img.example/a.jpg"])
+        self.client.post("/catalog/meli/new/", {"action": "post_all", "pause_after": "1"})
+        self.draft_row.refresh_from_db()
+        self.assertEqual((self.draft_row.status, self.meli.paused), (ListingDraft.Status.PUBLISHED, ["MLA900"]))
 
 
 class PictureHostTests(TestCase):
