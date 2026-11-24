@@ -460,6 +460,9 @@
     .scraped-link { display: flex; gap: 0.4rem; margin: 0.3rem 0 0; }
     .scraped-link input { width: 10rem; min-width: 0; }
     .scraped-category { margin: 0.2rem 0 0; font-size: 0.85rem; }
+    .category-current { margin: 0.25rem 0 0; font-size: 0.9rem; }
+    .suggested-price { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: baseline; margin: 0.2rem 0; }
+    .competitor-row { display: grid; grid-template-columns: auto 1fr auto; gap: 0.6rem; align-items: center; }
     .filters input[type="search"], .filters input[type="date"], .filters select { padding: 0.45rem 0.6rem; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); }
     .filters input[type="search"] { width: 100%; }
     fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
@@ -474,7 +477,10 @@
     .req-tag { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); border: 1px solid var(--line-strong); border-radius: 4px; padding: 0 0.3rem; margin-left: 0.25rem; }
     .omit-label { font-size: 0.85rem; color: var(--muted); margin-top: 0.25rem; }
     .field.omitted input, .field.omitted select { opacity: 0.45; }
-    .fast-pictures { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+    .picture-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 0.5rem; margin: 0.5rem 0; }
+    .picture-option { display: flex; flex-direction: column; align-items: center; gap: 0.2rem; padding: 0.35rem; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; font-size: 0.75rem; }
+    .picture-option img { width: 100%; aspect-ratio: 1; object-fit: contain; background: var(--gray-1); border-radius: 4px; }
+    .picture-option:has(input:checked) { border-color: var(--neon-strong); }
     .field .help { font-size: 0.78rem; color: #7a838b; margin: 0.3rem 0 0; }
     .field input:not([type="checkbox"]), .field select, .field textarea,
     .attr-row input, .line input, .code-form input {
@@ -1338,5 +1344,31 @@
     })();
   </script>
   {% endif %}
+  <script>
+    // A Mercado Libre category field shows the chosen code's name under it, from the suggestions' datalist
+    // (meli/_category_options.html also names the saved code). Typing an unknown code clears the line until
+    // the field's change reloads the suggestions, which look it up.
+    (function () {
+      function show(input) {
+        var list = document.getElementById("category-suggestions");
+        var line = document.getElementById("category-current");
+        if (!list || !line) return;
+        var code = (input.value || "").trim().split(/\s/)[0].toUpperCase();
+        var option = null;
+        Array.prototype.forEach.call(list.options, function (item) { if (item.value === code) option = item; });
+        line.textContent = "";
+        if (!option) { line.hidden = true; return; }
+        var mono = document.createElement("span");
+        mono.className = "mono";
+        mono.textContent = code;
+        line.appendChild(mono);
+        line.appendChild(document.createTextNode(" — " + (option.textContent || option.label)));
+        line.hidden = false;
+      }
+      document.addEventListener("input", function (event) {
+        if (event.target.matches && event.target.matches("input[list='category-suggestions']")) show(event.target);
+      });
+    })();
+  </script>
 </body>
 </html>

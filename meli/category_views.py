@@ -26,8 +26,12 @@ def meli_categories(request):
     """
     from .drafts import _site, _token
 
+    from catalog.validators import clean_category_id
+
     organization = membership_for(request.user).organization
     title = " ".join((request.GET.get("title") or request.GET.get("q") or "").split())[:200]
+    # The field's own value, sent along (meli_category_id or category_id), so the page can say what it is.
+    current = clean_category_id(request.GET.get("meli_category_id") or request.GET.get("category_id") or "")
     options, note = [], ""
     if not title:
         note = "Type the title to get Mercado Libre's categories."
@@ -47,7 +51,43 @@ def meli_categories(request):
                 cache.set(key, options, CACHE_SECONDS)
         if not options and not note:
             note = "Mercado Libre has no category for this title; try a clearer one."
-    return render(request, "meli/_category_options.html", {"options": options, "note": note})
+    labels = {option["id"]: option["label"] for option in options}
+    if current and current not in labels and MercadoLibreAccount.objects.filter(organization=organization).exists():
+        labels[current] = category_label(organization, current)
+    return render(
+        request,
+        "meli/_category_options.html",
+        {
+            "options": options,
+            "note": note,
+            "current": current,
+            "current_label": labels.get(current, ""),
+            # The datalist names the current code too, so picking or typing it shows its name.
+            "known": [{"id": key, "label": label} for key, label in labels.items() if label],
+        },
+    )
+
+
+LABEL_SECONDS = 24 * 60 * 60
+
+
+def category_label(organization, category_id):
+    """ "Belleza y Cuidado Personal › Perfumes" for a category code, cached a day; "" when unknown."""
+    from .client import fetch_category
+    from .drafts import _token
+
+    key = f"meli:category-label:{category_id}"
+    label = cache.get(key)
+    if label is None:
+        try:
+            category = fetch_category(_token(organization), category_id)
+        except Exception as error:
+            logger.warning("Category %s not read: %s", category_id, describe_failure(error))
+            return ""
+        path = [str(step.get("name") or "") for step in category.get("path_from_root") or [] if isinstance(step, dict)]
+        label = " › ".join(name for name in path if name) or str(category.get("name") or "")
+        cache.set(key, label, LABEL_SECONDS)
+    return label
 
 
 def top_categories(guesses):

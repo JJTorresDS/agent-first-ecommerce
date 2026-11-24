@@ -36,7 +36,7 @@
           </div>
         {% endif %}
         {% include "_field.html" with field=form.meli_category_id %}
-        <div class="category-loader" hx-get="{% url 'meli_categories' %}" hx-trigger="load, input changed delay:600ms from:#id_title" hx-include="#id_title" hx-target="this" hx-swap="innerHTML"></div>
+        <div class="category-loader" hx-get="{% url 'meli_categories' %}" hx-trigger="load, input changed delay:600ms from:#id_title, change from:#id_meli_category_id" hx-include="#id_title, #id_meli_category_id" hx-target="this" hx-swap="innerHTML"></div>
       </fieldset>
       <h3 id="package">Package</h3>
       <p class="{% if package_flags %}warn-note{% else %}muted{% endif %} package-note">Mercado Libre needs the package weight and size to post{% if package_flags %}, so this can't be listed yet{% endif %}. Measure the packed item: wrong values lead to fines, shipping overcharges and buyer claims.</p>

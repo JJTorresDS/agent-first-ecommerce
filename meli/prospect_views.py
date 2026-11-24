@@ -5,10 +5,12 @@ Link one to a catalog product, then Create listing opens a regular draft for tha
 scraped listing's characteristics once its category's attributes load.
 """
 
+from decimal import ROUND_FLOOR, Decimal
+
 from django.contrib import messages
 from django.db.models import Q
 from django.http import HttpResponse, HttpResponseForbidden
-from django.shortcuts import get_object_or_404, redirect
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
@@ -232,3 +234,31 @@ def meli_draft_fast(request, pk):
     prospect.status = Status.DRAFTED
     prospect.save(update_fields=["draft", "status", "updated_at"])
     return redirect(f"{reverse('meli_draft', args=[draft.pk])}?prospect={prospect.pk}")
+
+
+UNDERCUT = Decimal("0.95")
+
+
+@require_app(AppAccess.App.CATALOG)
+def meli_product_competitors(request, pk):
+    """The product page's suggested price: 5% below the lowest competitor (its linked scraped listings with a
+    price, not dismissed), and every competitor's price in a dropdown. Loaded by htmx: catalog never imports meli."""
+    from catalog.models import MasterProduct
+
+    organization, can_edit = _scope(request)
+    product = get_object_or_404(MasterProduct, organization=organization, pk=pk)
+    competitors = list(
+        MeliListingProspect.objects.filter(organization=organization, product=product, price__isnull=False)
+        .exclude(status=Status.DISMISSED)
+        .only("title", "external_id", "url", "seller", "price", "picture")
+        .order_by("price", "pk")[:20]
+    )
+    if not competitors:
+        return HttpResponse("")
+    lowest = competitors[0]
+    suggested = (lowest.price * UNDERCUT).quantize(Decimal("1"), rounding=ROUND_FLOOR)
+    return render(
+        request,
+        "meli/_competitor_price.html",
+        {"competitors": competitors, "lowest": lowest, "suggested": suggested, "can_edit": can_edit},
+    )

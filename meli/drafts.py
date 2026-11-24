@@ -141,7 +141,8 @@ def build_item(draft, settings, user_products=False, overrides=True):
             body["family_name"] = listed.title
         else:
             body["title"] = listed.title
-        body["pictures"] = [{"source": url} for url in pictures_of(listed)]
+        # The draft's own pick (fast listings, or chosen from a scraped listing), else the product's.
+        body["pictures"] = [{"source": url} for url in (draft.pictures or pictures_of(listed))[:10]]
         attributes.extend(package_attributes(listed))
         attributes.extend(product_attributes(draft))
     if draft.category_id:

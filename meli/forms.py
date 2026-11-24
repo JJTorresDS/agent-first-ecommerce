@@ -115,21 +115,27 @@ class DraftForm(forms.ModelForm):
             "Empty: Mercado Libre picks one from the title."
         }
 
-    def __init__(self, *args, available, **kwargs):
+    def __init__(self, *args, available, picture_options=None, product_pictures=(), **kwargs):
         super().__init__(*args, **kwargs)
+        # The picture picker: [(url, source)] to tick, offered to fast drafts and drafts from a scraped listing.
+        self.picture_options = picture_options or []
+        self.product_pictures = list(product_pictures)
+        if self.picture_options:
+            self.fields["picture"] = forms.MultipleChoiceField(
+                required=False, choices=[(url, url) for url, _source in self.picture_options]
+            )
+            self.fields["pictures_extra"] = forms.CharField(
+                label="Add picture URLs", required=False, widget=forms.Textarea(attrs={"rows": 2}),
+                help_text="One per line, added after the ticked ones.",
+            )
         self.available = available
         self.fields["price"].validators.append(MinValueValidator(MIN_PRICE))
         self.fields["quantity"].min_value = 1
         self.fields["quantity"].widget.attrs.update({"min": 1, **({"max": max(available, 1)} if available is not None else {})})
         if self.instance.fast():
-            # A fast listing's own title, pictures and package stand in for a product's.
+            # A fast listing's own title and package stand in for a product's.
             self.fields["title"].required = True
             self.fields["title"].help_text = "Your listing's title on Mercado Libre."
-            self.fields["pictures_text"] = forms.CharField(
-                label="Pictures", required=False, widget=forms.Textarea(attrs={"rows": 4}),
-                initial="\n".join(self.instance.pictures or []),
-                help_text="One picture URL per line, the first is the main one; up to 10.",
-            )
             for name in ("weight_g", "length_cm", "width_cm", "height_cm"):
                 self.fields[name].validators.append(MinValueValidator(0))
         else:
@@ -152,24 +158,36 @@ class DraftForm(forms.ModelForm):
 
         return clean_category_id(self.cleaned_data.get("category_id"))
 
-    def clean_pictures_text(self):
+    def clean(self):
+        cleaned = super().clean()
+        if "picture" not in self.fields:
+            return cleaned
         from django.core.validators import URLValidator
 
-        urls = [line.strip() for line in self.cleaned_data.get("pictures_text", "").splitlines() if line.strip()]
-        if len(urls) > 10:
-            raise forms.ValidationError("Mercado Libre takes up to 10 pictures.")
         check = URLValidator(schemes=["https", "http"])
-        for url in urls:
+        urls = list(cleaned.get("picture") or [])
+        for line in (cleaned.get("pictures_extra") or "").splitlines():
+            url = line.strip()
+            if not url:
+                continue
             try:
                 check(url)
             except forms.ValidationError:
-                raise forms.ValidationError(f"Not a picture URL: {url[:80]}") from None
-        return urls
+                self.add_error("pictures_extra", f"Not a picture URL: {url[:80]}")
+                return cleaned
+            urls.append(url)
+        urls = list(dict.fromkeys(urls))
+        if len(urls) > 10:
+            self.add_error("picture", "Mercado Libre takes up to 10 pictures.")
+        cleaned["pictures"] = urls
+        return cleaned
 
     def save(self, commit=True):
         draft = super().save(commit=False)
-        if "pictures_text" in self.cleaned_data:
-            draft.pictures = self.cleaned_data["pictures_text"]
+        if "pictures" in self.cleaned_data:
+            pictures = self.cleaned_data["pictures"]
+            # A product draft with exactly the product's pictures keeps following the product.
+            draft.pictures = [] if not draft.fast() and pictures == self.product_pictures else pictures
         if commit:
             draft.save()
         return draft

@@ -52,6 +52,20 @@ class AiFixTests(DraftTestCase):
             f"/catalog/meli/new/{self.refused.pk}/fix/apply/", {"fix_body": json.dumps(body), **extra}
         )
 
+    def test_the_fix_reads_values_as_words_and_the_scraped_listing(self):
+        from .models import MeliListingProspect
+
+        MeliListingProspect.objects.create(
+            organization=self.organization, external_id="MLAU1", title="Perfume ajeno", draft=self.refused,
+            payload={"characteristics": {"Formato de venta": "Unidad"}},
+        )
+        fake = FakeMistral(self.suggestion(attributes={"SELLER_PACKAGE_WEIGHT": "450 g"}))
+        with patch("vimple.ai.urlopen", side_effect=fake):
+            self.client.post(f"/catalog/meli/new/{self.refused.pk}/fix/")
+        sent = json.loads(fake.asked[0]["messages"][1]["content"])
+        self.assertIn({"id": "SELLER_SKU", "name": "", "value": self.product.sku}, sent["sent_readable"])
+        self.assertEqual(sent["reference_listing"], {"title": "Perfume ajeno", "characteristics": {"Formato de venta": "Unidad"}})
+
     def test_a_refused_draft_offers_the_ai_fix_and_nothing_changes_until_it_is_used(self):
         self.assertEqual(self.refused.status, ListingDraft.Status.NEEDS_FIX)
         listed = self.client.get("/catalog/meli/new/")
@@ -182,3 +196,4 @@ class OverrideTests(DraftTestCase):
         )
         self.assertEqual(values, {"height_cm": Decimal("4.5"), "weight_g": 1200})
         self.assertEqual(sorted(unread), ["SELLER_PACKAGE_LENGTH", "SELLER_PACKAGE_WIDTH"])
+

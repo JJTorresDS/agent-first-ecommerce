@@ -371,14 +371,14 @@ class FastPublishTests(PerfumeDraftCase):
         self.assertEqual(draft.error, "Mercado Libre needs the package weight and size: fill in Package below, then Save and check.")
         page = self.client.get(f"/catalog/meli/new/{draft.pk}/")
         self.assertContains(page, "Fast listing: not linked to a Vimple product")
-        self.assertContains(page, "which are another seller's")
+        self.assertContains(page, "Scraped ones are another seller's photos")
         self.prospect.refresh_from_db()
         self.assertEqual((self.prospect.status, self.prospect.draft), (MeliListingProspect.Status.DRAFTED, draft))
 
         # More than the Depósito holds (3): no product, so no cap.
         self.client.post(f"/catalog/meli/new/{draft.pk}/", {
             **DRAFT_FORM, "price": "14500", "quantity": "5", "title": "Kit pestañas descartables",
-            "pictures_text": "https://img.example/mine.jpg\nhttps://http2.mlstatic.com/b.jpg",
+            "picture": ["https://http2.mlstatic.com/b.jpg"], "pictures_extra": "https://img.example/mine.jpg",
             "weight_g": "120", "length_cm": "15", "width_cm": "10", "height_cm": "5",
             "attr_key": ["BRAND", "PERFUME_TYPE", "UNIT_VOLUME", "PERFUME_NAME", "GENDER"],
             "attr_value": ["City Girl", "Eau de parfum", "30 mL", "Kit", "Mujer"],
@@ -392,7 +392,8 @@ class FastPublishTests(PerfumeDraftCase):
         self.assertNotIn("SELLER_SKU", sent)
         self.assertEqual(sent["BRAND"]["value_name"], "City Girl")
         self.assertEqual(sent["SELLER_PACKAGE_WEIGHT"]["value_name"], "120 g")
-        self.assertEqual(body["pictures"], [{"source": "https://img.example/mine.jpg"}, {"source": "https://http2.mlstatic.com/b.jpg"}])
+        # Ticked scraped photo first, then the added URL; the unticked one is left out.
+        self.assertEqual(body["pictures"], [{"source": "https://http2.mlstatic.com/b.jpg"}, {"source": "https://img.example/mine.jpg"}])
         self.assertEqual((body["available_quantity"], body["title"]), (5, "Kit pestañas descartables"))
 
         self.client.post("/catalog/meli/new/", {"action": "post", "draft": [draft.pk]})
@@ -412,3 +413,94 @@ class FastPublishTests(PerfumeDraftCase):
         self.client.force_login(member(self.organization, role=Membership.Role.CONTRIBUTOR, username="bea"))
         self.assertEqual(self.fast().status_code, 403)
         self.assertFalse(ListingDraft.objects.exists())
+
+
+@override_settings(MISTRAL_API_KEY="")
+class ScrapedPictureTests(PerfumeDraftCase):
+    def setUp(self):
+        super().setUp()
+        self.meli.category_attributes = [*PERFUME_ATTRIBUTES, NAME, GENDER]
+        self.prospect = prospect_for(self.organization, product=self.product, payload={
+            **SCRAPED[0], "images": {"gallery": ["https://http2.mlstatic.com/s1.webp", "https://http2.mlstatic.com/s2.webp"]},
+        })
+        self.client.post(f"/catalog/meli/new/scraped/{self.prospect.pk}/")
+        self.draft_row = self.draft()
+
+    def save(self, **pictures):
+        from .drafts import build_item, defaults_for
+
+        self.client.post(f"/catalog/meli/new/{self.draft_row.pk}/", {
+            **DRAFT_FORM, "price": "15999", **pictures,
+            "attr_key": ["PERFUME_TYPE", "PERFUME_NAME", "GENDER"], "attr_value": ["Eau de parfum", "Kit", "Mujer"],
+        })
+        self.draft_row.refresh_from_db()
+        return [picture["source"] for picture in build_item(self.draft_row, defaults_for(self.organization))["pictures"]]
+
+    def test_the_scraped_listings_pictures_can_be_picked(self):
+        page = self.client.get(f"/catalog/meli/new/{self.draft_row.pk}/")
+        self.assertContains(page, 'name="picture" value="https://img.example/a.jpg" checked', html=False)
+        self.assertContains(page, 'name="picture" value="https://http2.mlstatic.com/s1.webp"', html=False)
+        self.assertNotContains(page, 'value="https://http2.mlstatic.com/s1.webp" checked', html=False)
+        sent = self.save(picture=["https://http2.mlstatic.com/s2.webp", "https://img.example/a.jpg"])
+        self.assertEqual(sent, ["https://http2.mlstatic.com/s2.webp", "https://img.example/a.jpg"])
+        # Exactly the product's again: the draft follows the product's pictures.
+        self.save(picture=["https://img.example/a.jpg", "https://img.example/b.jpg"])
+        self.assertEqual(self.draft_row.pictures, [])
+
+    def test_a_draft_without_a_scraped_listing_has_no_picker(self):
+        self.prospect.delete()
+        self.assertNotContains(self.client.get(f"/catalog/meli/new/{self.draft_row.pk}/"), 'name="picture"', html=False)
+
+
+class ReadableAttributesTests(TestCase):
+    def test_value_ids_become_their_names(self):
+        from catalog.suggest import readable_attributes
+
+        schema = [{"id": "SALE_FORMAT", "name": "Formato de venta", "values": ["Unidad", "Pack"], "value_ids": ["1359391", "1359392"]}]
+        sent = {"attributes": [{"id": "SALE_FORMAT", "value_id": "1359391"}, {"id": "COLOR", "value_name": "Rosa"}]}
+        self.assertEqual(readable_attributes(sent, schema), [
+            {"id": "SALE_FORMAT", "name": "Formato de venta", "value": "Unidad"},
+            {"id": "COLOR", "name": "", "value": "Rosa"},
+        ])
+
+
+class CategoryNameAndSuggestedPriceTests(PerfumeDraftCase):
+    def test_the_category_field_says_what_its_code_is(self):
+        from django.core.cache import cache
+
+        cache.clear()
+        response = self.client.get("/catalog/meli/categories/", {"title": "Perfume", "meli_category_id": "mla5555 (x)"})
+        self.assertContains(response, '<span class="mono">MLA5555</span> — Belleza y Cuidado Personal › Perfumes', html=False)
+        self.assertContains(response, '<option value="MLA5555">Belleza y Cuidado Personal › Perfumes</option>', html=False)
+        # A suggested code is named from the suggestion, with no extra call.
+        before = len(self.meli.calls)
+        self.client.get("/catalog/meli/categories/", {"title": "Perfume", "meli_category_id": "MLA1271"})
+        self.assertNotIn(("GET", "/categories/MLA1271"), self.meli.calls[before:])
+        product_page = self.client.get(f"/catalog/products/{self.product.pk}/")
+        self.assertContains(product_page, 'hx-include="#id_title, #id_meli_category_id"', html=False)
+
+    def test_the_suggested_price_is_5_percent_below_the_lowest_competitor(self):
+        self.assertEqual(self.client.get(f"/catalog/meli/products/{self.product.pk}/competitors/").content, b"")
+        prospect_for(self.organization, external_id="MLAU1", title="Kit A", price=Decimal("18000"), product=self.product,
+                     seller="CARO", url="https://www.mercadolibre.com.ar/a", picture="https://http2.mlstatic.com/a.webp")
+        prospect_for(self.organization, external_id="MLAU2", title="Kit B", price=Decimal("15000"), product=self.product, seller="BEAUTYBODYS")
+        prospect_for(self.organization, external_id="MLAU3", title="Dismissed", price=Decimal("9000"), product=self.product,
+                     status=MeliListingProspect.Status.DISMISSED)
+        prospect_for(self.organization, external_id="MLAU4", title="Not linked", price=Decimal("8000"))
+        other = shared_seller("Other", user_id="777")
+        prospect_for(other, external_id="MLAU5", title="Theirs", price=Decimal("5000"))
+        response = self.client.get(f"/catalog/meli/products/{self.product.pk}/competitors/")
+        self.assertContains(response, "<strong>ARS 14250</strong>", html=False)
+        self.assertContains(response, "5% below the lowest competitor, ARS 15000.00 (BEAUTYBODYS)")
+        self.assertContains(response, "p.value = '14250'", html=False)
+        page = response.content.decode()
+        self.assertLess(page.index("Kit B"), page.index("Kit A"))
+        self.assertIn('<a href="https://www.mercadolibre.com.ar/a" target="_blank" rel="noopener">Kit A</a>', page)
+        self.assertIn('src="https://http2.mlstatic.com/a.webp"', page)
+        for hidden in ("Dismissed", "Not linked", "Theirs"):
+            self.assertNotIn(hidden, page)
+        self.assertEqual(self.client.get(f"/catalog/meli/products/{other_product(other).pk}/competitors/").status_code, 404)
+
+
+def other_product(organization):
+    return product(organization, variant="99ML")

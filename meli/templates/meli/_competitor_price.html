@@ -1,0 +1,25 @@
+{% load l10n %}
+{# Product page, next to the list price: 5% below the lowest competitor, and every competitor's price. #}
+<div class="field wide competitor-price">
+  <label>Suggested price</label>
+  <p class="suggested-price">
+    <strong>ARS {{ suggested }}</strong>
+    <span class="muted">· 5% below the lowest competitor, ARS {{ lowest.price }}{% if lowest.seller %} ({{ lowest.seller }}){% endif %}</span>
+    {% if can_edit %}<button type="button" class="link-button" onclick="var p = document.getElementById('id_list_price'); if (p) { p.value = '{{ suggested|unlocalize }}'; p.dispatchEvent(new Event('input', {bubbles: true})); p.focus(); }">Use it</button>{% endif %}
+  </p>
+  <details class="competitor-list">
+    <summary class="muted">{{ competitors|length }} competitor price{{ competitors|length|pluralize }}</summary>
+    <ul class="plain lines">
+      {% for row in competitors %}
+        <li class="competitor-row">
+          {% if row.picture %}<img class="thumb" src="{{ row.picture }}" alt="" loading="lazy">{% else %}<span class="thumb"></span>{% endif %}
+          <span>
+            {% if row.url %}<a href="{{ row.url }}" target="_blank" rel="noopener">{{ row.title|default:row.external_id }}</a>{% else %}{{ row.title|default:row.external_id }}{% endif %}
+            <br><span class="muted">{{ row.seller|default:"Unknown seller" }}</span>
+          </span>
+          <strong class="num">ARS {{ row.price }}</strong>
+        </li>
+      {% endfor %}
+    </ul>
+  </details>
+</div>

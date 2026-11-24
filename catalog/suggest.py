@@ -286,21 +286,48 @@ FIX_PROMPT = (
     "When a cause needs a fact you can't read from the data (package size or weight, GTIN, a measure), give "
     "your best realistic estimate for this product as it ships, boxed, and mark that change estimated. "
     "Package dimensions in Mercado Libre's answer are too small when they are below the product's own.\n"
+    "sent_readable lists every attribute sent with its name and its value as words: sent uses Mercado "
+    "Libre's value ids, so read values there. Causes name attributes by their name (\"Cantidad de "
+    "envases\"): find the id in schema by that name.\n"
+    "Read every cause, warnings too: a warning such as \"Attribute [UNITS_PER_PACK] to be added with values "
+    "[(null,1)]\" gives the value Mercado Libre expects. Attributes can depend on each other: fix them "
+    "together so the combination is valid (Formato de venta Unidad needs Cantidad de envases 1; Pack needs "
+    "the number of units in the pack, above 1). You may add an attribute a cause asks for, change one, or "
+    "remove one that isn't required.\n"
+    "reference_listing, when given, is the same product listed by another seller and accepted by Mercado "
+    "Libre: its characteristics show values that work, as the page names them.\n"
     "Return ONLY a JSON object: {\"body\": {…the whole corrected body…}, \"changes\": [{\"field\": "
     "\"SELLER_PACKAGE_WEIGHT\", \"why\": \"one short sentence in English\", \"estimated\": true}]}. "
     "field is the top-level key or the attribute id."
 )
 
 
-def fix_listing(sent, response, schema, user_product_seller, name, brand, attributes, package):
+def readable_attributes(sent, schema):
+    """The attributes sent, as words: [{id, name, value}]. A value_id becomes its name from the schema."""
+    by_id = {item.get("id"): item for item in schema or []}
+    rows = []
+    for attribute in sent.get("attributes") or []:
+        if not isinstance(attribute, dict):
+            continue
+        item = by_id.get(attribute.get("id")) or {}
+        names = dict(zip(item.get("value_ids") or [], item.get("values") or []))
+        value = attribute.get("value_name") or names.get(str(attribute.get("value_id") or "")) or attribute.get("value_id") or ""
+        rows.append({"id": attribute.get("id"), "name": item.get("name", ""), "value": str(value)})
+    return rows
+
+
+def fix_listing(sent, response, schema, user_product_seller, name, brand, attributes, package, reference=None):
     """Mistral's corrected body for a refused listing and its reasons: ({body}, [{field, why, estimated}]).
 
     Gets the listing data only: never tokens or costs. The caller keeps the fields Vimple owns.
+    reference: a scraped listing of the same product ({title, characteristics}), when the draft came from one.
     """
     answer = ai.complete_json(
         FIX_PROMPT,
         {
             "sent": sent,
+            "sent_readable": readable_attributes(sent, schema),
+            **({"reference_listing": reference} if reference else {}),
             "response": response,
             "schema": [
                 {

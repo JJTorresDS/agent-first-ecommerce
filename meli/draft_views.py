@@ -156,14 +156,16 @@ def meli_draft(request, pk):
     if draft.use_defaults:
         # Unticking "Use the defaults" starts from them.
         initial = {name: getattr(defaults, name) for name in ListingDraft.SETTING_FIELDS}
-    form = DraftForm(instance=draft, initial=initial, available=available)
+    scraped = MeliListingProspect.objects.filter(organization=organization, draft=draft).first()
+    pictures = _picture_kwargs(draft, scraped)
+    form = DraftForm(instance=draft, initial=initial, available=available, **pictures)
     parts = draft.description_parts or [{"product": True}]
     if request.method == "POST" and not draft.locked():
         if request.POST.get("action") == "delete":
             draft.delete()
             messages.success(request, f"Draft #{pk} deleted.")
             return redirect("meli_drafts")
-        form = DraftForm(request.POST, instance=draft, available=available)
+        form = DraftForm(request.POST, instance=draft, available=available, **pictures)
         if regular:
             if request.POST.get("desc_present"):
                 parts = parts_from(request.POST, organization)
@@ -195,7 +197,8 @@ def meli_draft(request, pk):
             "available": available,
             "can_edit": can_edit and not draft.locked(),
             # The scraped listing this draft started from: the competitor shown under the price.
-            "scraped": MeliListingProspect.objects.filter(organization=organization, draft=draft).first(),
+            "scraped": scraped,
+            "picture_options": _picture_rows(draft, pictures),
             **(_fix_context(draft) if fix_offered(draft, can_edit and not draft.locked()) else {}),
             "fix_count": sum(
                 len(value) if key == "attributes" and isinstance(value, dict) else 1
@@ -902,6 +905,7 @@ def meli_draft_fix(request, pk):
             brand,
             listed.attributes,
             {name: str(getattr(listed, name)) for name in PACKAGE_FIELDS if getattr(listed, name) is not None},
+            reference=_scraped_reference(organization, draft),
         )
         # The fields Vimple owns stay as sent, whatever the AI wrote.
         body = {**{key: value for key, value in body.items() if key not in LOCKED_KEYS},
@@ -926,6 +930,38 @@ def meli_draft_fix(request, pk):
     draft.ai_fix = fix
     draft.save(update_fields=["ai_fix", "updated_at"])
     return render(request, "meli/_ai_fix.html", _fix_context(draft, fix))
+
+
+def _picture_kwargs(draft, scraped):
+    """The picture picker for a fast draft or one from a scraped listing: (url, source) in order, the draft's
+    current pictures first, then the product's, then the scraped gallery. {} for any other draft."""
+    from .drafts import pictures_of
+
+    if not draft.regular() or not (draft.fast() or scraped):
+        return {}
+    product = [] if draft.fast() else [url for url in pictures_of(draft.listed()) if url]
+    gallery = scraped.gallery() if scraped else []
+    current = list(draft.pictures or product)
+    options, seen = [], set()
+    for url in [*current, *product, *gallery]:
+        if url and url not in seen:
+            seen.add(url)
+            options.append((url, "Product" if url in product else "Scraped" if url in gallery else "Added"))
+    return {"picture_options": options, "product_pictures": product}
+
+
+def _picture_rows(draft, pictures):
+    """The picker's rows for the page: url, source, ticked."""
+    current = set(draft.pictures or pictures.get("product_pictures") or [])
+    return [{"url": url, "source": source, "checked": url in current} for url, source in pictures.get("picture_options", [])]
+
+
+def _scraped_reference(organization, draft):
+    """The scraped listing this draft came from, as the AI fix reads it: its title and characteristics."""
+    scraped = MeliListingProspect.objects.filter(organization=organization, draft=draft).first()
+    if scraped is None:
+        return None
+    return {"title": scraped.title[:300], "characteristics": scraped.characteristics()}
 
 
 @require_app(AppAccess.App.CATALOG)

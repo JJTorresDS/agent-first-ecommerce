@@ -39,13 +39,25 @@
       <fieldset class="form-grid wide"{% if not can_edit %} disabled{% endif %}>
         {% include "_field.html" with field=form.price %}
         {% include "_field.html" with field=form.quantity %}
+        {% if picture_options %}
+          <fieldset class="wide picture-pick">
+            <legend>Pictures</legend>
+            <p class="muted">Tick the ones to post, up to 10; the first ticked is the main one.{% if scraped %} Scraped ones are another seller's photos: Mercado Libre can moderate or pause a listing that reuses them.{% endif %}</p>
+            {% for error in form.picture.errors %}<p class="error">{{ error }}</p>{% endfor %}
+            <div class="picture-grid">
+              {% for row in picture_options %}
+                <label class="picture-option">
+                  <input type="checkbox" name="picture" value="{{ row.url }}"{% if row.checked %} checked{% endif %}>
+                  <img src="{{ row.url }}" alt="" loading="lazy">
+                  <span class="muted">{{ row.source }}</span>
+                </label>
+              {% endfor %}
+            </div>
+            {% include "_field.html" with field=form.pictures_extra wide=True %}
+          </fieldset>
+        {% endif %}
         {% if draft.fast %}
           {% include "_field.html" with field=form.title wide=True %}
-          {% include "_field.html" with field=form.pictures_text wide=True %}
-          {% if draft.pictures %}
-            <div class="wide fast-pictures">{% for url in draft.pictures %}<img class="thumb" src="{{ url }}" alt="" loading="lazy">{% endfor %}</div>
-            {% if scraped %}<p class="muted wide">These start as the scraped listing's photos, which are another seller's: Mercado Libre can moderate or pause a listing that reuses them. Replace them with your own when you can.</p>{% endif %}
-          {% endif %}
           <fieldset class="form-grid wide" id="package">
             <legend>Package</legend>
             <p class="muted wide">Mercado Libre needs the package weight and size on every listing.</p>
@@ -57,7 +69,7 @@
         {% endif %}
         {% if draft.regular %}
           {% include "_field.html" with field=form.category_id %}
-          <div class="category-loader" hx-get="{% url 'meli_categories' %}" hx-vals='{"title": "{{ draft.listed.title|escapejs }}"}' hx-trigger="load" hx-target="this" hx-swap="innerHTML"></div>
+          <div class="category-loader" hx-get="{% url 'meli_categories' %}" hx-vals='{"title": "{{ draft.listed.title|escapejs }}"}' hx-include="#id_category_id" hx-trigger="load, change from:#id_category_id" hx-target="this" hx-swap="innerHTML"></div>
         {% endif %}
         {% if form.template %}{% include "meli/_check_field.html" with field=form.template %}{% endif %}
         {% include "meli/_check_field.html" with field=form.use_defaults %}
