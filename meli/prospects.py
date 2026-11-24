@@ -11,6 +11,7 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
+from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from .models import MeliListingProspect
@@ -141,6 +142,8 @@ def store(organization, entries):
                 prospect.category_checked_at, prospect.category_error = None, ""
             for name, value in fields.items():
                 setattr(prospect, name, value)
+            # The price's date: the scraper's scrapedAt, else when it reached Vimple.
+            prospect.scraped_at = prospect.scraped_at if fields["scraped_at"] else timezone.now()
             prospect.payload = entry
             prospect.save()
             existing[prospect.external_id] = prospect

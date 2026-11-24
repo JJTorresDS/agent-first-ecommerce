@@ -90,7 +90,10 @@ class ProspectApiTests(TestCase):
     def test_the_id_can_come_from_the_page_url(self):
         entry = {"title": "Item page", "pageUrl": "https://articulo.mercadolibre.com.ar/MLA-1234567890-perfume-_JM"}
         self.assertEqual(self.post(entry).status_code, 201)
-        self.assertEqual(MeliListingProspect.objects.get().external_id, "MLA1234567890")
+        prospect = MeliListingProspect.objects.get()
+        self.assertEqual(prospect.external_id, "MLA1234567890")
+        # No scrapedAt: dated when it arrived.
+        self.assertIsNotNone(prospect.scraped_at)
 
     def test_a_bad_entry_stores_nothing(self):
         response = self.post([SCRAPED[0], {"title": "No id"}])
@@ -489,7 +492,10 @@ class CategoryNameAndSuggestedPriceTests(PerfumeDraftCase):
         self.assertEqual(self.client.get(f"/catalog/meli/products/{self.product.pk}/competitors/").content, b"")
         prospect_for(self.organization, external_id="MLAU1", title="Kit A", price=Decimal("18000"), product=self.product,
                      seller="CARO", url="https://www.mercadolibre.com.ar/a", picture="https://http2.mlstatic.com/a.webp")
-        prospect_for(self.organization, external_id="MLAU2", title="Kit B", price=Decimal("15000"), product=self.product, seller="BEAUTYBODYS")
+        from datetime import datetime, timezone as dt_timezone
+
+        prospect_for(self.organization, external_id="MLAU2", title="Kit B", price=Decimal("15000"), product=self.product,
+                     seller="BEAUTYBODYS", scraped_at=datetime(2026, 11, 24, 2, 30, tzinfo=dt_timezone.utc))
         prospect_for(self.organization, external_id="MLAU3", title="Dismissed", price=Decimal("9000"), product=self.product,
                      status=MeliListingProspect.Status.DISMISSED)
         prospect_for(self.organization, external_id="MLAU4", title="Not linked", price=Decimal("8000"))
@@ -497,7 +503,9 @@ class CategoryNameAndSuggestedPriceTests(PerfumeDraftCase):
         prospect_for(other, external_id="MLAU5", title="Theirs", price=Decimal("5000"))
         response = self.client.get(f"/catalog/meli/products/{self.product.pk}/competitors/")
         self.assertContains(response, "<strong>ARS 14250</strong>", html=False)
-        self.assertContains(response, "5% below the lowest competitor, ARS 15000.00 (BEAUTYBODYS)")
+        # Buenos Aires time: 02:30 UTC is the evening before.
+        self.assertContains(response, "5% below the lowest competitor, ARS 15000.00 (BEAUTYBODYS), scraped 23 Nov 2026")
+        self.assertContains(response, 'BEAUTYBODYS · scraped <time datetime="2026-11-24T02:30:00+00:00">23 Nov 2026, 23:30</time>', html=False)
         self.assertContains(response, "p.value = '14250'", html=False)
         page = response.content.decode()
         self.assertLess(page.index("Kit B"), page.index("Kit A"))

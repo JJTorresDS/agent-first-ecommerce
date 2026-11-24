@@ -250,7 +250,7 @@ def meli_product_competitors(request, pk):
     competitors = list(
         MeliListingProspect.objects.filter(organization=organization, product=product, price__isnull=False)
         .exclude(status=Status.DISMISSED)
-        .only("title", "external_id", "url", "seller", "price", "picture")
+        .only("title", "external_id", "url", "seller", "price", "picture", "scraped_at", "updated_at")
         .order_by("price", "pk")[:20]
     )
     if not competitors:
