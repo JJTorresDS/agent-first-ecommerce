@@ -962,6 +962,17 @@ class MeliListingProspect(models.Model):
                     found.update(group)
         return {str(name): str(value) for name, value in found.items() if str(value).strip()}
 
+    def catalog_product_id(self):
+        """The catalog product (MLA…) when the scraped page is a catalog page (…/p/MLA…), else ""."""
+        import re
+
+        payload = self.payload if isinstance(self.payload, dict) else {}
+        for url in (self.url, payload.get("pageUrl"), payload.get("productUrl")):
+            found = re.search(r"/p/(MLA\d+)", str(url or ""), re.IGNORECASE)
+            if found:
+                return found.group(1).upper()
+        return ""
+
     def description(self):
         """The listing's description as the scraper sent it (description, descriptionText or
         description.plain_text), as plain text, or ""."""

@@ -75,7 +75,10 @@
                     <form method="post" action="{% url 'meli_draft_from_prospect' prospect.pk %}">
                       {% csrf_token %}
                       <input type="hidden" name="next" value="{{ back }}">
-                      <button type="submit">{% if prospect.draft_id %}Another listing{% else %}Create listing{% endif %}</button>
+                      <button type="submit"{% if prospect.catalog_id %} title="A separate item of your own, not linked to the catalog product."{% endif %}>{% if prospect.draft_id %}Another listing{% else %}Create listing{% endif %}</button>
+                      {% if prospect.catalog_id %}
+                        <button type="submit" name="kind" value="catalog" title="List in catalog product {{ prospect.catalog_id }} and compete for its buy box.">Compete in catalog</button>
+                      {% endif %}
                     </form>
                   {% endif %}
                 {% endif %}

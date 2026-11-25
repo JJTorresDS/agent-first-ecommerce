@@ -34,6 +34,7 @@ class FakeSellFlow:
         self.refuse_text = ""
         self.warn_only = False
         self.product_status = "active"
+        self.product_children = []
         self.candy_guess = False
         self.discovered = []
         # Mercado Libre's own measures of the catalog product, as /products/<id> lists them.
@@ -104,6 +105,7 @@ class FakeSellFlow:
                     "id": CATALOG,
                     "name": "Caramel Dream Sweet Tooth 75 Ml",
                     "status": self.product_status,
+                    "children_ids": self.product_children,
                     "domain_id": "MLA-PERFUMES",
                     "pictures": [{"url": "https://http2.mlstatic.com/caramel.jpg"}],
                     "attributes": [{"id": "BRAND", "value_name": "Sabrina Carpenter"}, *self.product_package],

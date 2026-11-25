@@ -675,6 +675,12 @@ def _check_one(draft, token, defaults, stock, site, user_products=False):
         if product.get("status") not in (None, "active"):
             _set(draft, ListingDraft.Status.NEEDS_FIX, "This catalog product isn't active on Mercado Libre.")
             return
+        if product.get("children_ids"):
+            # A family page (color, tone…): only one of its variants takes listings.
+            _set(draft, ListingDraft.Status.NEEDS_FIX,
+                 "This catalog page is a family with variants. Open the variant you sell (its color or tone) "
+                 "and start the listing from that link.")
+            return
         pictures = product.get("pictures") or []
         draft.catalog_name = str(product.get("name") or "")[:255]
         draft.catalog_picture = str((pictures[0] or {}).get("url") or "")[:1024] if pictures else ""

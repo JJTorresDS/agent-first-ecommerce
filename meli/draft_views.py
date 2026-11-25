@@ -620,10 +620,12 @@ def meli_draft_from_product(request, pk):
     return _open_draft(organization, draft, template)
 
 
-def product_draft(organization, product, user, template=None, in_catalog=False, category_id="", price=None, prospect=None):
+def product_draft(organization, product, user, template=None, in_catalog=False, category_id="", price=None, prospect=None,
+                  catalog_product_id=""):
     """A new draft for one product, saved and sent to be checked: a regular listing, or in its catalog.
 
-    category_id and price (a scraped listing's) win over the product's.
+    category_id and price (a scraped listing's) win over the product's; so does catalog_product_id
+    (a scraped catalog page's) over the product's own catalog product.
     """
     from .jobs import dispatch_drafts
 
@@ -637,8 +639,8 @@ def product_draft(organization, product, user, template=None, in_catalog=False, 
         created_by=user,
     )
     if in_catalog:
-        draft.catalog_product_id = product.meli_catalog_product_id
-        draft.catalog_url = f"https://www.mercadolibre.com.ar/p/{product.meli_catalog_product_id}"
+        draft.catalog_product_id = catalog_product_id or product.meli_catalog_product_id
+        draft.catalog_url = f"https://www.mercadolibre.com.ar/p/{draft.catalog_product_id}"
     if template is not None:
         draft.category_id = template.category_id
     elif category_id and not in_catalog:

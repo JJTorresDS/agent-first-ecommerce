@@ -621,3 +621,59 @@ class ScrapedDescriptionTests(PerfumeDraftCase):
         draft = self.draft_from_scraped()
         self.assertEqual(draft.description_parts[0], {"product": True})
         self.assertNotContains(self.client.get(f"/catalog/meli/new/{draft.pk}/"), "Scraped listing's description")
+
+
+@override_settings(MISTRAL_API_KEY="")
+class CompeteInCatalogTests(PerfumeDraftCase):
+    """A scraped catalog page (…/p/MLA…) offers both a separate listing and one competing in that catalog product."""
+
+    def setUp(self):
+        from .test_drafts import CATALOG, URL as CATALOG_URL
+
+        super().setUp()
+        self.catalog = CATALOG
+        self.prospect = prospect_for(
+            self.organization, product=self.product, external_id=CATALOG, url=f"{CATALOG_URL}?picker=true",
+            price=Decimal("14000"), payload={**SCRAPED[0], "pageUrl": f"{CATALOG_URL}?picker=true"},
+        )
+
+    def create(self, **data):
+        return self.client.post(f"/catalog/meli/new/scraped/{self.prospect.pk}/", data)
+
+    def test_the_row_offers_both_and_only_for_a_catalog_page(self):
+        page = self.client.get(PAGE_URL)
+        self.assertContains(page, 'name="kind" value="catalog"', html=False)
+        self.assertContains(page, "Compete in catalog")
+        self.prospect.url = SCRAPED[0]["pageUrl"]
+        self.prospect.payload = SCRAPED[0]
+        self.prospect.save()
+        self.assertNotContains(self.client.get(PAGE_URL), "Compete in catalog")
+        self.create(kind="catalog")
+        self.assertFalse(ListingDraft.objects.exists())
+
+    def test_compete_in_catalog_makes_a_catalog_draft_of_the_scraped_catalog_product(self):
+        self.product.meli_catalog_product_id = "MLA1"
+        self.product.save()
+        response = self.create(kind="catalog")
+        draft = ListingDraft.objects.get(organization=self.organization)
+        self.assertRedirects(response, f"/catalog/meli/new/{draft.pk}/", fetch_redirect_response=False)
+        self.assertEqual((draft.kind, draft.catalog_product_id, draft.price), (ListingDraft.Kind.CATALOG, self.catalog, Decimal("14000")))
+        self.assertEqual(draft.status, ListingDraft.Status.READY)
+
+    def test_create_listing_stays_a_separate_item(self):
+        from .drafts import build_item, defaults_for
+
+        self.create()
+        draft = ListingDraft.objects.get(organization=self.organization)
+        self.assertEqual(draft.kind, ListingDraft.Kind.PRODUCT)
+        self.assertEqual(draft.catalog_product_id, "")
+        body = build_item(draft, defaults_for(self.organization))
+        self.assertNotIn("catalog_product_id", body)
+        self.assertFalse(body.get("catalog_listing"))
+
+    def test_a_family_page_asks_for_the_variant(self):
+        self.meli.product_children = ["MLA36957852"]
+        self.create(kind="catalog")
+        draft = ListingDraft.objects.get(organization=self.organization)
+        self.assertEqual(draft.status, ListingDraft.Status.NEEDS_FIX)
+        self.assertIn("family with variants", draft.error)

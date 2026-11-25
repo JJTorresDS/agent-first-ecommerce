@@ -116,6 +116,7 @@ def scraped_context(request, organization, stock, connected, started):
             if prospect.product else ""
         )
         # Price, package and stock can be filled in from a dialog here; a connection can't.
+        prospect.catalog_id = prospect.catalog_product_id()
         prospect.fillable = bool(prospect.reason) and prospect.reason != CONNECT_FIRST
     return {
         "prospects": prospects,
@@ -155,14 +156,23 @@ def meli_draft_from_prospect(request, pk):
     if reason:
         messages.warning(request, f"{prospect.product.sku}: {reason}")
         return redirect(_back(request))
+    # kind=catalog: compete in the scraped page's catalog product. Otherwise a separate item of our own,
+    # not linked to any catalog product.
+    catalog_id = prospect.catalog_product_id() if request.POST.get("kind") == "catalog" else ""
+    if request.POST.get("kind") == "catalog" and not catalog_id:
+        messages.warning(request, "This scraped listing isn't a catalog product page.")
+        return redirect(_back(request))
     # The competitor's price is the suggestion; the product's list price when the scrape had none.
     draft = product_draft(
         organization, prospect.product, request.user, category_id=prospect.category_id, price=prospect.price,
-        prospect=prospect,
+        prospect=prospect, in_catalog=bool(catalog_id), catalog_product_id=catalog_id,
     )
     prospect.draft = draft
     prospect.status = Status.DRAFTED
     prospect.save(update_fields=["draft", "status", "updated_at"])
+    if catalog_id:
+        # A catalog listing takes the catalog product's attributes: nothing to copy.
+        return redirect("meli_draft", draft.pk)
     return redirect(f"{reverse('meli_draft', args=[draft.pk])}?prospect={prospect.pk}")
 
 
