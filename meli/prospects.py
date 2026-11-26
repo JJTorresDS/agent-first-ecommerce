@@ -8,7 +8,7 @@ user did with it: its status, product and draft.
 import logging
 import re
 from datetime import datetime
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from django.db import transaction
 from django.utils import timezone
@@ -22,6 +22,15 @@ logger = logging.getLogger(__name__)
 MELI_ID = re.compile(r"\b(ML[A-Z]U?)-?(\d{6,})\b")
 CATEGORY = re.compile(r"ML[A-Z]\d+")
 LIMIT = 100
+# The list price starts this much above the competitor's, so a discount can bring it back down.
+LIST_MARKUP = Decimal("1.35")
+
+
+def list_price_for(price):
+    """The competitor's price plus 35%, in whole pesos (half up); None without a price."""
+    if price is None:
+        return None
+    return (Decimal(price) * LIST_MARKUP).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
 
 
 class ProspectError(ValueError):

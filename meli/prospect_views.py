@@ -21,7 +21,7 @@ from vimple import deletion
 
 from .draft_views import CONNECT_FIRST, READ_ONLY, _listable, _scope, product_draft
 from .models import MeliListingProspect
-from .prospects import category_in, request_categories
+from .prospects import category_in, list_price_for, request_categories
 
 Status = MeliListingProspect.Status
 SHOWN = [(Status.PENDING, "Pending"), (Status.DRAFTED, "Draft started"), (Status.DISMISSED, "Dismissed"), ("all", "All")]
@@ -162,9 +162,10 @@ def meli_draft_from_prospect(request, pk):
     if request.POST.get("kind") == "catalog" and not catalog_id:
         messages.warning(request, "This scraped listing isn't a catalog product page.")
         return redirect(_back(request))
-    # The competitor's price is the suggestion; the product's list price when the scrape had none.
+    # The competitor's price plus 35% is the suggestion; the product's list price when the scrape had none.
     draft = product_draft(
-        organization, prospect.product, request.user, category_id=prospect.category_id, price=prospect.price,
+        organization, prospect.product, request.user, category_id=prospect.category_id,
+        price=list_price_for(prospect.price),
         prospect=prospect, in_catalog=bool(catalog_id), catalog_product_id=catalog_id,
     )
     prospect.draft = draft
@@ -233,7 +234,7 @@ def meli_draft_fast(request, pk):
         kind=ListingDraft.Kind.FAST,
         title=prospect.title[:255],
         pictures=(prospect.gallery() or ([prospect.picture] if prospect.picture else []))[:10],
-        price=prospect.price or 0,
+        price=list_price_for(prospect.price) or 0,
         quantity=1,
         category_id=prospect.category_id,
         status=ListingDraft.Status.CHECKING,

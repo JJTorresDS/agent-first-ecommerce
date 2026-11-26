@@ -301,7 +301,9 @@ class ScrapedImportTests(TestCase):
         page = self.client.get(f"/catalog/import/?prospect={scraped.pk}")
         self.assertContains(page, 'value="Perfume Onlyou 885 30ml Envío Gratis"')
         self.assertContains(page, f'name="prospect" value="{scraped.pk}"')
-        self.assertContains(page, 'name="list_price" value="12999')
+        # 12999 × 1.35 = 17548.65, rounded to whole pesos.
+        self.assertContains(page, 'name="list_price" value="17549"')
+        self.assertContains(page, "Competitor&#x27;s price: ARS 12999.00. Suggested 35% higher")
         self.assertContains(page, "From scraped listing")
         self.assertContains(page, f'name="meli_catalog_product_id" value="{CATALOG}"')
         self.assertEqual(self.meli.calls, [])

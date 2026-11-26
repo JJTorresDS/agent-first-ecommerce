@@ -101,9 +101,11 @@ def read_prospect(organization, prospect):
     page is never read through the API here. With the AI key, one Mistral call then maps the scrape onto
     the product's fields and the category's attributes (codes, title, GTIN, attributes). Nothing is saved.
     """
+    from .prospects import list_price_for
+
     notes = []
     values = _from_scraped(prospect)
-    values["list_price"] = prospect.price
+    values["list_price"] = list_price_for(prospect.price)
     values["meli_category_path"] = category_path(organization, values["meli_category_id"], prospect)
     if ai.enabled():
         try:

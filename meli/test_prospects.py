@@ -336,7 +336,8 @@ class LeaveOutPriceAndCompetitorTests(PerfumeDraftCase):
                                 url="https://www.mercadolibre.com.ar/x/up/MLAU3250631132", product=self.product)
         self.client.post(f"/catalog/meli/new/scraped/{prospect.pk}/")
         draft = self.draft()
-        self.assertEqual(draft.price, Decimal("15000"))
+        # 35% above the competitor's, in whole pesos, so a discount can bring it back down.
+        self.assertEqual(draft.price, Decimal("20250"))
         page = self.client.get(f"/catalog/meli/new/{draft.pk}/")
         self.assertContains(page, "Competitor:")
         self.assertContains(page, "BEAUTYBODYS · ARS 15000")
@@ -369,7 +370,7 @@ class FastPublishTests(PerfumeDraftCase):
         draft = self.draft()
         self.assertRedirects(response, f"/catalog/meli/new/{draft.pk}/?prospect={self.prospect.pk}", fetch_redirect_response=False)
         self.assertEqual((draft.kind, draft.product, draft.combo), (ListingDraft.Kind.FAST, None, None))
-        self.assertEqual((draft.title, draft.price, draft.category_id), (SCRAPED[0]["title"], Decimal("15000"), "MLA1271"))
+        self.assertEqual((draft.title, draft.price, draft.category_id), (SCRAPED[0]["title"], Decimal("20250"), "MLA1271"))
         self.assertEqual(draft.pictures, ["https://http2.mlstatic.com/a.webp", "https://http2.mlstatic.com/b.jpg"])
         self.assertEqual(draft.error, "Mercado Libre needs the package weight and size: fill in Package below, then Save and check.")
         page = self.client.get(f"/catalog/meli/new/{draft.pk}/")
@@ -657,7 +658,7 @@ class CompeteInCatalogTests(PerfumeDraftCase):
         response = self.create(kind="catalog")
         draft = ListingDraft.objects.get(organization=self.organization)
         self.assertRedirects(response, f"/catalog/meli/new/{draft.pk}/", fetch_redirect_response=False)
-        self.assertEqual((draft.kind, draft.catalog_product_id, draft.price), (ListingDraft.Kind.CATALOG, self.catalog, Decimal("14000")))
+        self.assertEqual((draft.kind, draft.catalog_product_id, draft.price), (ListingDraft.Kind.CATALOG, self.catalog, Decimal("18900")))
         self.assertEqual(draft.status, ListingDraft.Status.READY)
 
     def test_create_listing_stays_a_separate_item(self):

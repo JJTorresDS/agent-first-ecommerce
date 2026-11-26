@@ -164,6 +164,10 @@ def _review(request, organization, form, options, chosen, attributes, prospect=N
             category.setdefault("root_name", root_hint)
     if category:
         dialogs["category"] = category
+    if prospect is not None and prospect.price is not None:
+        form.fields["list_price"].help_text = (
+            f"Competitor's price: ARS {prospect.price}. Suggested 35% higher, in whole pesos, so you can offer a discount."
+        )
     return render(
         request,
         "meli/import.html",
