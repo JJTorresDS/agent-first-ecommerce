@@ -9,7 +9,6 @@ from catalog.test_views import member
 from catalog.tests import product_model
 from vimple import ai
 
-from .client import MercadoLibreError
 from .importer import ImportProblem, source_of
 from catalog.models import RootCategory
 
@@ -297,20 +296,19 @@ class ScrapedImportTests(TestCase):
         self.assertEqual(self.client.get(f"/catalog/import/?prospect={theirs.pk}").status_code, 404)
         self.assertEqual(self.client.get("/catalog/import/?prospect=nope").status_code, 404)
 
-    def test_a_catalog_page_link_is_read_through_the_api(self):
+    def test_even_a_catalog_page_is_never_read_through_the_api(self):
         scraped = prospect(self.organization, payload={"pageUrl": f"https://www.mercadolibre.com.ar/x/p/{CATALOG}"})
         page = self.client.get(f"/catalog/import/?prospect={scraped.pk}")
-        self.assertContains(page, 'value="Perfume Número 885, 30 Ml By Onlyou Para Hombre"')
+        self.assertContains(page, 'value="Perfume Onlyou 885 30ml Envío Gratis"')
         self.assertContains(page, f'name="prospect" value="{scraped.pk}"')
         self.assertContains(page, 'name="list_price" value="12999')
         self.assertContains(page, "From scraped listing")
         self.assertContains(page, f'name="meli_catalog_product_id" value="{CATALOG}"')
-        self.assertNotContains(page, "come from the scraped page")
+        self.assertEqual(self.meli.calls, [])
 
-    def test_without_a_readable_link_the_scrape_fills_the_form(self):
+    def test_the_scrape_fills_the_form(self):
         scraped = prospect(self.organization)
         page = self.client.get(f"/catalog/import/?prospect={scraped.pk}")
-        self.assertContains(page, "come from the scraped page")
         self.assertContains(page, 'value="Perfume Onlyou 885 30ml Envío Gratis"')
         self.assertContains(page, f'<option value="{self.brand.pk}" selected>')
         self.assertContains(page, 'name="variant" value="30ML"')
@@ -321,32 +319,27 @@ class ScrapedImportTests(TestCase):
         )
         self.assertEqual(self.meli.calls, [])
 
-    def test_a_refused_read_falls_back_to_the_scrape(self):
-        scraped = prospect(self.organization, payload={"pageUrl": f"https://www.mercadolibre.com.ar/x/p/{CATALOG}"})
-        with patch("meli.importer.read", side_effect=MercadoLibreError("Resource not found", status=404)):
-            page = self.client.get(f"/catalog/import/?prospect={scraped.pk}")
-        self.assertContains(page, "Mercado Libre couldn&#x27;t read it (Resource not found)")
-        self.assertContains(page, 'value="Perfume Onlyou 885 30ml Envío Gratis"')
-
     @override_settings(MISTRAL_API_KEY="test-key")
     def test_the_ai_maps_the_scrape_onto_the_form_after_a_retry(self):
         scraped = prospect(self.organization, payload={"pageUrl": f"https://www.mercadolibre.com.ar/x/p/{CATALOG}"})
         with patch("vimple.ai._complete_json", side_effect=[ai.SuggestionFailed("URLError"), MAPPED]) as call:
             page = self.client.get(f"/catalog/import/?prospect={scraped.pk}")
         self.assertEqual(call.call_count, 2)
+        # Only the category's attributes are read from Mercado Libre, never the scraped page itself.
+        self.assertEqual(self.meli.calls, ["/categories/MLA1271/attributes"])
         sent = call.call_args.args[1]
         self.assertEqual(sent["scraped_listing"]["characteristics"]["Marca"], "Onlyou")
-        self.assertEqual([item["id"] for item in sent["attributes"]], ["GENDER"])
+        self.assertEqual([item["id"] for item in sent["attributes"]], ["PERFUME_TYPE", "GENDER"])
         self.assertContains(page, f'<option value="{self.category.pk}" selected>')
         self.assertContains(page, f'<option value="{self.brand.pk}" selected>')
         self.assertContains(page, 'name="model_code" value="885"')
         self.assertContains(page, 'name="model_name" value="Número 885"')
-        # The API's own values win over the AI's.
-        self.assertContains(page, 'value="Perfume Número 885, 30 Ml By Onlyou Para Hombre"')
+        self.assertContains(page, 'value="Perfume Onlyou Número 885 30 ml"')
         self.assertContains(page, 'value="GENDER"')
         self.assertContains(page, 'value="Hombre"')
-        self.assertNotContains(page, 'value="Eau de toilette"')
+        self.assertContains(page, 'value="Eau de toilette"')
         self.assertNotContains(page, 'value="COLOR"')
+        self.assertNotContains(page, 'value="Género"')
         self.assertContains(page, "the AI&#x27;s suggestion")
 
     @override_settings(MISTRAL_API_KEY="test-key")

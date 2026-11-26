@@ -97,27 +97,12 @@ def read(organization, url):
 def read_prospect(organization, prospect):
     """The values for a new product from a scraped listing, and a note for the page: (values, note).
 
-    Its link is read through the API like a pasted one; when there's none Vimple can read, or Mercado Libre
-    doesn't answer, the values come from the scrape. With the AI key, one Mistral call then maps the scrape
-    onto the product's fields and the category's attributes (codes, title, GTIN, attributes). Nothing is saved.
+    The values come from the scrape only: a listing is scraped because the API wouldn't give it, so its
+    page is never read through the API here. With the AI key, one Mistral call then maps the scrape onto
+    the product's fields and the category's attributes (codes, title, GTIN, attributes). Nothing is saved.
     """
-    from .client import MercadoLibreError, describe_failure
-    from .drafts import DraftError, _reason
-
     notes = []
-    values, link = None, _link_of(prospect)
-    if link:
-        try:
-            values = read(organization, link)
-        except (ImportProblem, DraftError, MercadoLibreError, OSError) as error:
-            logger.warning("Scraped listing %s not read: %s", prospect.external_id, describe_failure(error))
-            reason = str(error) if isinstance(error, ImportProblem) else _reason(error)
-            notes.append(f"Mercado Libre couldn't read it ({reason.rstrip('.')}), so these values come from the scraped page. Check them.")
-    else:
-        notes.append("Its page isn't a link Mercado Libre's API reads, so these values come from the scraped page. Check them.")
-    scraped = values is None
-    if scraped:
-        values = _from_scraped(prospect)
+    values = _from_scraped(prospect)
     values["list_price"] = prospect.price
     values["meli_category_path"] = category_path(organization, values["meli_category_id"], prospect)
     if ai.enabled():
@@ -127,12 +112,10 @@ def read_prospect(organization, prospect):
             notes.append("The AI couldn't map the scraped listing this time; fill in the codes yourself.")
         else:
             attributes = mapped.pop("attributes")
-            if scraped and attributes:
+            if attributes:
                 values["attributes"] = attributes
-            else:
-                values["attributes"] = {**attributes, **values["attributes"]}
             for key in ("title", "gtin"):
-                if mapped.get(key) and (scraped or not values.get(key)):
+                if mapped.get(key):
                     values[key] = mapped.pop(key)
             if mapped.get("variant") and not values.get("variant"):
                 values["variant"] = mapped["variant"]
@@ -151,21 +134,6 @@ def category_path(organization, category_id, prospect=None):
     if prospect is not None and prospect.category_id == category_id and prospect.category_path:
         return prospect.category_path
     return category_label(organization, category_id).replace(" › ", " > ")
-
-
-def _link_of(prospect):
-    """The first of the scraped page's links that Vimple can read through the API, else ""."""
-    payload = prospect.payload if isinstance(prospect.payload, dict) else {}
-    links = [prospect.url] + [payload.get(key) for key in ("pageUrl", "productUrl", "permalink")]
-    if LISTING.fullmatch(prospect.external_id or ""):
-        links.append(f"https://articulo.mercadolibre.com.ar/{prospect.external_id}")
-    for link in links:
-        try:
-            source_of(str(link or ""))
-        except ImportProblem:
-            continue
-        return str(link)
-    return ""
 
 
 def _from_scraped(prospect):
