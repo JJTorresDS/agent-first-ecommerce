@@ -62,6 +62,9 @@
                   <input type="text" name="sku" list="scraped-products" value="{{ prospect.product.sku|default:'' }}" placeholder="SKU" aria-label="Your product's SKU for {{ prospect.external_id }}" autocomplete="off">
                   <button type="submit">{% if prospect.product %}Change{% else %}Link{% endif %}</button>
                 </form>
+                {% if not prospect.product and prospect.status != "dismissed" %}
+                  <a href="{% url 'catalog_import' %}?prospect={{ prospect.pk }}">New product from it</a>
+                {% endif %}
               </td>
               <td>
                 {% if prospect.status == "dismissed" %}<span class="pill">Dismissed</span>

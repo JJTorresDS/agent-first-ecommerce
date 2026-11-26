@@ -24,8 +24,22 @@ def enabled():
     return bool(getattr(settings, "MISTRAL_API_KEY", ""))
 
 
-def complete_json(system, user):
-    """Mistral's answer as a dict. Raises SuggestionFailed."""
+def complete_json(system, user, retries=0):
+    """Mistral's answer as a dict. Raises SuggestionFailed once retries more tries have failed too.
+
+    A refusal other than 429 (a bad key, a bad body) isn't tried again.
+    """
+    for attempt in range(retries + 1):
+        try:
+            return _complete_json(system, user)
+        except SuggestionFailed as error:
+            refused = str(error).startswith("HTTP 4") and str(error) != "HTTP 429"
+            if refused or attempt == retries:
+                raise
+            logger.info("Mistral call failed (%s); trying again", error)
+
+
+def _complete_json(system, user):
     if not enabled():
         raise SuggestionFailed("MISTRAL_API_KEY is not set")
     body = {

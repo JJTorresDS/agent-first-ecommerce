@@ -7,11 +7,12 @@ from django.core.exceptions import ValidationError
 
 from vimple import ai
 
-from .models import Brand, Category
+from .models import Brand, Category, ProductModel
 from .validators import (
     normalize_code,
     validate_brand_code,
     validate_category_code,
+    validate_gtin,
     validate_model_code,
     validate_variant,
 )
@@ -268,6 +269,81 @@ def fill_from_scraped(scraped, target, attributes, schema):
         SCRAPED_PROMPT, {"scraped_listing": scraped, "target_product": target, "attributes": attributes}
     )
     return _allowed(answer, {item["id"] for item in attributes}, schema)
+
+
+IMPORT_SCRAPED_PROMPT = (
+    "You help a seller in Argentina add a product to their catalog from a Mercado Libre listing someone else "
+    "sells, as a scraper read it.\n"
+    "You get scraped_listing (title, characteristics as the page shows them, description and other fields), "
+    "read_values (what Mercado Libre's API or the scrape already gave), the seller's existing categories, "
+    "brands and models, and attributes (the empty fields of its Mercado Libre category: id, name, value_type, "
+    "allowed_values).\n"
+    "The SKU is CATEGORY-BRAND-MODEL-VARIANT, for example PERF-ONLY-885-30ML. Codes use only capital letters "
+    "A-Z and digits 0-9: category 2-6, brand 2-8, model 1-10, variant 1-10 characters. The model is the "
+    "product family without the variant (model_name: its name without size or color); the variant is what "
+    "sets this version apart (30ML, ROJO, XL), or UNICO when there is only one. Reuse an existing category, "
+    "brand or model code when one fits; otherwise propose a new short code and a name.\n"
+    "title: a clean product title in Spanish, without the other seller's words (envío, oferta, original). "
+    "gtin: the barcode (8, 12, 13 or 14 digits) only when the listing states it.\n"
+    "Fill every attribute the listing states, by its characteristics, title or description: match by "
+    "meaning, not only by name. When allowed_values is not empty, use exactly one of them, copied as "
+    "written. A number_unit value is a number and a unit, like 30 mL. A boolean is Sí or No. Never invent "
+    "facts the listing doesn't give; leave out what you can't fill with confidence.\n"
+    "Return ONLY a JSON object with: category_code, category_name, brand_code, brand_name, model_code, "
+    "model_name, variant, title, gtin, attributes (an object of attribute id to value)."
+)
+IMPORT_RETRIES = 2
+
+
+def map_scraped(organization, scraped, read_values, attributes, schema):
+    """A new product's fields from a scraped listing: codes, names, title, GTIN and {id: value} attributes.
+
+    scraped: the scraper's data (never another organization's); read_values: what was already read;
+    attributes: [{id, name, value_type, allowed_values}] still empty; schema: {id: {type, values}}.
+    Codes go through the same validators as typed ones and attributes must be on Mercado Libre's list,
+    else they are dropped. Raises ai.SuggestionFailed after IMPORT_RETRIES more tries.
+    """
+    answer = ai.complete_json(
+        IMPORT_SCRAPED_PROMPT,
+        {
+            "scraped_listing": scraped,
+            "read_values": read_values,
+            "existing_categories": [
+                {"code": row.code, "name": row.name} for row in Category.objects.filter(organization=organization)
+            ],
+            "existing_brands": [
+                {"code": row.code, "name": row.name} for row in Brand.objects.filter(organization=organization)
+            ],
+            "existing_models": [
+                {"brand_code": row.brand.code, "code": row.code, "name": row.name}
+                for row in ProductModel.objects.filter(organization=organization).select_related("brand")[:200]
+            ],
+            "attributes": attributes,
+        },
+        retries=IMPORT_RETRIES,
+    )
+    values = {}
+    for key, validate in _CODES.items():
+        code = normalize_code(str(answer.get(key) or ""))
+        try:
+            validate(code)
+        except ValidationError:
+            continue
+        values[key] = code
+    for key, limit in {**_NAMES, "title": 200}.items():
+        text = " ".join(str(answer.get(key) or "").split())[:limit]
+        if text:
+            values[key] = text
+    gtin = "".join(str(answer.get("gtin") or "").split())
+    try:
+        validate_gtin(gtin)
+    except ValidationError:
+        gtin = ""
+    if gtin:
+        values["gtin"] = gtin
+    answered = answer.get("attributes") if isinstance(answer.get("attributes"), dict) else {}
+    values["attributes"], _dropped = _allowed({"values": answered}, {item["id"] for item in attributes}, schema)
+    return values
 
 
 FIX_PROMPT = (

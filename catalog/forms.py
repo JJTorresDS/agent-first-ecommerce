@@ -177,6 +177,7 @@ class ImportForm(forms.Form):
     brand_hint = forms.CharField(widget=forms.HiddenInput, required=False, max_length=100)
     meli_catalog_product_id = forms.CharField(widget=forms.HiddenInput, required=False, max_length=32)
     meli_category_id = forms.CharField(widget=forms.HiddenInput, required=False, max_length=32)
+    prospect = forms.IntegerField(widget=forms.HiddenInput, required=False)
     category = forms.ModelChoiceField(queryset=Category.objects.none())
     brand = forms.ModelChoiceField(queryset=Brand.objects.none())
     product_model = forms.ModelChoiceField(

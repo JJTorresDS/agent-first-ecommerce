@@ -1,0 +1,33 @@
+{% comment %}
+  Catalog → Import → From a scraped listing: this organization's scraped listings not linked to a product yet.
+  Create product opens the import review (?prospect=<pk>); saving links the scraped listing to the new product.
+{% endcomment %}
+{% if prospects %}
+  <section class="card">
+    <div class="table-scroll">
+      <table class="list wide">
+        <thead><tr><th></th><th>Scraped listing</th><th class="num">Price</th><th></th></tr></thead>
+        <tbody>
+          {% for prospect in prospects %}
+            <tr>
+              <td class="thumb-cell">{% if prospect.picture %}<img class="thumb" src="{{ prospect.picture }}" alt="{{ prospect.title }}" loading="lazy" data-zoom>{% else %}<span class="thumb"></span>{% endif %}</td>
+              <td>
+                {% if prospect.url %}<a href="{{ prospect.url }}" target="_blank" rel="noopener">{{ prospect.title|default:prospect.external_id }}</a>{% else %}{{ prospect.title|default:prospect.external_id }}{% endif %}
+                <br><span class="mono muted">{{ prospect.external_id }}</span>{% if prospect.seller %} <span class="muted">· {{ prospect.seller }}</span>{% endif %}
+                {% if prospect.category_path %}<p class="scraped-category muted">{{ prospect.category_path }}</p>{% endif %}
+              </td>
+              <td class="num">{% if prospect.price is not None %}ARS {{ prospect.price }}{% else %}—{% endif %}</td>
+              <td><a class="button" href="?prospect={{ prospect.pk }}">Create product</a></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if prospects|length == 200 %}<p class="muted">Showing the newest 200.</p>{% endif %}
+  </section>
+{% else %}
+  <div class="card empty">
+    <p>No scraped listings waiting. Scraped listings come from your scraper through the API.</p>
+    <p><a href="{% url 'meli_drafts' %}?start=scraped">See all scraped listings</a></p>
+  </div>
+{% endif %}

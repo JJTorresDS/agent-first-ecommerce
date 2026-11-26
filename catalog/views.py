@@ -262,12 +262,12 @@ def _int(value):
         return None
 
 
-def _code_dialog(organization, kind, data=None):
+def _code_dialog(organization, kind, data=None, initial=None):
     Model, Form, example_name, example_code = _KINDS[kind]
     return {
         "kind": kind,
         "label": Model._meta.verbose_name,
-        "form": Form(data, prefix=kind, instance=Model(organization=organization)),
+        "form": Form(data, prefix=kind, instance=Model(organization=organization), initial=initial),
         "example_name": example_name,
         "example_code": example_code,
     }

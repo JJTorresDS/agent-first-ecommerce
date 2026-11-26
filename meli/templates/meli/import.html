@@ -7,15 +7,23 @@
   <div class="page-head">
     <h1>Import from Mercado Libre</h1>
   </div>
+  <p class="page-lead">Bring a Mercado Libre product into your catalog: paste its link or pick a scraped listing.</p>
 
   {% if not can_edit %}
     <div class="card empty"><p>Only owners and admins can import products.</p></div>
-  {% elif not connected %}
+  {% elif not form %}
+    <nav class="segmented" aria-label="Import from">
+      <a class="{% if start == 'link' %}active{% endif %}" href="?start=link"{% if start == 'link' %} aria-current="page"{% endif %}>From a link</a>
+      <a class="{% if start == 'scraped' %}active{% endif %}" href="?start=scraped"{% if start == 'scraped' %} aria-current="page"{% endif %}>From a scraped listing</a>
+    </nav>
+    {% if start == "scraped" %}
+      {% include "meli/_import_scraped.html" %}
+    {% elif not connected %}
     <div class="card empty">
       <p>Mercado Libre isn't connected for this organization.</p>
       <p><a href="{% url 'mercadolibre_settings' %}">Connect Mercado Libre</a> to read products from it.</p>
     </div>
-  {% elif not form %}
+    {% else %}
     <section class="card">
       <p class="muted">Paste the link of a product you'd like to sell: its catalog page (…/p/MLA…) or a listing. Vimple reads it from Mercado Libre and shows a new catalog product to review. Nothing is saved until you do.</p>
       {% if error %}<p class="error">{{ error }}</p>{% endif %}
@@ -29,11 +37,16 @@
         <div class="actions wide"><span></span><button class="primary" type="submit">Read product</button></div>
       </form>
     </section>
+    {% endif %}
   {% else %}
     <form method="post" id="import-form">
       {% csrf_token %}
       <input type="hidden" name="action" value="save">
-      {{ form.url }}{{ form.brand_hint }}{{ form.meli_catalog_product_id }}{{ form.meli_category_id }}
+      {{ form.url }}{{ form.brand_hint }}{{ form.meli_catalog_product_id }}{{ form.meli_category_id }}{{ form.prospect }}
+      {% if prospect %}
+        <p class="muted">From scraped listing <span class="mono">{{ prospect.external_id }}</span>{% if prospect.seller %} by {{ prospect.seller }}{% endif %}{% if prospect.price is not None %} at ARS {{ prospect.price }}{% endif %}. Saving links it to the new product.</p>
+      {% endif %}
+      {% if note %}<p class="notice">{{ note }}</p>{% endif %}
       {% for error in form.non_field_errors %}<p class="error">{{ error }}</p>{% endfor %}
 
       <section class="card">
