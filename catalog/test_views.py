@@ -43,7 +43,7 @@ class CatalogAccessTests(TestCase):
     def test_model_and_product_pages_link_to_a_new_model(self):
         self.client.force_login(member(self.organization))
         for url in (f"/catalog/models/{self.item.product_model_id}/", f"/catalog/products/{self.item.pk}/"):
-            self.assertContains(self.client.get(url), '<a class="button" href="/catalog/models/new/">New model</a>', html=True)
+            self.assertContains(self.client.get(url), '<a class="button" href="/catalog/new/">New model</a>', html=True)
 
     def test_a_contributor_reads_but_cannot_change_the_catalog(self):
         self.client.force_login(member(self.organization, role=Membership.Role.CONTRIBUTOR))

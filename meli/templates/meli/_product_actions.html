@@ -1,17 +1,23 @@
 <div class="listing-actions" id="listing-actions">
   <p class="muted">Mercado Libre: {% include "meli/_listed_link.html" with summary=listing_summary pk=listed.pk %}</p>
   {% include "meli/_listed_dialog.html" %}
+  {% if progress %}{% include "meli/_product_progress.html" %}{% endif %}
   {% if can_edit %}
     {% if reason %}
-      <p class="{% if package_first %}warn-note{% else %}muted{% endif %}">{{ reason }}{% if package_first %} <a href="#package">Go to Package</a>{% endif %}</p>
+      <p class="{% if package_first %}warn-note{% else %}muted{% endif %}">{{ reason }}{% if fixable %} <button type="button" class="link-button" data-ready hx-get="{% url 'meli_product_ready' product.pk %}" hx-target="#ready-dialog-body" hx-swap="innerHTML">Fill in</button>{% endif %}</p>
+      {% if fixable %}{% include "meli/_ready_dialog.html" %}{% endif %}
     {% else %}
       <form method="post" action="{% url 'meli_draft_from_product' product.pk %}" class="head-actions">
         {% csrf_token %}
-        <button type="submit" name="kind" value="product" class="primary">Create Mercado Libre listing</button>
+        {% if from_scraped %}<input type="hidden" name="prospect" value="{{ from_scraped.pk }}">{% endif %}
+        <button type="submit" name="kind" value="product" class="primary"{% if from_scraped %} title="In {{ from_scraped.category_path|default:from_scraped.category_id }}, with the scraped listing's characteristics"{% endif %}>Create Mercado Libre listing</button>
         {% if template %}<button type="submit" name="template" value="{{ template.pk }}" title="Copies the attributes of “{{ template.title }}”">Create from the {{ template.category_id }} template</button>{% endif %}
         {% if product.meli_catalog_product_id %}<button type="submit" name="kind" value="catalog">List in its catalog ({{ product.meli_catalog_product_id }})</button>{% endif %}
       </form>
     {% endif %}
+  {% endif %}
+  {% if next_scraped %}
+    <p class="next-step"><a class="accent" href="{% url 'catalog_import' %}?prospect={{ next_scraped.pk }}">Next scraped listing →</a> <span class="muted">{{ scraped_left }} waiting for a product</span></p>
   {% endif %}
   {% if competitors %}
     <div class="competitors">

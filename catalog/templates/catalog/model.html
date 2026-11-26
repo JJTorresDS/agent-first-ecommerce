@@ -8,9 +8,13 @@
     <h1>{% if model %}{{ model.name }}{% else %}New model{% endif %}</h1>
     <div class="head-actions">
       <span class="sku sku-lg" id="family-preview" data-model="{% if model %}{{ model.code }}{% endif %}">{% if model %}{{ model.family_code }}{% else %}ROOT-CATEGORY-BRAND-MODEL{% endif %}</span>
-      {% if model and can_edit %}<a class="button" href="{% url 'catalog_model_new' %}">New model</a>{% endif %}
+      {% if model and can_edit %}<a class="button" href="{% url 'catalog_new' %}">New model</a>{% endif %}
     </div>
   </div>
+  {% if not model %}
+    <p class="page-lead">Name the model, then add its variants: each one gets its own SKU.</p>
+    {% if can_edit %}{% include "catalog/_new_tabs.html" with new_start="scratch" %}{% endif %}
+  {% endif %}
 
   <section class="card">
     <h2>Model</h2>

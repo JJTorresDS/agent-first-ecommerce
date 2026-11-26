@@ -54,7 +54,7 @@ class DescriptionTests(PerfumeDraftCase):
             **FORM, "desc_present": "1",
             "desc_part": [f"block:{self.why.pk}", "text", "product"], "desc_text": ["Perfume árabe 100 ml."],
         })
-        self.assertRedirects(response, "/catalog/meli/new/")
+        self.assertRedirects(response, f"/catalog/meli/new/{draft.pk}/")
         draft.refresh_from_db()
         self.assertEqual(draft.description_parts, [{"block": self.why.pk}, {"text": "Perfume árabe 100 ml."}, {"product": True}])
         # A block edited before posting is posted as it reads then.

@@ -506,7 +506,7 @@ class DraftFlowTests(DraftTestCase):
                 "installments": "on", "regulatory_na": "on",
             },
         )
-        self.assertRedirects(response, "/catalog/meli/new/")
+        self.assertRedirects(response, f"/catalog/meli/new/{draft.pk}/")
         draft.refresh_from_db()
         self.assertEqual(draft.status, ListingDraft.Status.READY)
         self.assertFalse(draft.use_defaults)

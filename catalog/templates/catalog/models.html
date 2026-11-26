@@ -6,7 +6,7 @@
   {% include "catalog/_tabs.html" %}
   <div class="page-head">
     <h1>Models</h1>
-    {% if can_edit %}<a class="accent" href="{% url 'catalog_model_new' %}">New model</a>{% endif %}
+    {% if can_edit %}<a class="accent" href="{% url 'catalog_new' %}">New model</a>{% endif %}
   </div>
   {% if models %}
     {% if bulk %}{% include "_bulk_bar.html" %}{% endif %}

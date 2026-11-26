@@ -1,21 +1,18 @@
 {% extends "base.html" %}
 
-{% block title %}Import from Mercado Libre{% endblock %}
+{% block title %}New model{% endblock %}
 
 {% block content %}
   {% include "catalog/_tabs.html" %}
   <div class="page-head">
-    <h1>Import from Mercado Libre</h1>
+    <h1>New model</h1>
   </div>
-  <p class="page-lead">Bring a Mercado Libre product into your catalog: paste its link or pick a scraped listing.</p>
+  <p class="page-lead">{% if form %}Check what Mercado Libre says about the product, then save it to your catalog.{% elif start == "scraped" %}Pick a scraped listing: it fills in a new product with its first variant.{% else %}Paste a Mercado Libre link: it fills in a new product with its first variant.{% endif %}</p>
 
   {% if not can_edit %}
     <div class="card empty"><p>Only owners and admins can import products.</p></div>
   {% elif not form %}
-    <nav class="segmented" aria-label="Import from">
-      <a class="{% if start == 'link' %}active{% endif %}" href="?start=link"{% if start == 'link' %} aria-current="page"{% endif %}>From a link</a>
-      <a class="{% if start == 'scraped' %}active{% endif %}" href="?start=scraped"{% if start == 'scraped' %} aria-current="page"{% endif %}>From a scraped listing</a>
-    </nav>
+    {% include "catalog/_new_tabs.html" with new_start=start %}
     {% if start == "scraped" %}
       {% include "meli/_import_scraped.html" %}
     {% elif not connected %}

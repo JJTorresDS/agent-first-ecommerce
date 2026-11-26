@@ -149,6 +149,11 @@ def meli_draft(request, pk):
     )
     if request.method == "POST" and not can_edit:
         return HttpResponseForbidden(READ_ONLY)
+    if request.GET.get("poll") == "state" and draft.status in ListingDraft.BUSY:
+        # #draft-state polls while the worker checks or posts; nothing to swap until it's done.
+        return HttpResponse(status=204)
+    if request.method == "POST" and request.POST.get("action") == "post":
+        return _post_from_page(request, organization, draft)
     regular = draft.regular()
     attributes = dict(draft.attributes or {})
     attributes_error = ""
@@ -188,7 +193,8 @@ def meli_draft(request, pk):
             saved.error_details = {}
             saved.save()
             dispatch_drafts(organization, "check", [saved.pk])
-            return redirect("meli_drafts")
+            # The answer shows here: #draft-state polls until the check is done, then offers Post.
+            return redirect("meli_draft", pk=saved.pk)
     return render(
         request,
         "meli/draft.html",
@@ -214,6 +220,29 @@ def meli_draft(request, pk):
             "active_tab": "meli_new",
         },
     )
+
+
+LISTING_SENT = "meli_listing_sent"
+
+
+def _post_from_page(request, organization, draft):
+    """Post on the draft page: queue it, then go back to its product or combo, where the listing shows up.
+
+    The product page then offers the next scraped listing (LISTING_SENT in the session).
+    """
+    from .jobs import dispatch_drafts
+
+    queued = queue_for_posting(organization, [draft.pk], pause=bool(request.POST.get("pause_after")))
+    if not queued:
+        messages.warning(request, "Only a ready draft can be posted. Save and check it first.")
+        return redirect("meli_draft", pk=draft.pk)
+    dispatch_drafts(organization, "publish", queued)
+    messages.success(request, f"Listing sent to Mercado Libre{' (paused)' if request.POST.get('pause_after') else ''}.")
+    if draft.kind == ListingDraft.Kind.FAST:
+        return redirect("meli_drafts")
+    if draft.product_id:
+        request.session[LISTING_SENT] = str(draft.product_id)
+    return redirect(draft.listed_url())
 
 
 def _ready_missing(organization, draft):
@@ -589,16 +618,58 @@ def meli_product_actions(request, pk):
 
     organization, can_edit = _scope(request)
     product = get_object_or_404(MasterProduct, organization=organization, pk=pk)
-    competitors = (
+    competitors = list(
         MeliListingProspect.objects.filter(organization=organization, product=product)
         .exclude(status=MeliListingProspect.Status.DISMISSED)
-        .only("title", "external_id", "url", "seller", "price")[:10]
+        .order_by("-updated_at")
+        .only("title", "external_id", "url", "seller", "price", "category_id", "category_path")[:10]
     )
-    return render(
-        request,
-        "meli/_product_actions.html",
-        {**_actions_context(organization, product, can_edit, product=product), "competitors": competitors},
+    context = _actions_context(organization, product, can_edit, product=product)
+    # Create listing starts from the newest linked scraped listing: its category and characteristics.
+    context["from_scraped"] = next((row for row in competitors if row.category_id), None)
+    context["fixable"] = can_edit and bool(context["reason"]) and context["reason"] != CONNECT_FIRST
+    context["progress"] = _draft_progress(organization, product)
+    if can_edit and request.session.get(LISTING_SENT) == str(product.pk):
+        from .import_views import _unlinked
+
+        waiting = _unlinked(organization)
+        context["next_scraped"] = waiting.order_by("-updated_at").first()
+        context["scraped_left"] = waiting.count() if context["next_scraped"] else 0
+    return render(request, "meli/_product_actions.html", {**context, "competitors": competitors})
+
+
+PROGRESS_SHOWN = (
+    ListingDraft.Status.CHECKING, ListingDraft.Status.READY, ListingDraft.Status.NEEDS_FIX,
+    ListingDraft.Status.QUEUED, ListingDraft.Status.PUBLISHING, ListingDraft.Status.FAILED,
+)
+
+
+def _draft_progress(organization, product):
+    """The product's newest draft while it isn't published yet: posting, refused or waiting to post."""
+    return (
+        ListingDraft.objects.filter(organization=organization, product=product, status__in=PROGRESS_SHOWN)
+        .order_by("-updated_at")
+        .only("pk", "status", "error", "updated_at")
+        .first()
     )
+
+
+@require_app(AppAccess.App.CATALOG)
+def meli_product_progress(request, pk):
+    """The product card's draft line, polled while a draft is checked or posted (204 until it changes)."""
+    from catalog.models import MasterProduct
+
+    organization, _can_edit = _scope(request)
+    product = get_object_or_404(MasterProduct, organization=organization, pk=pk)
+    progress = _draft_progress(organization, product)
+    if progress is not None and progress.status == request.GET.get("status"):
+        return HttpResponse(status=204)
+    if progress is None or progress.status == ListingDraft.Status.PUBLISHED:
+        # Posted: the card reads its listings again.
+        response = HttpResponse(status=204)
+        response["HX-Refresh"] = "true"
+        return response
+    return render(request, "meli/_product_progress.html", {"product": product, "progress": progress})
 
 
 @require_app(AppAccess.App.CATALOG)
@@ -616,7 +687,25 @@ def meli_draft_from_product(request, pk):
         return HttpResponseBadRequest(reason)
     template = _chosen_template(organization, request)
     in_catalog = request.POST.get("kind") == "catalog" and product.meli_catalog_product_id and template is None
-    draft = product_draft(organization, product, request.user, template, in_catalog)
+    # A scraped listing linked to this product gives the draft its category, then its characteristics.
+    prospect = None
+    chosen = _ids([request.POST.get("prospect")])
+    if chosen and template is None and not in_catalog:
+        # Only this organization's scraped listings linked to this product; any other id is ignored.
+        prospect = (
+            MeliListingProspect.objects.filter(organization=organization, product=product, pk=chosen[0])
+            .exclude(status=MeliListingProspect.Status.DISMISSED)
+            .first()
+        )
+    draft = product_draft(
+        organization, product, request.user, template, in_catalog,
+        category_id=prospect.category_id if prospect else "", prospect=prospect,
+    )
+    if prospect is not None:
+        prospect.draft = draft
+        prospect.status = MeliListingProspect.Status.DRAFTED
+        prospect.save(update_fields=["draft", "status", "updated_at"])
+        return redirect(f"{reverse('meli_draft', args=[draft.pk])}?prospect={prospect.pk}")
     return _open_draft(organization, draft, template)
 
 

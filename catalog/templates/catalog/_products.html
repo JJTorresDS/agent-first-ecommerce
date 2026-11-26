@@ -35,7 +35,7 @@
       {% else %}
         <p>No products yet.</p>
         <p class="muted">Add a category and a brand, then create a model with its variants. Each variant gets its SKU, like <span class="sku">PERF-ONLY-885-30ML</span>.</p>
-        {% if can_edit %}<p><a class="accent" href="{% url 'catalog_model_new' %}">New model</a></p>{% endif %}
+        {% if can_edit %}<p><a class="accent" href="{% url 'catalog_new' %}">New model</a></p>{% endif %}
       {% endif %}
     </div>
   {% endif %}

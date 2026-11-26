@@ -1,0 +1,12 @@
+{% comment %}
+  The product's newest unposted draft. While the worker checks or posts it, the line polls
+  meli_product_progress, which answers 204 until the status changes (HX-Refresh once posted).
+{% endcomment %}
+<p class="muted" id="listing-progress"{% if progress.status in "checking queued publishing" %} hx-get="{% url 'meli_product_progress' product.pk %}?status={{ progress.status }}" hx-trigger="every 3s" hx-target="this" hx-swap="outerHTML"{% endif %}>
+  {% if progress.status == "queued" or progress.status == "publishing" %}<span class="spinner" aria-hidden="true"></span> Posting to Mercado Libre…
+  {% elif progress.status == "checking" %}<span class="spinner" aria-hidden="true"></span> Draft #{{ progress.pk }} is being checked.
+  {% elif progress.status == "ready" %}Draft #{{ progress.pk }} is ready to post.
+  {% elif progress.status == "needs_fix" %}Draft #{{ progress.pk }} needs a fix before it can post.
+  {% else %}Mercado Libre refused draft #{{ progress.pk }}.{% endif %}
+  <a href="{% url 'meli_draft' progress.pk %}">Open draft</a>
+</p>

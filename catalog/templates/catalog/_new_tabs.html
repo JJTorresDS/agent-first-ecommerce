@@ -1,0 +1,9 @@
+{% comment %}
+  New model's three starts. From a scraped listing and From a link live on the import page (meli),
+  From scratch on the model page; catalog only links to them.
+{% endcomment %}
+<nav class="segmented" aria-label="Create from">
+  <a class="{% if new_start == 'scraped' %}active{% endif %}" href="{% url 'catalog_import' %}?start=scraped"{% if new_start == 'scraped' %} aria-current="page"{% endif %}>From a scraped listing</a>
+  <a class="{% if new_start == 'link' %}active{% endif %}" href="{% url 'catalog_import' %}?start=link"{% if new_start == 'link' %} aria-current="page"{% endif %}>From a link</a>
+  <a class="{% if new_start == 'scratch' %}active{% endif %}" href="{% url 'catalog_model_new' %}"{% if new_start == 'scratch' %} aria-current="page"{% endif %}>From scratch</a>
+</nav>
