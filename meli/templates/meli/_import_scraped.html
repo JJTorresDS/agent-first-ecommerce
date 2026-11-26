@@ -14,7 +14,7 @@
               <td>
                 {% if prospect.url %}<a href="{{ prospect.url }}" target="_blank" rel="noopener">{{ prospect.title|default:prospect.external_id }}</a>{% else %}{{ prospect.title|default:prospect.external_id }}{% endif %}
                 <br><span class="mono muted">{{ prospect.external_id }}</span>{% if prospect.seller %} <span class="muted">· {{ prospect.seller }}</span>{% endif %}
-                {% if prospect.category_path %}<p class="scraped-category muted">{{ prospect.category_path }}</p>{% endif %}
+                {% if prospect.category_id %}<p class="scraped-category"><span class="mono">{{ prospect.category_id }}</span>{% if prospect.category_path %} <span class="muted">· {{ prospect.category_path }}</span>{% endif %}</p>{% endif %}
               </td>
               <td class="num">{% if prospect.price is not None %}ARS {{ prospect.price }}{% else %}—{% endif %}</td>
               <td><a class="button" href="?prospect={{ prospect.pk }}">Create product</a></td>

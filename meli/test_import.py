@@ -229,6 +229,7 @@ def prospect(organization, external_id="MLAU3874307988", **fields):
         picture=payload["images"]["gallery"][0],
         seller=payload["seller"],
         category_id="MLA1271",
+        category_path="Belleza y Cuidado Personal > Perfumes",
         payload=payload,
         **fields,
     )
@@ -308,6 +309,9 @@ class ScrapedImportTests(TestCase):
         self.assertContains(page, 'name="variant" value="30ML"')
         self.assertContains(page, 'name="picture" value="https://http2.mlstatic.com/scraped-2.webp" checked')
         self.assertContains(page, 'value="Género"')
+        self.assertContains(
+            page, 'Mercado Libre\'s category: <span class="mono">MLA1271</span> · <strong>Belleza y Cuidado Personal &gt; Perfumes</strong>'
+        )
         self.assertEqual(self.meli.calls, [])
 
     def test_a_refused_read_falls_back_to_the_scrape(self):

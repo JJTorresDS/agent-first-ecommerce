@@ -61,6 +61,7 @@
           {% endif %}
         </div>
         <p class="muted" id="ai-note" hidden></p>
+        {% if form.meli_category_id.value %}<p class="muted">Mercado Libre's category: <span class="mono">{{ form.meli_category_id.value }}</span>{% if meli_category_path %} · <strong>{{ meli_category_path }}</strong>{% endif %}</p>{% endif %}
         {% if form.brand_hint.value %}<p class="muted">Mercado Libre's brand: <strong>{{ form.brand_hint.value }}</strong></p>{% endif %}
         <div class="form-grid">
           {% include "catalog/_code_select.html" with field=form.category kind="category" %}

@@ -142,6 +142,8 @@ def _review_prospect(request, organization, prospect, values, note):
 
 def _review(request, organization, form, options, chosen, attributes, prospect=None, note="", dialogs=None):
     dialogs = dialogs or {}
+    category_id = form["meli_category_id"].value()
+    same = prospect is not None and category_id and prospect.category_id == category_id
     return render(
         request,
         "meli/import.html",
@@ -156,5 +158,6 @@ def _review(request, organization, form, options, chosen, attributes, prospect=N
             "active_tab": "products",
             "prospect": prospect,
             "note": note,
+            "meli_category_path": prospect.category_path if same else "",
         },
     )
