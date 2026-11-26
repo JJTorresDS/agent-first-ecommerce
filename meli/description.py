@@ -20,6 +20,19 @@ EMPTY = "Write a description first: it's empty."
 _LINK = re.compile(r"(https?://|www\.)\S+|\b[\w-]+\.(com|ar|net|org)(\.ar)?\b", re.IGNORECASE)
 _EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+")
 _PHONE = re.compile(r"(?<!\d)(\+?\d[\d\s().-]{7,}\d)(?!\d)")
+# A street and number: "Av. Corrientes 1234", "calle Leiva 4572", or "en/de Leiva 4572" (capitalized words, then 3-5 digits).
+_ADDRESS = re.compile(
+    r"\b(?:[Cc]alle|[Aa]venida|[Aa]vda?\.?|[Pp]asaje)\s+[^\d\n,]{2,40}?\s\d{2,5}\b"
+    r"|\b(?:en|de|sobre)\s+(?:[A-ZÁÉÍÓÚÑ][a-záéíóúñ.]+\s+){1,3}\d{3,5}\b"
+)
+# Pickup at the seller's own place, or its opening hours: "retirá en nuestro local", "lunes a viernes de 9 a 18 hs".
+_PICKUP = re.compile(
+    r"retir[a-záéíóúñ]*[^.\n]{0,40}\b(?:local|showroom|dep[oó]sito|oficina|domicilio|tienda)\b"
+    r"|\bnuestro local\b|\bshowroom\b|\bpuntos? de retiro\b"
+    r"|\blunes a (?:viernes|s[áa]bado)\b"
+    r"|\b\d{1,2}(?:[:.]\d{2})?\s*(?:a|-|–)\s*\d{1,2}(?:[:.]\d{2})?\s*(?:hs|horas)\b",
+    re.IGNORECASE,
+)
 
 
 def category_of(listed):
@@ -116,4 +129,8 @@ def warnings(text):
         found.append("It has an email address: Mercado Libre moderates contact details.")
     if _PHONE.search(text):
         found.append("It looks like it has a phone number: Mercado Libre moderates contact details.")
+    if _ADDRESS.search(text):
+        found.append("It looks like it has an address: Mercado Libre moderates contact details.")
+    if _PICKUP.search(text):
+        found.append("It offers pickup at your place or gives opening hours: Mercado Libre moderates deals outside it, and these listings don't offer local pickup.")
     return found

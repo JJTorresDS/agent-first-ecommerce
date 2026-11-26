@@ -99,3 +99,13 @@ class DescriptionTests(PerfumeDraftCase):
         self.assertIn("email", found)
         self.assertIn("phone", found)
         self.assertIn(EMPTY, warnings("  "))
+
+    def test_an_address_and_pickup_are_flagged(self):
+        text = "Formas de entrega:\n\nPodés retirar tu pedido en nuestro local de Leiva 4572 (lunes a viernes de 9 a 18 hs)."
+        found = " ".join(warnings(text))
+        self.assertIn("address", found)
+        self.assertIn("pickup", found)
+        self.assertIn("address", " ".join(warnings("Showroom en Av. Corrientes 1234")))
+        self.assertIn("pickup", " ".join(warnings("Atendemos de 10 a 19 hs")))
+        clean = "Alfombra de yute de 120 cm. Modelo 2024, lavable. Peso 310 g. Retirá el film protector antes de usar."
+        self.assertEqual(warnings(clean), [])
