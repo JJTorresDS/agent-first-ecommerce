@@ -2,14 +2,23 @@ from django.contrib import admin
 
 from purchasing.models import PurchaseItem
 
-from .models import Brand, Category, Combo, ComboItem, MasterProduct, ProductModel
+from .models import Brand, Category, Combo, ComboItem, MasterProduct, ProductModel, RootCategory
+
+
+@admin.register(RootCategory)
+class RootCategoryAdmin(admin.ModelAdmin):
+    list_display = ("code", "name", "organization")
+    list_filter = ("organization",)
+    search_fields = ("code", "name")
 
 
 @admin.register(Category)
 class CategoryAdmin(admin.ModelAdmin):
-    list_display = ("code", "name", "organization")
-    list_filter = ("organization",)
-    search_fields = ("code", "name")
+    list_display = ("code", "name", "root", "organization")
+    list_filter = ("organization", "root")
+    search_fields = ("code", "name", "root__code", "root__name")
+    list_select_related = ("root",)
+    autocomplete_fields = ("root",)
 
 
 @admin.register(Brand)

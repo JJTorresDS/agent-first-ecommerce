@@ -7,7 +7,7 @@ from django.test import TestCase
 from accounts.models import AppAccess, Membership, Organization, Profile
 from purchasing.models import Purchase, PurchaseItem, Supplier
 
-from .models import Brand, Category, MasterProduct, ProductModel
+from .models import Brand, Category, MasterProduct, ProductModel, RootCategory
 from .tests import IMAGE, product, product_model
 
 User = get_user_model()
@@ -116,7 +116,14 @@ class CatalogFlowTests(TestCase):
         self.client.force_login(self.user)
 
     def test_codes_then_a_model_then_its_variants(self):
-        self.client.post("/catalog/codes/", {"kind": "category", "category-code": "perf", "category-name": "Perfumes"})
+        no_root = self.client.post("/catalog/codes/", {"kind": "category", "category-code": "perf", "category-name": "Perfumes"})
+        self.assertContains(no_root, "Pick a root category or give a new one&#x27;s code and name.")
+        self.client.post("/catalog/codes/", {"kind": "root", "root-code": "beauty", "root-name": "Belleza"})
+        root = RootCategory.objects.get(organization=self.organization)
+        self.client.post(
+            "/catalog/codes/",
+            {"kind": "category", "category-code": "perf", "category-name": "Perfumes", "category-root": root.pk},
+        )
         self.client.post("/catalog/codes/", {"kind": "brand", "brand-code": "ONLY", "brand-name": "Only"})
         duplicate = self.client.post("/catalog/codes/", {"kind": "brand", "brand-code": "only", "brand-name": "Other"})
         self.assertContains(duplicate, "already exists")
@@ -145,7 +152,7 @@ class CatalogFlowTests(TestCase):
         self.assertEqual(again.status_code, 200)
         self.assertEqual(
             sorted(MasterProduct.objects.values_list("sku", flat=True)),
-            ["PERF-ONLY-885-100ML", "PERF-ONLY-885-30ML"],
+            ["BEAUTY-PERF-ONLY-885-100ML", "BEAUTY-PERF-ONLY-885-30ML"],
         )
         page = self.client.get(f"/catalog/models/{model.pk}/")
         self.assertContains(page, "Variants use this model")
@@ -258,19 +265,24 @@ class CodeDialogTests(TestCase):
 
     def test_an_owner_adds_a_category_and_a_brand(self):
         category = self._added(
-            self.client.post("/catalog/codes/new/category/", {"category-code": "perf", "category-name": "Perfumes"})
+            self.client.post(
+                "/catalog/codes/new/category/",
+                {"category-code": "perf", "category-name": "Perfumes", "category-root_code": "beauty",
+                 "category-root_name": "Belleza y Cuidado Personal"},
+            )
         )
         row = Category.objects.get(organization=self.organization)
         self.assertEqual(row.code, "PERF")
+        self.assertEqual((row.root.code, row.root.name, row.root.organization), ("BEAUTY", "Belleza y Cuidado Personal", self.organization))
         self.assertEqual(
             category,
             {
                 "select": "id_category",
                 "dialog": "code-dialog-category",
                 "id": str(row.pk),
-                "label": "PERF · Perfumes",
+                "label": "BEAUTY > PERF · Perfumes",
                 "kind": "category",
-                "code": "PERF",
+                "code": "BEAUTY-PERF",
             },
         )
         brand = self._added(self.client.post("/catalog/codes/new/brand/", {"brand-code": "ONLY", "brand-name": "Only"}))
@@ -289,12 +301,70 @@ class CodeDialogTests(TestCase):
     def test_another_organizations_code_is_neither_a_clash_nor_shown(self):
         theirs = Category.objects.create(organization=self.other, code="PERF", name="Perfumes")
         added = self._added(
-            self.client.post("/catalog/codes/new/category/", {"category-code": "PERF", "category-name": "Perfumes"})
+            self.client.post(
+                "/catalog/codes/new/category/",
+                {"category-code": "PERF", "category-name": "Perfumes", "category-root_code": "BEAUTY",
+                 "category-root_name": "Belleza"},
+            )
         )
         self.assertNotEqual(added["id"], str(theirs.pk))
         self.assertEqual(Category.objects.get(pk=added["id"]).organization, self.organization)
         page = self.client.get("/catalog/models/new/")
-        self.assertNotContains(page, f'value="{theirs.pk}"')
+        self.assertContains(page, f'<option value="{added["id"]}">BEAUTY &gt; PERF · Perfumes</option>')
+        self.assertNotContains(page, f'<option value="{theirs.pk}">PERF · Perfumes</option>')
+
+    def test_a_new_category_needs_one_of_this_organizations_roots(self):
+        theirs = RootCategory.objects.create(organization=self.other, code="BEAUTY", name="Belleza")
+        mine = RootCategory.objects.create(organization=self.organization, code="SALUD", name="Salud")
+        data = {"category-code": "PERF", "category-name": "Perfumes"}
+        missing = self.client.post("/catalog/codes/new/category/", data)
+        self.assertContains(missing, "Pick a root category or give a new one&#x27;s code and name.")
+        stolen = self.client.post("/catalog/codes/new/category/", {**data, "category-root": theirs.pk})
+        self.assertContains(stolen, "Select a valid choice")
+        both = self.client.post(
+            "/catalog/codes/new/category/",
+            {**data, "category-root": mine.pk, "category-root_code": "NEW", "category-root_name": "New"},
+        )
+        self.assertContains(both, "not both")
+        bad = self.client.post(
+            "/catalog/codes/new/category/", {**data, "category-root_code": "COMBO", "category-root_name": "Combos"}
+        )
+        self.assertContains(bad, "COMBO is kept for combo SKUs")
+        self.assertFalse(Category.objects.exists())
+        self.assertEqual(RootCategory.objects.filter(organization=self.organization).count(), 1)
+        added = self._added(self.client.post("/catalog/codes/new/category/", {**data, "category-root": mine.pk}))
+        self.assertEqual(Category.objects.get(pk=added["id"]).root, mine)
+        self.assertEqual(added["code"], "SALUD-PERF")
+
+    def test_the_codes_page_lists_roots_and_old_categories_save_without_one(self):
+        old = Category.objects.create(organization=self.organization, code="PERF", name="Perfumes")
+        RootCategory.objects.create(organization=self.other, code="THEIRS", name="Their root")
+        mine = RootCategory.objects.create(organization=self.organization, code="BEAUTY", name="Belleza")
+        page = self.client.get("/catalog/codes/")
+        self.assertContains(page, "Root categories")
+        self.assertContains(page, "ROOT-CATEGORY-BRAND-MODEL-VARIANT")
+        self.assertContains(page, "BEAUTY · Belleza")
+        self.assertNotContains(page, "THEIRS")
+        renamed = self.client.post(
+            "/catalog/codes/", {"kind": "category", "id": old.pk, "category-code": "PERF", "category-name": "Fragancias"}
+        )
+        self.assertEqual(renamed.status_code, 302)
+        old.refresh_from_db()
+        self.assertEqual((old.name, old.root), ("Fragancias", None))
+        self.client.post(
+            "/catalog/codes/",
+            {"kind": "category", "id": old.pk, "category-code": "PERF", "category-name": "Fragancias", "category-root": mine.pk},
+        )
+        old.refresh_from_db()
+        self.assertEqual(old.root, mine)
+        # Now it has one, it keeps one.
+        removed = self.client.post(
+            "/catalog/codes/", {"kind": "category", "id": old.pk, "category-code": "PERF", "category-name": "Fragancias"}
+        )
+        self.assertEqual(removed.status_code, 200)
+        blocked = self.client.post("/catalog/codes/", {"kind": "root", "action": "delete", "id": mine.pk})
+        self.assertTrue(RootCategory.objects.filter(pk=mine.pk).exists())
+        self.assertEqual(blocked.status_code, 302)
 
     def test_only_editors_add_and_only_by_post(self):
         self.assertEqual(self.client.get("/catalog/codes/new/category/").status_code, 405)

@@ -17,10 +17,12 @@ from .validators import (
     validate_currency,
     validate_gtin,
     validate_model_code,
+    validate_root_code,
     validate_variant,
 )
 
 CODE_IN_USE = "Products already use this code in their SKU. Create a new one instead."
+ROOT_IN_USE = "Products' SKUs already use this root category. Create a new category instead."
 
 
 class Condition(models.TextChoices):
@@ -84,8 +86,38 @@ class _CodedName(TenantModel):
         super().save(*args, **kwargs)
 
 
+class RootCategory(_CodedName):
+    """The umbrella over categories (Belleza y Cuidado Personal, BEAUTY): the first part of a product's SKU."""
+
+    code = models.CharField(max_length=6, validators=[validate_root_code], help_text="BEAUTY")
+
+    class Meta(_CodedName.Meta):
+        db_table = "catalog_root_category"
+        verbose_name = "root category"
+        verbose_name_plural = "root categories"
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "code"], name="uniq_catalog_org_root_code"),
+            models.UniqueConstraint(Lower("name"), "organization", name="uniq_catalog_org_root_name"),
+        ]
+
+    def _in_use(self):
+        stored = _stored(self, "code")
+        return bool(stored) and MasterProduct.objects.filter(
+            product_model__category__root=self, sku__startswith=f"{stored[0]}-"
+        ).exists()
+
+
 class Category(_CodedName):
     code = models.CharField(max_length=6, validators=[validate_category_code], help_text="PERF")
+    root = models.ForeignKey(
+        RootCategory,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="categories",
+        verbose_name="root category",
+        help_text="The umbrella category; its code starts the SKU of products created from now on.",
+    )
 
     class Meta(_CodedName.Meta):
         db_table = "catalog_category"
@@ -95,8 +127,27 @@ class Category(_CodedName):
             models.UniqueConstraint(Lower("name"), "organization", name="uniq_catalog_org_category_name"),
         ]
 
+    def __str__(self):
+        if self.root_id is None:
+            return super().__str__()
+        return f"{self.root.code} > {self.code} · {self.name}"
+
+    def sku_prefix(self):
+        """BEAUTY-ALICAT with a root category, else ALICAT."""
+        return f"{self.root.code}-{self.code}" if self.root_id else self.code
+
     def _in_use(self):
         return MasterProduct.objects.filter(product_model__category=self).exists()
+
+    def _check(self):
+        stored = _stored(self, "code", "root_id")
+        super()._check()
+        _same_organization(self, "root")
+        # A root can be set on a category without one at any time: only new products take it.
+        if stored and stored[1] and stored[1] != self.root_id:
+            old = RootCategory.objects.filter(pk=stored[1]).values_list("code", flat=True).first()
+            if MasterProduct.objects.filter(product_model__category=self, sku__startswith=f"{old}-{stored[0]}-").exists():
+                raise ValidationError({"root": ROOT_IN_USE})
 
 
 class Brand(_CodedName):
@@ -145,7 +196,7 @@ class ProductModel(TenantModel):
     def family_code(self):
         if self.category_id is None or self.brand_id is None:
             return self.code
-        return f"{self.category.code}-{self.brand.code}-{self.code}"
+        return f"{self.category.sku_prefix()}-{self.brand.code}-{self.code}"
 
     def clean_fields(self, exclude=None):
         self.code = normalize_code(self.code)
@@ -180,7 +231,8 @@ def package_missing(row):
 
 
 class MasterProduct(TenantModel):
-    """One sellable variant. Its SKU is CATEGORY-BRAND-MODEL-VARIANT, made once and never changed.
+    """One sellable variant. Its SKU is ROOT-CATEGORY-BRAND-MODEL-VARIANT (CATEGORY-BRAND-MODEL-VARIANT when the
+    category had no root then), made once and never changed.
 
     Shared data lives on the ProductModel; secondary attributes go in attributes.
     Channel listings (Mercado Libre, Tiendanube) will point here.

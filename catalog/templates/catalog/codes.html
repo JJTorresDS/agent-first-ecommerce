@@ -5,7 +5,7 @@
 {% block content %}
   {% include "catalog/_tabs.html" %}
   <div class="page-head"><h1>Categories &amp; brands</h1></div>
-  <p class="muted">Codes go into every SKU: <span class="sku">CATEGORY-BRAND-MODEL-VARIANT</span>. Use capital letters and digits. A code can't change once a SKU uses it; the name can.</p>
+  <p class="page-lead">Codes go into every new SKU: <span class="sku">ROOT-CATEGORY-BRAND-MODEL-VARIANT</span>. A code can't change once a SKU uses it; the name can.</p>
   <div class="two-cards">
     {% for kind, title, example_name, example_code, rows, form, editing, bulk in sections %}
       <section class="card">
@@ -13,14 +13,15 @@
         {% if rows %}
           {% if bulk %}{% include "_bulk_bar.html" %}{% endif %}
           <table class="list">
-            <thead><tr>{% if bulk %}{% include "_bulk_all.html" %}{% endif %}<th>Code</th><th>Name</th><th class="num">Models</th>{% if can_edit %}<th></th>{% endif %}</tr></thead>
+            <thead><tr>{% if bulk %}{% include "_bulk_all.html" %}{% endif %}{% if kind == "category" %}<th>Root</th>{% endif %}<th>Code</th><th>Name</th><th class="num">{% if kind == "root" %}Categories{% else %}Models{% endif %}</th>{% if can_edit %}<th></th>{% endif %}</tr></thead>
             <tbody>
               {% for row in rows %}
                 {% if editing and editing.0 == row.pk %}
-                  <tr><td colspan="5">{% include "catalog/_code_form.html" with form=editing.1 row_id=row.pk button="Save" %}</td></tr>
+                  <tr><td colspan="6">{% include "catalog/_code_form.html" with form=editing.1 row_id=row.pk button="Save" %}</td></tr>
                 {% else %}
                   <tr>
                     {% if bulk %}{% include "_bulk_check.html" with value=row.pk label=row.name %}{% endif %}
+                    {% if kind == "category" %}<td>{% if row.root %}<span class="sku">{{ row.root.code }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>{% endif %}
                     <td><span class="sku">{{ row.code }}</span></td>
                     <td>{{ row.name }}</td>
                     <td class="num">{{ row.model_count }}</td>
@@ -30,13 +31,13 @@
                           <summary>Edit</summary>
                           {% include "catalog/_code_form.html" with form=None row=row row_id=row.pk button="Save" %}
                           {% if row.model_count %}
-                            <p class="muted">Used by {{ row.model_count }} model{{ row.model_count|pluralize }}, so it can't be deleted.</p>
+                            <p class="muted">Used by {{ row.model_count }} {% if kind == "root" %}categor{{ row.model_count|pluralize:"y,ies" }}{% else %}model{{ row.model_count|pluralize }}{% endif %}, so it can't be deleted.</p>
                           {% else %}
                             <form method="post" onsubmit="return confirm('Delete {{ row.name|escapejs }}? This can\'t be undone.')">
                               {% csrf_token %}
                               <input type="hidden" name="kind" value="{{ kind }}">
                               <input type="hidden" name="id" value="{{ row.pk }}">
-                              <button type="submit" name="action" value="delete" class="link-button danger-link">Delete {{ kind }}</button>
+                              <button type="submit" name="action" value="delete" class="link-button danger-link">Delete {% if kind == "root" %}root category{% else %}{{ kind }}{% endif %}</button>
                             </form>
                           {% endif %}
                         </details>
@@ -51,7 +52,7 @@
           <p class="muted">None yet.</p>
         {% endif %}
         {% if can_edit %}
-          <h3>Add {{ kind }}</h3>
+          <h3>Add {% if kind == "root" %}root category{% else %}{{ kind }}{% endif %}</h3>
           {% include "catalog/_code_form.html" with form=form row_id="" button="Add" %}
         {% endif %}
       </section>

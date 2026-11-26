@@ -8,12 +8,12 @@ from django.shortcuts import get_object_or_404, redirect, render
 from accounts.access import require_app
 from accounts.models import AppAccess, can_edit_products, membership_for
 from catalog.forms import ImportForm, attribute_rows, attributes_from
-from catalog.models import Brand, Category, ProductModel
+from catalog.models import Brand, Category, ProductModel, RootCategory
 from catalog.views import _KINDS, _code_dialog
 
 from .client import MercadoLibreError, describe_failure
 from .drafts import DraftError
-from .importer import ImportProblem, read, read_prospect
+from .importer import ImportProblem, category_path, read, read_prospect
 from .models import MercadoLibreAccount, MeliListingProspect
 
 logger = logging.getLogger(__name__)
@@ -123,6 +123,13 @@ def _review_prospect(request, organization, prospect, values, note):
             name = suggested.get(f"{kind}_name", "")
             dialogs[kind] = {"code": code, "name": name}
             notes.append(f"Suggested new {kind} {code} · {name}: add it with +.")
+    if suggested.get("root_code"):
+        root = RootCategory.objects.filter(organization=organization, code=suggested["root_code"]).first()
+        category = dialogs.setdefault("category", {})
+        if root is not None:
+            category["root"] = root.pk
+        else:
+            category.update({"root_code": suggested["root_code"], "root_name": suggested.get("root_name", "")})
     brand = picked.get("brand") or Brand.objects.filter(pk=initial.get("brand"), organization=organization).first()
     model_code = suggested.get("model_code")
     model = None
@@ -141,9 +148,22 @@ def _review_prospect(request, organization, prospect, values, note):
 
 
 def _review(request, organization, form, options, chosen, attributes, prospect=None, note="", dialogs=None):
-    dialogs = dialogs or {}
-    category_id = form["meli_category_id"].value()
-    same = prospect is not None and category_id and prospect.category_id == category_id
+    """The review form. Mercado Libre's category path is shown, and its first step is offered as the root
+    category in the + category dialog: an existing root with that name is picked, else its name is filled."""
+    dialogs = dict(dialogs or {})
+    path = category_path(organization, form["meli_category_id"].value(), prospect)
+    root_hint = path.split(" > ")[0].strip() if path else ""
+    category = dict(dialogs.get("category") or {})
+    if root_hint and not category.get("root"):
+        root = RootCategory.objects.filter(organization=organization, name__iexact=root_hint).first()
+        if root is not None:
+            category["root"] = root.pk
+            category.pop("root_code", None)
+            category.pop("root_name", None)
+        else:
+            category.setdefault("root_name", root_hint)
+    if category:
+        dialogs["category"] = category
     return render(
         request,
         "meli/import.html",
@@ -151,13 +171,15 @@ def _review(request, organization, form, options, chosen, attributes, prospect=N
             "form": form,
             "pictures": [(url, url in chosen) for url in options],
             "attributes": attribute_rows(attributes),
-            "code_dialogs": [_code_dialog(organization, kind, initial=dialogs.get(kind)) for kind in _KINDS],
+            "code_dialogs": [
+                _code_dialog(organization, kind, initial=dialogs.get(kind), root_hint=root_hint) for kind in _KINDS
+            ],
             "ai": bool(settings.MISTRAL_API_KEY),
             "can_edit": True,
             "connected": True,
             "active_tab": "products",
             "prospect": prospect,
             "note": note,
-            "meli_category_path": prospect.category_path if same else "",
+            "meli_category_path": path,
         },
     )

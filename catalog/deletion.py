@@ -25,7 +25,9 @@ def model_blocked(model):
 
 
 def code_blocked(row):
-    """A category or brand; a category can also hold copy."""
+    """A root category, category or brand; a category can also hold copy."""
+    if not hasattr(row, "product_models"):
+        return counted((row.categories.count(), "category uses it", "categories use it"))
     copy = row.copy_blocks.count() if hasattr(row, "copy_blocks") else 0
     return counted(
         (row.product_models.count(), "model uses it", "models use it"),

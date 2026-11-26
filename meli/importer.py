@@ -119,6 +119,7 @@ def read_prospect(organization, prospect):
     if scraped:
         values = _from_scraped(prospect)
     values["list_price"] = prospect.price
+    values["meli_category_path"] = category_path(organization, values["meli_category_id"], prospect)
     if ai.enabled():
         try:
             mapped = _map(organization, prospect, values)
@@ -138,6 +139,18 @@ def read_prospect(organization, prospect):
             values["suggested"] = mapped
             notes.append("Codes and attributes are the AI's suggestion from the scraped listing: check them before saving.")
     return values, " ".join(notes)
+
+
+def category_path(organization, category_id, prospect=None):
+    """Mercado Libre's "Belleza y Cuidado Personal > … > Alicates" for a category: the scraped listing's own
+    when it's the same category, else read once a day (meli.category_views.category_label); "" when unknown."""
+    from .category_views import category_label
+
+    if not category_id:
+        return ""
+    if prospect is not None and prospect.category_id == category_id and prospect.category_path:
+        return prospect.category_path
+    return category_label(organization, category_id).replace(" › ", " > ")
 
 
 def _link_of(prospect):
@@ -221,6 +234,7 @@ def _map(organization, prospect, values):
         read_values,
         asked,
         {item["id"]: {"type": item["type"], "values": item["values"]} for item in schema},
+        category_path=values.get("meli_category_path", ""),
     )
 
 

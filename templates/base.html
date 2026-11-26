@@ -494,7 +494,7 @@
     .picture-option:has(input:checked) { border-color: var(--neon-strong); }
     .field .help { font-size: 0.78rem; color: #7a838b; margin: 0.3rem 0 0; }
     .field input:not([type="checkbox"]), .field select, .field textarea,
-    .attr-row input, .line input, .code-form input {
+    .attr-row input, .line input, .code-form input, .code-form select {
       width: 100%; padding: 0.5rem 0.6rem; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); color: var(--text);
     }
     .field.has-error input, .field.has-error select, .line.has-error input { border-color: var(--danger); }
@@ -587,7 +587,7 @@
     .two-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; align-items: start; }
     .code-form { display: grid; grid-template-columns: 6.5rem minmax(0, 1fr) auto; gap: 0.5rem; align-items: start; }
     .code-form .code-input { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; text-transform: uppercase; }
-    .code-form .error { grid-column: 1 / -1; margin: 0; }
+    .code-form .error, .code-form select { grid-column: 1 / -1; margin: 0; }
     details.inline-edit summary { cursor: pointer; color: var(--muted); font-size: 0.85rem; list-style: none; }
     details.inline-edit[open] { position: relative; }
     details.inline-edit[open] .code-form { position: absolute; right: 0; top: 1.6rem; z-index: 3; width: 24rem; padding: 0.6rem; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1); }

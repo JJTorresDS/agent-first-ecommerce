@@ -6,8 +6,8 @@ from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import transaction
 
-from .models import Brand, Category, Combo, CopyBlock, MasterProduct, ProductModel
-from .validators import clean_category_id, validate_attributes
+from .models import Brand, Category, Combo, CopyBlock, MasterProduct, ProductModel, RootCategory
+from .validators import clean_category_id, normalize_code, validate_attributes
 
 
 _NUMBER = re.compile(r"-?(0|[1-9][0-9]*)([.,][0-9]+)?")
@@ -44,10 +44,61 @@ class TenantForm(forms.ModelForm):
         return exclude
 
 
+class RootCategoryForm(TenantForm):
+    class Meta:
+        model = RootCategory
+        fields = ["code", "name"]
+
+
 class CategoryForm(TenantForm):
+    """A category and its root: an existing one, or a new one (root_code, root_name) saved with it.
+
+    A new category needs a root, and so does one that has it; an older category without one still saves.
+    """
+
+    root_code = forms.CharField(required=False, max_length=6, label="New root code")
+    root_name = forms.CharField(required=False, max_length=120, label="New root name")
+
     class Meta:
         model = Category
-        fields = ["code", "name"]
+        fields = ["code", "name", "root"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        field = self.fields["root"]
+        field.queryset = RootCategory.objects.filter(organization_id=self.instance.organization_id)
+        field.empty_label = "Pick a root category"
+        self.root_required = self.instance.pk is None or self.instance.root_id is not None
+        self.new_root = None
+
+    def clean(self):
+        cleaned = super().clean()
+        code = normalize_code(cleaned.get("root_code"))
+        name = " ".join((cleaned.get("root_name") or "").split())
+        if code or name:
+            if cleaned.get("root") is not None:
+                self.add_error("root_code", "Pick an existing root category or give a new one, not both.")
+                return cleaned
+            form = RootCategoryForm(
+                {"code": code, "name": name}, instance=RootCategory(organization_id=self.instance.organization_id)
+            )
+            if form.is_valid():
+                self.new_root = form.instance
+            else:
+                for field, messages in form.errors.items():
+                    target = {"code": "root_code", "name": "root_name"}.get(field)
+                    for message in messages:
+                        self.add_error(target, message)
+        elif self.root_required and cleaned.get("root") is None:
+            self.add_error("root", "Pick a root category or give a new one's code and name.")
+        return cleaned
+
+    @transaction.atomic
+    def save(self, commit=True):
+        if self.new_root is not None:
+            self.new_root.save()
+            self.instance.root = self.new_root
+        return super().save(commit)
 
 
 class BrandForm(TenantForm):
@@ -69,7 +120,7 @@ class ProductModelForm(TenantForm):
 
     def __init__(self, *args, organization, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["category"].queryset = Category.objects.filter(organization=organization)
+        self.fields["category"].queryset = Category.objects.filter(organization=organization).select_related("root")
         self.fields["brand"].queryset = Brand.objects.filter(organization=organization)
         self.locked = bool(self.instance.pk and self.instance.products.exists())
         if self.locked:
@@ -199,10 +250,10 @@ class ImportForm(forms.Form):
         self.organization = organization
         self.pictures = list(pictures)
         self.attributes = attributes or {}
-        self.fields["category"].queryset = Category.objects.filter(organization=organization)
+        self.fields["category"].queryset = Category.objects.filter(organization=organization).select_related("root")
         self.fields["brand"].queryset = Brand.objects.filter(organization=organization)
         self.fields["product_model"].queryset = ProductModel.objects.filter(organization=organization).select_related(
-            "brand"
+            "brand", "category__root"
         )
 
     def clean(self):
@@ -355,7 +406,7 @@ class CopyBlockForm(TenantForm):
     def __init__(self, *args, organization, **kwargs):
         super().__init__(*args, **kwargs)
         field = self.fields["category"]
-        field.queryset = Category.objects.filter(organization=organization).order_by("name")
+        field.queryset = Category.objects.filter(organization=organization).select_related("root").order_by("name")
         field.empty_label = "Every listing"
         self.fields["title"].widget.attrs["placeholder"] = "Ej.: Por qué elegirnos"
         self.fields["body"].widget.attrs["placeholder"] = (

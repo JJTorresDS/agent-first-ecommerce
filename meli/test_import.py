@@ -11,6 +11,8 @@ from vimple import ai
 
 from .client import MercadoLibreError
 from .importer import ImportProblem, source_of
+from catalog.models import RootCategory
+
 from .models import MeliListingProspect
 from .tests import TokenResponse, shared_seller
 
@@ -62,6 +64,11 @@ class FakeCatalog:
             return TokenResponse({"plain_text": "Lámpara táctil."})
         if url.path == "/categories/MLA1271/attributes":
             return TokenResponse(CATEGORY_ATTRIBUTES)
+        if url.path == "/categories/MLA1271":
+            return TokenResponse(
+                {"id": "MLA1271", "name": "Perfumes",
+                 "path_from_root": [{"id": "MLA1246", "name": "Belleza y Cuidado Personal"}, {"id": "MLA1271", "name": "Perfumes"}]}
+            )
         raise AssertionError(request.full_url)
 
 
@@ -346,11 +353,15 @@ class ScrapedImportTests(TestCase):
     def test_ai_codes_new_to_the_organization_wait_in_their_dialog_or_pick_an_existing_model(self):
         model = product_model(self.organization, code="885", brand="ONLY", category="PERF")
         scraped = prospect(self.organization)
-        answer = {**MAPPED, "category_code": "FRAG", "category_name": "Fragancias"}
-        with patch("vimple.ai._complete_json", return_value=answer):
+        answer = {**MAPPED, "category_code": "FRAG", "category_name": "Fragancias", "root_code": "beauty",
+                  "root_name": "Belleza"}
+        with patch("vimple.ai._complete_json", return_value=answer) as call:
             page = self.client.get(f"/catalog/import/?prospect={scraped.pk}")
+        self.assertEqual(call.call_args.args[1]["meli_category_path"], "Belleza y Cuidado Personal > Perfumes")
         self.assertContains(page, "Suggested new category FRAG · Fragancias: add it with +.")
         self.assertContains(page, 'name="category-code" value="FRAG"')
+        self.assertContains(page, 'name="category-root_code" value="BEAUTY"')
+        self.assertContains(page, 'name="category-root_name" value="Belleza"')
         self.assertContains(page, f'<option value="{model.pk}" selected>')
         # From the scrape, the AI's clean title and its attributes replace the raw ones.
         self.assertContains(page, 'value="Perfume Onlyou Número 885 30 ml"')
@@ -365,6 +376,25 @@ class ScrapedImportTests(TestCase):
         self.assertEqual(call.call_count, 1)
         self.assertContains(page, "The AI couldn&#x27;t map the scraped listing")
         self.assertContains(page, 'value="Perfume Onlyou 885 30ml Envío Gratis"')
+
+    def test_the_root_category_is_offered_from_mercado_libres_path(self):
+        scraped = prospect(self.organization)
+        page = self.client.get(f"/catalog/import/?prospect={scraped.pk}")
+        self.assertContains(page, "Mercado Libre's root category: <strong>Belleza y Cuidado Personal</strong>")
+        self.assertContains(page, 'name="category-root_name" value="Belleza y Cuidado Personal"')
+        RootCategory.objects.create(organization=Organization.objects.create(name="Other"), code="THEIRS",
+                                    name="Belleza y cuidado personal")
+        mine = RootCategory.objects.create(organization=self.organization, code="BEAUTY", name="belleza y cuidado personal")
+        page = self.client.get(f"/catalog/import/?prospect={scraped.pk}")
+        self.assertContains(page, f'<option value="{mine.pk}" selected>BEAUTY · belleza y cuidado personal</option>')
+        self.assertNotContains(page, "THEIRS")
+        self.assertContains(page, 'name="category-root_name" value=""')
+
+    def test_a_pasted_links_category_path_is_read_once(self):
+        page = self.client.post("/catalog/import/", {"action": "read", "url": f"https://www.mercadolibre.com.ar/p/{CATALOG}"})
+        self.assertContains(page, "<strong>Belleza y Cuidado Personal &gt; Perfumes</strong>")
+        self.assertContains(page, 'name="meli_category_path" value="Belleza y Cuidado Personal &gt; Perfumes"')
+        self.assertContains(page, 'name="category-root_name" value="Belleza y Cuidado Personal"')
 
     def test_saving_links_the_scraped_listing_to_the_new_product(self):
         scraped = prospect(self.organization)

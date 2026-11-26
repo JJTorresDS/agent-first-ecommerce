@@ -7,7 +7,7 @@
   <div class="page-head">
     <h1>{% if model %}{{ model.name }}{% else %}New model{% endif %}</h1>
     <div class="head-actions">
-      <span class="sku sku-lg" id="family-preview" data-model="{% if model %}{{ model.code }}{% endif %}">{% if model %}{{ model.family_code }}{% else %}CATEGORY-BRAND-MODEL{% endif %}</span>
+      <span class="sku sku-lg" id="family-preview" data-model="{% if model %}{{ model.code }}{% endif %}">{% if model %}{{ model.family_code }}{% else %}ROOT-CATEGORY-BRAND-MODEL{% endif %}</span>
       {% if model and can_edit %}<a class="button" href="{% url 'catalog_model_new' %}">New model</a>{% endif %}
     </div>
   </div>
@@ -97,7 +97,8 @@
   {% if delete %}{% include "_delete_card.html" %}{% endif %}
 
   <script>
-    // Live SKU preview: CATEGORY-BRAND-MODEL from the form, plus the variant being typed.
+    // Live SKU preview: ROOT-CATEGORY-BRAND-MODEL from the form (codes.categories holds each category's
+    // ROOT-CATEGORY prefix), plus the variant being typed.
     (function () {
       var codes = JSON.parse((document.getElementById("sku-codes") || {}).textContent || "{}");
       var family = document.getElementById("family-preview");
@@ -106,7 +107,7 @@
       function familyCode() {
         var form = document.getElementById("model-form");
         if (!form || !codes.categories) return family.textContent;
-        var category = codes.categories[form.elements.category.value] || "CATEGORY";
+        var category = codes.categories[form.elements.category.value] || "ROOT-CATEGORY";
         var brand = codes.brands[form.elements.brand.value] || "BRAND";
         var model = clean(form.elements.code.value) || "MODEL";
         return category + "-" + brand + "-" + model;

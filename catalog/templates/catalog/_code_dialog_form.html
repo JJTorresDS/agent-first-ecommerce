@@ -12,6 +12,28 @@
     <input type="text" id="id_{{ kind }}-name" name="{{ kind }}-name" value="{{ form.name.value|default:'' }}" placeholder="{{ dialog.example_name }}" maxlength="{{ form.name.field.max_length }}" required autocomplete="off">
     {% for error in form.name.errors %}<p class="error">{{ error }}</p>{% endfor %}
   </div>
+  {% if kind == "category" %}
+    {% if dialog.root_hint %}<p class="muted">Mercado Libre's root category: <strong>{{ dialog.root_hint }}</strong></p>{% endif %}
+    <div class="field{% if form.root.errors %} has-error{% endif %}">
+      <label for="id_category-root">Root category</label>
+      <select id="id_category-root" name="category-root">
+        <option value="">Pick one, or add a new one below</option>
+        {% for root in dialog.roots %}<option value="{{ root.pk }}"{% if root.pk|stringformat:"s" == form.root.value|stringformat:"s" %} selected{% endif %}>{{ root }}</option>{% endfor %}
+      </select>
+      <p class="help">The umbrella category; its code starts the SKU: <span class="sku">BEAUTY-ALICAT-…</span></p>
+      {% for error in form.root.errors %}<p class="error">{{ error }}</p>{% endfor %}
+    </div>
+    <div class="field{% if form.root_code.errors %} has-error{% endif %}">
+      <label for="id_category-root_code">New root code</label>
+      <input type="text" id="id_category-root_code" name="category-root_code" value="{{ form.root_code.value|default:'' }}" placeholder="BEAUTY" maxlength="6" class="code-input" autocomplete="off">
+      {% for error in form.root_code.errors %}<p class="error">{{ error }}</p>{% endfor %}
+    </div>
+    <div class="field{% if form.root_name.errors %} has-error{% endif %}">
+      <label for="id_category-root_name">New root name</label>
+      <input type="text" id="id_category-root_name" name="category-root_name" value="{{ form.root_name.value|default:'' }}" placeholder="Belleza y Cuidado Personal" maxlength="120" autocomplete="off">
+      {% for error in form.root_name.errors %}<p class="error">{{ error }}</p>{% endfor %}
+    </div>
+  {% endif %}
   <div class="actions">
     <button type="button" data-close-dialog>Cancel</button>
     <button type="submit" class="primary">Add {{ dialog.label }}</button>

@@ -7,25 +7,32 @@ from django.core.exceptions import ValidationError
 
 from vimple import ai
 
-from .models import Brand, Category, ProductModel
+from .models import Brand, Category, ProductModel, RootCategory
 from .validators import (
     normalize_code,
     validate_brand_code,
     validate_category_code,
     validate_gtin,
     validate_model_code,
+    validate_root_code,
     validate_variant,
 )
 
+ROOT_RULES = (
+    "The root category is the umbrella over the category: the first step of Mercado Libre's category path "
+    "(meli_category_path) when given, for example Belleza y Cuidado Personal (BEAUTY) over Alicates (ALICAT). "
+    "Reuse an existing root category when one fits.\n"
+)
 CODES_PROMPT = (
     "You help a seller in Argentina add a product to their catalog. Its SKU is "
-    "CATEGORY-BRAND-MODEL-VARIANT, for example PERF-ONLY-885-30ML.\n"
-    "Codes use only capital letters A-Z and digits 0-9, no spaces or hyphens: category 2-6, "
+    "ROOT-CATEGORY-BRAND-MODEL-VARIANT, for example BEAUTY-PERF-ONLY-885-30ML.\n"
+    "Codes use only capital letters A-Z and digits 0-9, no spaces or hyphens: root category 2-6, category 2-6, "
     "brand 2-8, model 1-10, variant 1-10 characters. The variant is what sets this version apart "
     "(30ML, ROJO, XL), or UNICO when there is only one.\n"
-    "Reuse an existing category or brand code from the lists when one fits; otherwise propose a new "
+    + ROOT_RULES
+    + "Reuse an existing category or brand code from the lists when one fits; otherwise propose a new "
     "short code and a name for it.\n"
-    "Return ONLY a JSON object with: category_code, category_name, brand_code, brand_name, "
+    "Return ONLY a JSON object with: root_code, root_name, category_code, category_name, brand_code, brand_name, "
     "model_code, model_name (the product's name without the variant), variant."
 )
 
@@ -50,30 +57,46 @@ def _notes(extra):
 
 
 _CODES = {
+    "root_code": validate_root_code,
     "category_code": validate_category_code,
     "brand_code": validate_brand_code,
     "model_code": validate_model_code,
     "variant": validate_variant,
 }
-_NAMES = {"category_name": 100, "brand_name": 100, "model_name": 200}
+_NAMES = {"root_name": 120, "category_name": 100, "brand_name": 100, "model_name": 200}
 
 
 def _product(name, brand, attributes):
     return {"name": (name or "")[:300], "brand": (brand or "")[:100], "attributes": attributes or {}}
 
 
-def suggest_codes(organization, name, brand="", attributes=None):
-    """Valid codes (and names) for a new product, reusing the organization's own codes where they fit."""
+def _existing(organization):
+    """This organization's own roots, categories (with their root) and brands, for the codes prompts."""
+    return {
+        "existing_root_categories": [
+            {"code": row.code, "name": row.name} for row in RootCategory.objects.filter(organization=organization)
+        ],
+        "existing_categories": [
+            {"code": row.code, "name": row.name, "root_code": row.root.code if row.root_id else ""}
+            for row in Category.objects.filter(organization=organization).select_related("root")
+        ],
+        "existing_brands": [
+            {"code": row.code, "name": row.name} for row in Brand.objects.filter(organization=organization)
+        ],
+    }
+
+
+def suggest_codes(organization, name, brand="", attributes=None, category_path=""):
+    """Valid codes (and names) for a new product, reusing the organization's own codes where they fit.
+
+    category_path: Mercado Libre's "A > B > C", whose first step suggests the root category.
+    """
     answer = ai.complete_json(
         CODES_PROMPT,
         {
             "product": _product(name, brand, attributes),
-            "existing_categories": [
-                {"code": row.code, "name": row.name} for row in Category.objects.filter(organization=organization)
-            ],
-            "existing_brands": [
-                {"code": row.code, "name": row.name} for row in Brand.objects.filter(organization=organization)
-            ],
+            **({"meli_category_path": category_path[:500]} if category_path else {}),
+            **_existing(organization),
         },
     )
     values = {}
@@ -275,31 +298,34 @@ IMPORT_SCRAPED_PROMPT = (
     "You help a seller in Argentina add a product to their catalog from a Mercado Libre listing someone else "
     "sells, as a scraper read it.\n"
     "You get scraped_listing (title, characteristics as the page shows them, description and other fields), "
-    "read_values (what Mercado Libre's API or the scrape already gave), the seller's existing categories, "
-    "brands and models, and attributes (the empty fields of its Mercado Libre category: id, name, value_type, "
-    "allowed_values).\n"
-    "The SKU is CATEGORY-BRAND-MODEL-VARIANT, for example PERF-ONLY-885-30ML. Codes use only capital letters "
-    "A-Z and digits 0-9: category 2-6, brand 2-8, model 1-10, variant 1-10 characters. The model is the "
+    "read_values (what Mercado Libre's API or the scrape already gave), meli_category_path, the seller's "
+    "existing root categories, categories, brands and models, and attributes (the empty fields of its Mercado "
+    "Libre category: id, name, value_type, allowed_values).\n"
+    "The SKU is ROOT-CATEGORY-BRAND-MODEL-VARIANT, for example BEAUTY-PERF-ONLY-885-30ML. Codes use only capital "
+    "letters A-Z and digits 0-9: root category 2-6, category 2-6, brand 2-8, model 1-10, variant 1-10 "
+    "characters. The model is the "
     "product family without the variant (model_name: its name without size or color); the variant is what "
     "sets this version apart (30ML, ROJO, XL), or UNICO when there is only one. Reuse an existing category, "
     "brand or model code when one fits; otherwise propose a new short code and a name.\n"
-    "title: a clean product title in Spanish, without the other seller's words (envío, oferta, original). "
+    + ROOT_RULES
+    + "title: a clean product title in Spanish, without the other seller's words (envío, oferta, original). "
     "gtin: the barcode (8, 12, 13 or 14 digits) only when the listing states it.\n"
     "Fill every attribute the listing states, by its characteristics, title or description: match by "
     "meaning, not only by name. When allowed_values is not empty, use exactly one of them, copied as "
     "written. A number_unit value is a number and a unit, like 30 mL. A boolean is Sí or No. Never invent "
     "facts the listing doesn't give; leave out what you can't fill with confidence.\n"
-    "Return ONLY a JSON object with: category_code, category_name, brand_code, brand_name, model_code, "
-    "model_name, variant, title, gtin, attributes (an object of attribute id to value)."
+    "Return ONLY a JSON object with: root_code, root_name, category_code, category_name, brand_code, "
+    "brand_name, model_code, model_name, variant, title, gtin, attributes (an object of attribute id to value)."
 )
 IMPORT_RETRIES = 2
 
 
-def map_scraped(organization, scraped, read_values, attributes, schema):
+def map_scraped(organization, scraped, read_values, attributes, schema, category_path=""):
     """A new product's fields from a scraped listing: codes, names, title, GTIN and {id: value} attributes.
 
     scraped: the scraper's data (never another organization's); read_values: what was already read;
-    attributes: [{id, name, value_type, allowed_values}] still empty; schema: {id: {type, values}}.
+    attributes: [{id, name, value_type, allowed_values}] still empty; schema: {id: {type, values}};
+    category_path: Mercado Libre's "A > B > C", whose first step suggests the root category.
     Codes go through the same validators as typed ones and attributes must be on Mercado Libre's list,
     else they are dropped. Raises ai.SuggestionFailed after IMPORT_RETRIES more tries.
     """
@@ -308,12 +334,8 @@ def map_scraped(organization, scraped, read_values, attributes, schema):
         {
             "scraped_listing": scraped,
             "read_values": read_values,
-            "existing_categories": [
-                {"code": row.code, "name": row.name} for row in Category.objects.filter(organization=organization)
-            ],
-            "existing_brands": [
-                {"code": row.code, "name": row.name} for row in Brand.objects.filter(organization=organization)
-            ],
+            "meli_category_path": category_path[:500],
+            **_existing(organization),
             "existing_models": [
                 {"brand_code": row.brand.code, "code": row.code, "name": row.name}
                 for row in ProductModel.objects.filter(organization=organization).select_related("brand")[:200]

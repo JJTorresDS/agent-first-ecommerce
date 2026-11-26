@@ -1,0 +1,7 @@
+{% comment %}A category's root: pick one of roots, or type a new one's code and name (saved with the category).{% endcomment %}
+<select name="category-root" aria-label="Root category">
+  <option value="">Root category…</option>
+  {% for root in roots %}<option value="{{ root.pk }}"{% if root.pk|stringformat:"s" == selected|stringformat:"s" %} selected{% endif %}>{{ root }}</option>{% endfor %}
+</select>
+<input type="text" name="category-root_code" value="{{ code|default:'' }}" placeholder="or new root: BEAUTY" aria-label="New root category code" maxlength="6" class="code-input">
+<input type="text" name="category-root_name" value="{{ name|default:'' }}" placeholder="New root name" aria-label="New root category name" maxlength="120">

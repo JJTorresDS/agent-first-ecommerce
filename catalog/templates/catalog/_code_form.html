@@ -6,12 +6,19 @@
     {% for error in form.non_field_errors %}<p class="error">{{ error }}</p>{% endfor %}
     <input type="text" name="{{ kind }}-code" value="{{ form.code.value|default:'' }}" placeholder="{{ example_code }}" aria-label="Code" maxlength="{{ form.code.field.max_length }}" class="code-input">
     <input type="text" name="{{ kind }}-name" value="{{ form.name.value|default:'' }}" placeholder="{{ example_name }}" aria-label="Name">
+    {% if kind == "category" %}{% include "catalog/_root_fields.html" with selected=form.root.value code=form.root_code.value name=form.root_name.value %}{% endif %}
     <button type="submit" class="primary">{{ button }}</button>
     {% for error in form.code.errors %}<p class="error">{{ error }}</p>{% endfor %}
     {% for error in form.name.errors %}<p class="error">{{ error }}</p>{% endfor %}
+    {% if kind == "category" %}
+      {% for error in form.root.errors %}<p class="error">{{ error }}</p>{% endfor %}
+      {% for error in form.root_code.errors %}<p class="error">{{ error }}</p>{% endfor %}
+      {% for error in form.root_name.errors %}<p class="error">{{ error }}</p>{% endfor %}
+    {% endif %}
   {% else %}
     <input type="text" name="{{ kind }}-code" value="{{ row.code }}" aria-label="Code" class="code-input">
     <input type="text" name="{{ kind }}-name" value="{{ row.name }}" aria-label="Name">
+    {% if kind == "category" %}{% include "catalog/_root_fields.html" with selected=row.root_id %}{% endif %}
     <button type="submit" class="primary">{{ button }}</button>
   {% endif %}
 </form>

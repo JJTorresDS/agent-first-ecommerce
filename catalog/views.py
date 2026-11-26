@@ -20,6 +20,7 @@ from .forms import (
     CategoryForm,
     ProductForm,
     ProductModelForm,
+    RootCategoryForm,
     VariantForm,
     attribute_rows,
     attributes_from,
@@ -30,7 +31,17 @@ from vimple.ai import enabled as ai_enabled
 
 from .deletion import code_blocked, combo_blocked, model_blocked, product_blocked, unlinked
 from .images import set_images
-from .models import Brand, Category, Combo, ComboItem, CopyBlock, MasterProduct, ProductModel, package_missing
+from .models import (
+    Brand,
+    Category,
+    Combo,
+    ComboItem,
+    CopyBlock,
+    MasterProduct,
+    ProductModel,
+    RootCategory,
+    package_missing,
+)
 from .validators import validate_attributes
 
 PAGE_SIZE = 50
@@ -40,6 +51,8 @@ _KINDS = {
     "category": (Category, CategoryForm, "Perfumes", "PERF"),
     "brand": (Brand, BrandForm, "Only", "ONLY"),
 }
+# The Codes page also lists root categories; they have no + dialog of their own (a category's form makes one).
+_CODE_KINDS = {"root": (RootCategory, RootCategoryForm, "Belleza y Cuidado Personal", "BEAUTY"), **_KINDS}
 
 
 def _scope(request):
@@ -84,7 +97,7 @@ def products(request):
         "category": category,
         "status": status,
         "brands": Brand.objects.filter(organization=organization),
-        "categories": Category.objects.filter(organization=organization),
+        "categories": Category.objects.filter(organization=organization).select_related("root"),
         "statuses": MasterProduct.Status.choices,
         "can_edit": can_edit,
         "bulk": deletion.bulk("products", deletion.ARCHIVE_ACTION, deletion.DELETE_ACTION) if can_edit else None,
@@ -108,7 +121,7 @@ def models(request):
         return redirect("catalog_models")
     rows = (
         ProductModel.objects.filter(organization=organization)
-        .select_related("brand", "category")
+        .select_related("brand", "category__root")
         .annotate(variant_count=Count("products"))
         .order_by("brand__code", "code")
     )
@@ -192,7 +205,7 @@ def code_new(request, kind):
                 "id": str(row.pk),
                 "label": str(row),
                 "kind": kind,
-                "code": row.code,
+                "code": row.sku_prefix() if kind == "category" else row.code,
             }
         }
     )
@@ -235,8 +248,15 @@ def ai_suggest(request, kind):
         elif kind == "description":
             values["description"] = write_description(name, brand_name, attributes, post.get("ai_extra"))
         else:
-            values = suggest_codes(organization, name, brand_name, attributes)
+            values = suggest_codes(
+                organization, name, brand_name, attributes, category_path=(post.get("meli_category_path") or "")[:500]
+            )
             notes = []
+            root = RootCategory.objects.filter(organization=organization, code=values.get("root_code", "")).first()
+            if root is not None:
+                values["root"] = str(root.pk)
+                values.pop("root_code", None)
+                values.pop("root_name", None)
             for field, Model, label in (("category", Category, "category"), ("brand", Brand, "brand")):
                 code = values.get(f"{field}_code")
                 if not code:
@@ -262,7 +282,8 @@ def _int(value):
         return None
 
 
-def _code_dialog(organization, kind, data=None, initial=None):
+def _code_dialog(organization, kind, data=None, initial=None, root_hint=""):
+    """A + dialog's form. A category's also offers this organization's roots; root_hint names Mercado Libre's."""
     Model, Form, example_name, example_code = _KINDS[kind]
     return {
         "kind": kind,
@@ -270,6 +291,8 @@ def _code_dialog(organization, kind, data=None, initial=None):
         "form": Form(data, prefix=kind, instance=Model(organization=organization), initial=initial),
         "example_name": example_name,
         "example_code": example_code,
+        "roots": list(RootCategory.objects.filter(organization=organization)) if kind == "category" else [],
+        "root_hint": root_hint,
     }
 
 
@@ -278,10 +301,12 @@ def _new_variant(organization, model):
 
 
 def _codes(organization):
-    """Category and brand codes by id, for the live SKU preview; brand names, left out of a suggested model code."""
+    """Category SKU prefixes (BEAUTY-ALICAT) and brand codes by id, for the live SKU preview; brand names, left
+    out of a suggested model code."""
     brands = list(Brand.objects.filter(organization=organization).only("code", "name"))
+    categories = Category.objects.filter(organization=organization).select_related("root")
     return {
-        "categories": {str(row.pk): row.code for row in Category.objects.filter(organization=organization)},
+        "categories": {str(row.pk): row.sku_prefix() for row in categories},
         "brands": {str(row.pk): row.code for row in brands},
         "brand_names": {str(row.pk): row.name for row in brands},
     }
@@ -377,24 +402,27 @@ def _code_bulk(kind, can_edit):
 
 @require_app(AppAccess.App.CATALOG)
 def codes(request):
-    """Categories and brands: add one, or change a name or an unused code."""
+    """Root categories, categories and brands: add one, or change a name or an unused code."""
     organization, can_edit = _scope(request)
     if request.method == "POST" and not can_edit:
         return HttpResponseForbidden(READ_ONLY)
-    forms = {kind: Form(prefix=kind, instance=Model(organization=organization)) for kind, (Model, Form, *_) in _KINDS.items()}
+    forms = {
+        kind: Form(prefix=kind, instance=Model(organization=organization))
+        for kind, (Model, Form, *_) in _CODE_KINDS.items()
+    }
     editing = {}
-    if request.method == "POST" and request.POST.get("kind") in _KINDS and request.POST.get("action") == "delete_selected":
-        Model = _KINDS[request.POST["kind"]][0]
+    kind = request.POST.get("kind") if request.method == "POST" else None
+    if kind in _CODE_KINDS and request.POST.get("action") == "delete_selected":
+        Model = _CODE_KINDS[kind][0]
         return deletion.delete_selected(
             request, Model.objects.filter(organization=organization), code_blocked, lambda row: row.name, "catalog_codes"
         )
-    if request.method == "POST" and request.POST.get("kind") in _KINDS and request.POST.get("action") == "delete":
-        Model = _KINDS[request.POST["kind"]][0]
+    if kind in _CODE_KINDS and request.POST.get("action") == "delete":
+        Model = _CODE_KINDS[kind][0]
         row = get_object_or_404(Model, organization=organization, pk=request.POST.get("id"))
         return deletion.delete(request, row, code_blocked(row), "catalog_codes", "catalog_codes", row.name)
-    if request.method == "POST" and request.POST.get("kind") in _KINDS:
-        kind = request.POST["kind"]
-        Model, Form, *_ = _KINDS[kind]
+    if kind in _CODE_KINDS:
+        Model, Form, *_ = _CODE_KINDS[kind]
         row = Model(organization=organization)
         if request.POST.get("id"):
             row = get_object_or_404(Model, organization=organization, pk=request.POST["id"])
@@ -406,18 +434,26 @@ def codes(request):
             editing[kind] = (row.pk, form)
         else:
             forms[kind] = form
-    categories = Category.objects.filter(organization=organization).annotate(model_count=Count("product_models"))
+    roots = RootCategory.objects.filter(organization=organization).annotate(model_count=Count("categories"))
+    categories = (
+        Category.objects.filter(organization=organization)
+        .select_related("root")
+        .annotate(model_count=Count("product_models"))
+    )
     brands = Brand.objects.filter(organization=organization).annotate(model_count=Count("product_models"))
     return render(
         request,
         "catalog/codes.html",
         {
             "sections": [
+                ("root", "Root categories", "Belleza y Cuidado Personal", "BEAUTY", roots, forms["root"],
+                 editing.get("root"), _code_bulk("root", can_edit)),
                 ("category", "Categories", "Perfumes", "PERF", categories, forms["category"], editing.get("category"),
                  _code_bulk("category", can_edit)),
                 ("brand", "Brands", "Only", "ONLY", brands, forms["brand"], editing.get("brand"),
                  _code_bulk("brand", can_edit)),
             ],
+            "roots": list(roots),
             "can_edit": can_edit,
             "active_tab": "codes",
         },

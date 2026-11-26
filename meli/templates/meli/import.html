@@ -43,6 +43,7 @@
       {% csrf_token %}
       <input type="hidden" name="action" value="save">
       {{ form.url }}{{ form.brand_hint }}{{ form.meli_catalog_product_id }}{{ form.meli_category_id }}{{ form.prospect }}
+      <input type="hidden" name="meli_category_path" value="{{ meli_category_path }}">
       {% if prospect %}
         <p class="muted">From scraped listing <span class="mono">{{ prospect.external_id }}</span>{% if prospect.seller %} by {{ prospect.seller }}{% endif %}{% if prospect.price is not None %} at ARS {{ prospect.price }}{% endif %}. Saving links it to the new product.</p>
       {% endif %}
@@ -55,7 +56,7 @@
           {% if ai %}
             <button type="button" class="ai-button" hx-post="{% url 'catalog_ai' 'codes' %}" hx-include="#import-form" hx-swap="none" hx-sync="this:drop"
               data-ai-note="ai-note"
-              data-ai-map='{"category": "id_category", "brand": "id_brand", "category_code": "id_category-code", "category_name": "id_category-name", "brand_code": "id_brand-code", "brand_name": "id_brand-name", "model_code": "id_model_code", "model_name": "id_model_name", "variant": "id_variant"}'>
+              data-ai-map='{"root": "id_category-root", "root_code": "id_category-root_code", "root_name": "id_category-root_name", "category": "id_category", "brand": "id_brand", "category_code": "id_category-code", "category_name": "id_category-name", "brand_code": "id_brand-code", "brand_name": "id_brand-name", "model_code": "id_model_code", "model_name": "id_model_name", "variant": "id_variant"}'>
               <span class="spinner htmx-indicator" aria-hidden="true"></span>Suggest codes (AI)
             </button>
           {% endif %}

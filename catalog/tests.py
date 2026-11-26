@@ -5,7 +5,8 @@ from django.test import TestCase
 
 from accounts.models import Organization
 
-from .models import Brand, Category, MasterProduct, ProductModel
+from .deletion import code_blocked
+from .models import Brand, Category, MasterProduct, ProductModel, RootCategory
 from .validators import validate_attributes
 
 IMAGE = "https://cdn.example.com/only-885.jpg"
@@ -136,6 +137,72 @@ class SkuTests(TestCase):
                 organization=self.organization, product_model=theirs, variant="30ML", image_url=IMAGE
             )
         self.assertFalse(MasterProduct.objects.filter(organization=self.organization).exists())
+
+
+class RootCategoryTests(TestCase):
+    def setUp(self):
+        self.organization = Organization.objects.create(name="Test Seller")
+        self.beauty = RootCategory.objects.create(organization=self.organization, code="beauty", name="Belleza")
+        self.category = Category.objects.create(organization=self.organization, code="ALICAT", name="Alicates")
+        self.brand = Brand.objects.create(organization=self.organization, code="CHARM", name="Charm Limit")
+
+    def variant(self, variant="UNICO", code="885"):
+        model, _ = ProductModel.objects.get_or_create(
+            organization=self.organization, brand=self.brand, code=code, defaults={"category": self.category, "name": "Alicate"}
+        )
+        return MasterProduct.objects.create(product_model=model, variant=variant, image_url=IMAGE)
+
+    def test_a_category_with_a_root_makes_five_part_skus(self):
+        self.assertEqual(self.beauty.code, "BEAUTY")
+        self.assertEqual(self.variant().sku, "ALICAT-CHARM-885-UNICO")
+        self.category.root = self.beauty
+        self.category.save()
+        # The first SKU never changes; a new variant of the same model takes the root.
+        self.assertEqual(MasterProduct.objects.get(variant="UNICO").sku, "ALICAT-CHARM-885-UNICO")
+        self.assertEqual(self.variant("ROSA").sku, "BEAUTY-ALICAT-CHARM-885-ROSA")
+        self.assertEqual(self.category.sku_prefix(), "BEAUTY-ALICAT")
+        self.assertEqual(str(self.category), "BEAUTY > ALICAT · Alicates")
+
+    def test_a_root_used_by_a_sku_is_locked_but_its_name_changes(self):
+        self.category.root = self.beauty
+        self.category.save()
+        other = RootCategory.objects.create(organization=self.organization, code="SALUD", name="Salud")
+        # Not used yet: the root may still change.
+        self.category.root = other
+        self.category.save()
+        self.category.root = self.beauty
+        self.category.save()
+        self.variant()
+        self.beauty.name = "Belleza y Cuidado Personal"
+        self.beauty.save()
+        self.beauty.code = "BELLEZ"
+        with self.assertRaises(ValidationError):
+            self.beauty.save()
+        for root in (other, None):
+            self.category.root = root
+            with self.assertRaisesMessage(ValidationError, "already use this root category"):
+                self.category.save()
+
+    def test_a_root_on_a_category_already_in_use_only_reaches_new_products(self):
+        self.variant()
+        self.category.root = self.beauty
+        self.category.save()
+        self.category.refresh_from_db()
+        self.assertEqual(self.category.root, self.beauty)
+
+    def test_combo_is_not_a_root_code_and_roots_stay_in_their_organization(self):
+        with self.assertRaisesMessage(ValidationError, "COMBO is kept for combo SKUs"):
+            RootCategory(organization=self.organization, code="COMBO", name="Combos").full_clean()
+        theirs = RootCategory.objects.create(organization=Organization.objects.create(name="Other"), code="X1", name="X")
+        self.category.root = theirs
+        with self.assertRaisesMessage(ValidationError, "another organization"):
+            self.category.save()
+
+    def test_a_root_in_use_cant_be_deleted(self):
+        self.assertEqual(code_blocked(self.beauty), "")
+        self.category.root = self.beauty
+        self.category.save()
+        self.assertIn("1 category uses it", code_blocked(self.beauty))
 
 
 class MasterProductTests(TestCase):

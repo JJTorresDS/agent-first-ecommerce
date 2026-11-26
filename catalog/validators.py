@@ -78,6 +78,14 @@ validate_brand_code = CodeValidator("Brand code", 2, 8)
 validate_model_code = CodeValidator("Model code", 1, 10)
 validate_variant = CodeValidator("Variant", 1, 10)
 validate_combo_code = CodeValidator("Combo code", 1, 10)
+_root_code = CodeValidator("Root category code", 2, 6)
+
+
+def validate_root_code(value):
+    """A root category's code: like a category's, but never COMBO, so a product SKU never reads like a combo's."""
+    _root_code(value)
+    if value == "COMBO":
+        raise ValidationError("COMBO is kept for combo SKUs. Pick another code.")
 
 
 _CATEGORY = re.compile(r"^\s*([A-Za-z]{3}\d+)")
