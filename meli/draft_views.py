@@ -222,6 +222,37 @@ def meli_draft(request, pk):
     )
 
 
+@require_app(AppAccess.App.CATALOG)
+@require_POST
+def meli_draft_quantity(request, pk):
+    """The drafts list's quantity box: saved without checking again, never above the Depósito stock.
+
+    A ready draft stays ready; posting checks the stock once more.
+    """
+    from .forms import _quantity_problem
+
+    organization, can_edit = _scope(request)
+    if not can_edit:
+        return HttpResponseForbidden(READ_ONLY)
+    draft = get_object_or_404(ListingDraft.objects.select_related("product", "combo"), organization=organization, pk=pk)
+    if draft.locked() or draft.template:
+        return HttpResponseForbidden("This draft's quantity can't change here.")
+    draft.stock = available_for(draft, stock_by_product(organization))
+    context = {"draft": draft, "can_edit": True}
+    try:
+        quantity = int(request.POST.get("quantity", ""))
+    except ValueError:
+        quantity = 0
+    problem = "At least 1." if quantity < 1 else _quantity_problem(quantity, draft.stock)
+    if problem:
+        context["quantity_error"] = problem
+    else:
+        draft.quantity = quantity
+        draft.save(update_fields=["quantity", "updated_at"])
+        context["quantity_saved"] = True
+    return render(request, "meli/_draft_quantity.html", context)
+
+
 LISTING_SENT = "meli_listing_sent"
 
 

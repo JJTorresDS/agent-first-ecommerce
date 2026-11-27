@@ -26,7 +26,7 @@
                   {% endif %}{% endif %}
                 </td>
                 <td class="num">ARS {{ draft.price }}</td>
-                <td class="num">{{ draft.quantity }} / {% if draft.stock is None %}—{% else %}{{ draft.stock }}{% endif %}</td>
+                {% include "meli/_draft_quantity.html" %}
                 <td>
                   <span class="pill {% if draft.status == 'ready' or draft.status == 'published' %}active{% elif draft.status == 'needs_fix' or draft.status == 'failed' %}warn{% elif draft.status == 'draft' %}{% else %}partial{% endif %}">
                     {% if draft.status == "checking" or draft.status == "queued" or draft.status == "publishing" %}<span class="spinner" aria-hidden="true"></span>{% endif %}{{ draft.get_status_display }}

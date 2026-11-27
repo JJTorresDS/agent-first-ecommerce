@@ -127,3 +127,43 @@ class NewModelTests(PerfumeDraftCase):
             self.assertContains(page, "From a scraped listing")
             self.assertContains(page, "From a link")
             self.assertContains(page, 'href="/catalog/models/new/"')
+
+
+class DraftQuantityTests(PerfumeDraftCase):
+    """The drafts list's quantity box."""
+
+    def save(self, draft, quantity):
+        return self.client.post(f"/catalog/meli/new/{draft.pk}/quantity/", {"quantity": quantity})
+
+    def ready_draft(self):
+        self.create()
+        draft = self.draft()
+        ListingDraft.objects.filter(pk=draft.pk).update(status=ListingDraft.Status.READY)
+        draft.refresh_from_db()
+        return draft
+
+    def test_the_list_offers_a_box_and_saving_keeps_the_draft_ready(self):
+        draft = self.ready_draft()
+        self.assertContains(self.client.get("/catalog/meli/new/"), f'id="draft-qty-input-{draft.pk}"')
+        response = self.save(draft, 3)
+        self.assertContains(response, "Saved")
+        draft.refresh_from_db()
+        self.assertEqual((draft.quantity, draft.status), (3, ListingDraft.Status.READY))
+
+    def test_never_above_the_depósito_stock(self):
+        draft = self.ready_draft()
+        self.assertContains(self.save(draft, 4), "Only 3 in stock in the Depósito.")
+        self.assertContains(self.save(draft, 0), "At least 1.")
+        self.assertContains(self.save(draft, "x"), "At least 1.")
+        draft.refresh_from_db()
+        self.assertEqual(draft.quantity, 1)
+
+    def test_a_posting_draft_or_another_organizations_one_does_not_change(self):
+        draft = self.ready_draft()
+        ListingDraft.objects.filter(pk=draft.pk).update(status=ListingDraft.Status.QUEUED)
+        self.assertEqual(self.save(draft, 2).status_code, 403)
+        other = Organization.objects.create(name="Other")
+        theirs = ListingDraft.objects.create(organization=other, kind=ListingDraft.Kind.PRODUCT, price=1, quantity=1)
+        self.assertEqual(self.save(theirs, 2).status_code, 404)
+        theirs.refresh_from_db()
+        self.assertEqual(theirs.quantity, 1)

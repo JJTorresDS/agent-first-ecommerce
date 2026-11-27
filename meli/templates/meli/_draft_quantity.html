@@ -1,0 +1,19 @@
+{% comment %}
+  The drafts list's Qty / stock cell. A draft that can still change takes its quantity here: Enter or
+  leaving the box saves it (meli_draft_quantity), capped by the Depósito stock. A ready draft stays
+  ready. hx-preserve: the list reloads every 3 s while a draft is busy, and a number being typed must survive.
+{% endcomment %}
+<td class="num qty-cell" id="draft-qty-{{ draft.pk }}">
+  {% if can_edit and not draft.locked and not draft.template %}
+    <span class="qty-edit">
+      <input type="number" name="quantity" id="draft-qty-input-{{ draft.pk }}" value="{{ draft.quantity }}" min="1"{% if draft.stock is not None %} max="{{ draft.stock }}"{% endif %} inputmode="numeric" aria-label="Quantity for draft #{{ draft.pk }}" hx-preserve
+        hx-post="{% url 'meli_draft_quantity' draft.pk %}" hx-trigger="change" hx-target="#draft-qty-{{ draft.pk }}" hx-swap="outerHTML"
+        hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
+        hx-on:keydown="if (event.key === 'Enter') { event.preventDefault(); this.blur(); }">
+      <span class="muted">/ {% if draft.stock is None %}—{% else %}{{ draft.stock }}{% endif %}</span>
+    </span>
+    {% if quantity_error %}<span class="error qty-note" role="alert">{{ quantity_error }}</span>{% elif quantity_saved %}<span class="muted qty-note" role="status">Saved</span>{% endif %}
+  {% else %}
+    {{ draft.quantity }} / {% if draft.stock is None %}—{% else %}{{ draft.stock }}{% endif %}
+  {% endif %}
+</td>
