@@ -753,12 +753,13 @@ class UnreadAcrossOrganizationsTests(TestCase):
 
     def test_a_full_page_costs_a_fixed_number_of_queries(self):
         self.client.get("/profile/")
-        # Session, user, memberships, profile, the profile view's own row, waiting counts, app access.
-        with self.assertNumQueries(7):
+        # Session, user, memberships, profile, the profile view's own row, waiting counts, app access,
+        # and the active organization's Mercado Libre claims with a deadline (the bell's claims alert).
+        with self.assertNumQueries(8):
             self.client.get("/profile/")
         create_owned_organization(self.user, "Third")
         ensure_profile(self.user, self.home)
-        with self.assertNumQueries(7):
+        with self.assertNumQueries(8):
             self.client.get("/profile/")
 
     def test_cached_memberships_follow_a_switch_or_a_new_organization(self):

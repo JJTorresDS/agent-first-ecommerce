@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block title %}Claims{% endblock %}
+
+{% block content %}
+  {% include "meli/_tabs.html" %}
+  <div class="page-head">
+    <h1>Claims</h1>
+  </div>
+  <p class="page-lead">Claims on your sales, the nearest deadline first. Answer each one on Mercado Libre before its deadline, or Mercado Libre decides for you.</p>
+
+  {% if not connected %}
+    <div class="card empty">
+      <p>Mercado Libre isn't connected for this organization.</p>
+      <p><a href="{% url 'mercadolibre_settings' %}">Connect Mercado Libre</a> to see the claims on your sales.</p>
+    </div>
+  {% else %}
+    <section id="claim-sync" class="card sync-card"{% if record and record.busy %} hx-get="{% url 'mercadolibre_claims' %}?poll=sync" hx-trigger="every 3s" hx-swap="none"{% endif %}>
+      <div>
+        {% if record and record.busy %}
+          <p class="sync-line"><span class="spinner" aria-hidden="true"></span>Reading your claims from Mercado Libre…</p>
+        {% elif record and record.state == "failed" %}
+          <p class="sync-line"><span class="error">Last refresh failed: {{ record.error }}</span></p>
+        {% elif record and record.finished_at %}
+          <p class="muted">Kept up to date as Mercado Libre reports changes. Last full refresh {{ record.finished_at|date:"Y-m-d H:i" }}.</p>
+        {% endif %}
+      </div>
+      <form method="post" action="{% url 'mercadolibre_claims' %}" class="sync-actions">
+        {% csrf_token %}
+        <button type="submit"{% if record and record.busy %} disabled{% endif %}>Refresh</button>
+      </form>
+    </section>
+
+    <nav class="segmented" aria-label="Show">
+      <a class="{% if showing == 'open' %}active{% endif %}" href="{% url 'mercadolibre_claims' %}"{% if showing == 'open' %} aria-current="page"{% endif %}>Open ({{ open_count }})</a>
+      <a class="{% if showing == 'closed' %}active{% endif %}" href="{% url 'mercadolibre_claims' %}?status=closed"{% if showing == 'closed' %} aria-current="page"{% endif %}>Closed</a>
+    </nav>
+
+    {% if claims %}
+      <div class="card flush table-scroll">
+        <table class="list claims-table">
+          <thead>
+            <tr><th>{% if showing == "open" %}Answer by{% else %}Closed{% endif %}</th><th>Sale</th><th>Claim</th><th>What you can do</th><th></th></tr>
+          </thead>
+          <tbody>
+            {% for claim in claims %}
+              <tr>
+                <td class="claim-deadline">
+                  {% if showing == "closed" %}{{ claim.meli_updated_at|date:"Y-m-d" }}
+                  {% elif claim.due_at %}<strong{% if claim.urgent %} class="error"{% endif %}>{{ claim.left }}</strong><span class="muted">{{ claim.deadline }}</span>
+                  {% else %}<span class="muted">Nothing to do now</span>{% endif %}
+                </td>
+                <td>
+                  {{ claim.title|default:"Sale" }}
+                  <p class="muted">{% if claim.buyer %}{{ claim.buyer }} · {% endif %}{% if claim.resource_id %}<span class="mono">{{ claim.resource_id }}</span>{% endif %}</p>
+                </td>
+                <td>
+                  <span class="pill{% if showing == 'open' %} warn{% endif %}">{{ claim.kind|default:"Claim" }}</span>
+                  <p class="muted">{% if claim.stage_label %}{{ claim.stage_label }} · {% endif %}<span class="mono">#{{ claim.claim_id }}</span></p>
+                </td>
+                <td>{% if claim.action_labels %}{{ claim.action_labels|join:", " }}{% else %}<span class="muted">—</span>{% endif %}</td>
+                <td>{% if claim.sale_url %}<a href="{{ claim.sale_url }}" target="_blank" rel="noopener"{% if forloop.first and showing == "open" and claim.due_at %} class="accent"{% endif %}>Answer on Mercado Libre</a>{% endif %}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% elif showing == "open" %}
+      <div class="card empty">
+        <p>No open claims.</p>
+        <p class="muted">When a buyer opens a claim, Mercado Libre tells Vimple at once: it shows here with its deadline, and the bell warns you.</p>
+      </div>
+    {% else %}
+      <div class="card empty"><p>No closed claims yet.</p></div>
+    {% endif %}
+  {% endif %}
+{% endblock %}

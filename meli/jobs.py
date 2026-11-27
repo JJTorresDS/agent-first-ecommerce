@@ -26,7 +26,7 @@ NOTIFICATION_QUEUE = _key("notification", "queue")
 LISTINGS_QUEUE = _key("listings", "queue")
 SALES_QUEUE = _key("sales", "queue")
 DRAFTS_QUEUE = _key("drafts", "queue")
-NOTIFICATION_TOPICS = {"questions", "messages", "items", "orders_v2"}
+NOTIFICATION_TOPICS = {"questions", "messages", "items", "orders_v2", "post_purchase"}
 ACTIVE_TTL = 30 * 60
 DONE_TTL = 2 * 60
 ERROR_TTL = 10 * 60
@@ -601,6 +601,10 @@ def run_notification_job(job):
             from .sales import load_order_from_notification
 
             load_order_from_notification(job)
+        elif job.get("topic") == "post_purchase":
+            from .claims import load_claim_from_notification
+
+            load_claim_from_notification(job)
     except (OSError, ValueError, InvalidToken) as error:
         logger.warning(
             "Notification %s could not be loaded: %s",
@@ -703,7 +707,12 @@ def dispatch_drafts_job(organization, action, draft_ids=(), **fields):
             _client().lpush(DRAFTS_QUEUE, payload)
         except Exception:
             logger.exception("Could not queue the drafts %s", action)
-            from .models import ListingDraft
+            from .models import ListingDraft, MeliClaimSync, MeliListingSync
+
+            if action == "claims_sync":
+                MeliClaimSync.objects.filter(organization=organization).update(
+                    state=MeliListingSync.State.FAILED, error="The refresh could not be queued. Try again."
+                )
 
             # Nothing will pick them up: say so on the drafts instead of leaving them spinning.
             ListingDraft.objects.filter(
@@ -769,6 +778,11 @@ def _run_drafts_payload(payload):
             from .prospects import find_categories
 
             find_categories(organization, [int(pk) for pk in job.get("prospect_ids") or []])
+            return
+        if job.get("action") == "claims_sync":
+            from .claims import sync_claims
+
+            sync_claims(organization)
             return
         if job.get("action") == "template":
             from .listing_templates import pause_marked

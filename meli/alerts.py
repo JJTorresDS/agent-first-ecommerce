@@ -51,3 +51,22 @@ def presales_questions(organization, waiting=None):
         "message": f"You have {count} unanswered presales {noun}",
         "url": reverse("inbox"),
     }
+
+
+def claims_due(organization, waiting=None):
+    """Open claims with a deadline: the bell, the sidebar's Claims and the Claims tab show the count."""
+    from .claim_views import deadline_text, time_left
+    from .claims import due_summary
+
+    count, first = due_summary(organization)
+    if not count:
+        return None
+    noun = "claim waits" if count == 1 else "claims wait"
+    left = time_left(first)
+    when = "one is overdue" if left == "Overdue" else f"the first by {deadline_text(first)} ({left})"
+    return {
+        "kind": "claims",
+        "count": count,
+        "message": f"{count} Mercado Libre {noun} for your answer: {when}",
+        "url": reverse("mercadolibre_claims"),
+    }

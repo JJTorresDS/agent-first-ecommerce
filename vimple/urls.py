@@ -37,6 +37,7 @@ from meli.draft_views import (
     meli_product_progress,
 )
 from meli.category_views import meli_categories
+from meli.claim_views import mercadolibre_claims
 from meli.import_views import catalog_import, catalog_new
 from meli.listing_views import meli_listing_history, meli_listing_row, meli_listings
 from meli.views import (
@@ -137,6 +138,7 @@ urlpatterns = [
     path("inbox/", inbox, name="inbox"),
     path("inbox/<uuid:conversation_id>/reply/", inbox_reply, name="inbox_reply"),
     path("meli/", mercadolibre_settings, name="mercadolibre_settings"),
+    path("meli/claims/", mercadolibre_claims, name="mercadolibre_claims"),
     path("meli/questions/", mercadolibre_questions, name="mercadolibre_questions"),
     path(
         "meli/questions/sync/",

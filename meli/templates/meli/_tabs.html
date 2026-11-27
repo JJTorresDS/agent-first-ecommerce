@@ -1,5 +1,6 @@
 <nav class="tabs" aria-label="Mercado Libre">
   <a class="tab{% if active_tab == 'settings' %} active{% endif %}" href="{% url 'mercadolibre_settings' %}">Connect</a>
+  <a class="tab{% if active_tab == 'claims' %} active{% endif %}" href="{% url 'mercadolibre_claims' %}">Claims{% if claims_due %} <span class="badge">{{ claims_due }}</span>{% endif %}</a>
   {% if can_open_catalog %}
     <a class="tab{% if active_tab == 'meli' %} active{% endif %}" href="{% url 'meli_listings' %}">Listings</a>
     <a class="tab{% if active_tab == 'meli_new' %} active{% endif %}" href="{% url 'meli_drafts' %}">Create listing</a>

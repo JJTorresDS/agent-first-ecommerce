@@ -53,6 +53,8 @@ def nav(request):
         "other_unread": other_unread,
         "organization": organization,
         "alert_groups": groups,
+        # Mercado Libre claims with a deadline (meli.alerts.claims_due): the sidebar and the Claims tab show it.
+        "claims_due": next((group["count"] for group in groups if group.get("kind") == "claims"), 0),
         "alert_count": sum(group["count"] for group in groups),
         "nav_name": name,
         "nav_initials": initials,

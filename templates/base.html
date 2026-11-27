@@ -602,6 +602,9 @@
     .sync-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
     .catalog-cell { white-space: nowrap; }
     .catalog-cell .spinner { display: inline-block; width: 0.75rem; height: 0.75rem; vertical-align: -0.1rem; }
+    .claim-deadline { white-space: nowrap; }
+    .claim-deadline strong, .claim-deadline span { display: block; }
+    .claims-table p { margin: 0.15rem 0 0; }
     .qty-cell { white-space: nowrap; }
     .qty-edit { display: inline-flex; align-items: center; gap: 0.35rem; }
     .qty-edit input { width: 4.5rem; text-align: right; padding: 0.3rem 0.4rem; }
@@ -855,6 +858,7 @@
               <svg class="chevron nav-text" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m6 4 4 4-4 4"/></svg>
             </summary>
             <a class="nav-link nav-sub{% if url_name == 'mercadolibre_settings' or url_name == 'mercadolibre_token' %} active{% endif %}" href="{% url 'mercadolibre_settings' %}"><span class="nav-text">Connect</span></a>
+            <a class="nav-link nav-sub{% if url_name == 'mercadolibre_claims' %} active{% endif %}" href="{% url 'mercadolibre_claims' %}"><span class="nav-text">Claims</span>{% if claims_due %}<span class="badge" title="Claims waiting for your answer">{{ claims_due }}</span>{% endif %}</a>
             {% if can_open_catalog %}
               <a class="nav-link nav-sub{% if url_name == 'meli_listings' %} active{% endif %}" href="{% url 'meli_listings' %}"><span class="nav-text">Listings</span></a>
               <a class="nav-link nav-sub{% if meli_page == 'meli_' and url_name != 'meli_listings' %} active{% endif %}" href="{% url 'meli_drafts' %}"><span class="nav-text">Create listing</span></a>

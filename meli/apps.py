@@ -17,7 +17,7 @@ class MeliConfig(AppConfig):
 
         from inbox.models import Channel
 
-        from .alerts import postsale_messages, presales_questions
+        from .alerts import claims_due, postsale_messages, presales_questions
         from .postsale import postsale_sync_action, refresh_postsale
         from .projection import (
             questions_sync_action,
@@ -28,6 +28,7 @@ class MeliConfig(AppConfig):
 
         register(presales_questions)
         register(postsale_messages)
+        register(claims_due)
         register_sender(Channel.MELI_ITEM_QUESTIONS, send_item_question)
         register_sender(
             Channel.MELI_POSTSALES,

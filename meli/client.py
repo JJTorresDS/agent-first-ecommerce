@@ -559,3 +559,34 @@ def post_item_description(access_token, item_id, text):
         {"plain_text": text},
         expect=(dict, type(None)),
     )
+
+
+CLAIMS_PAGE = 30
+CLAIMS_LIMIT = 300
+
+
+def fetch_claim(access_token, claim_id):
+    claim = quote(str(claim_id), safe="")
+    return _api_request(access_token, f"https://api.mercadolibre.com/post-purchase/v1/claims/{claim}")
+
+
+def fetch_open_claims(access_token, seller_id):
+    """The seller's open claims, where the seller is the one who must answer (respondent). Up to 300."""
+    claims = []
+    offset = 0
+    while offset < CLAIMS_LIMIT:
+        query = urlencode({
+            "player_role": "respondent", "player_user_id": seller_id, "status": "opened",
+            "offset": offset, "limit": CLAIMS_PAGE,
+        })
+        payload = _api_request(access_token, f"https://api.mercadolibre.com/post-purchase/v1/claims/search?{query}")
+        batch = payload.get("data", payload.get("results"))
+        if not isinstance(batch, list):
+            raise ValueError("Mercado Libre response had no claims.")
+        claims.extend(claim for claim in batch if isinstance(claim, dict))
+        paging = payload.get("paging") if isinstance(payload.get("paging"), dict) else {}
+        total = paging.get("total")
+        offset += CLAIMS_PAGE
+        if len(batch) < CLAIMS_PAGE or (isinstance(total, int) and offset >= total):
+            break
+    return claims

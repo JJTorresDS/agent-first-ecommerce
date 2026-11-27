@@ -174,6 +174,13 @@ Organization is the tenant. Its UUID does not change. The name can.
 - The Catalog column comes from the synced payload, no Mercado Libre call (MeliListing.catalog_state): Competing (catalog_listing), Via <item> (item_relations: its catalog twin competes and they share stock), Can join (tag catalog_listing_eligible), else No. New edits Vimple makes to a listing (price, stock…) log there too, with their own field.
 - Notices after a redirect use Django messages, rendered from the flash context processor: the inbox's context already has "messages".
 
+## Claims
+
+- Mercado Libre claims arrive as post_purchase webhooks (/post-purchase/v1/claims/<id>, or …/actions-history). The worker reads GET /post-purchase/v1/claims/<id> once per connected organization (meli/claims.py) into meli.MeliClaim, one row per organization and claim_id, with Mercado Libre's whole answer in payload. The first time, the order gives the item title and buyer nickname.
+- due_at is the earliest due_date among the seller's available_actions (the seller's player: by user id, else the respondent seller). When it passes Mercado Libre resolves the claim itself. A claim that isn't opened has no due_at.
+- Claims tab (/meli/claims/, mercadolibre_claims, any member): open claims nearest deadline first, red under 24 h, closed ones under Closed. Each links to the sale's page on Mercado Libre (ventas/<order>/detalle), where the seller answers; Vimple doesn't resolve claims. Refresh (drafts queue, action claims_sync) reads every open claim (claims/search, player_role respondent) and re-reads stored open ones the search no longer lists; the first visit queues one.
+- meli.alerts.claims_due puts open claims with a deadline in the bell and the count (claims_due in the nav context) on the sidebar's Claims and the tab: one aggregate query per page, for the active organization only.
+
 ## Service API key
 
 - An organization has at most one accounts.OrganizationApiKey (OneToOne). Only owners see, create, copy, regenerate or delete it, on the Organization page; anyone else gets 403 and no card. Regenerate replaces the row, so the old key stops working at once.

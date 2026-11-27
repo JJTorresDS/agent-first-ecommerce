@@ -989,3 +989,78 @@ class MeliListingProspect(models.Model):
         images = self.payload.get("images") if isinstance(self.payload, dict) else None
         gallery = images.get("gallery") if isinstance(images, dict) else None
         return [str(url) for url in gallery if url] if isinstance(gallery, list) else []
+
+
+class MeliClaim(models.Model):
+    """One Mercado Libre claim (reclamo, mediación, devolución) on a sale, as last read.
+
+    One row per organization and claim: a seller connected to several organizations gets one in each.
+    due_at is the earliest deadline among what the seller can do now (available_actions), the one that
+    expires with Mercado Libre choosing for the seller.
+    """
+
+    organization = models.ForeignKey(
+        "accounts.Organization",
+        on_delete=models.CASCADE,
+        related_name="meli_claims",
+    )
+    claim_id = models.CharField(max_length=32)
+    resource = models.CharField(max_length=32, blank=True, help_text="What the claim is on: order, shipment…")
+    resource_id = models.CharField(max_length=32, blank=True, help_text="The order id when resource is order.")
+    status = models.CharField(max_length=16, blank=True)
+    claim_type = models.CharField(max_length=32, blank=True)
+    stage = models.CharField(max_length=32, blank=True)
+    reason_id = models.CharField(max_length=32, blank=True)
+    title = models.CharField(max_length=255, blank=True, help_text="The sold item's title, from the order.")
+    buyer = models.CharField(max_length=128, blank=True, help_text="The buyer's nickname, from the order.")
+    actions = models.JSONField(default=list, blank=True, help_text="The seller's available actions: action, mandatory, due_date.")
+    due_at = models.DateTimeField(null=True, blank=True)
+    opened_at = models.DateTimeField(null=True, blank=True)
+    meli_updated_at = models.DateTimeField(null=True, blank=True)
+    payload = models.JSONField(default=dict, blank=True, help_text="Mercado Libre's whole answer, as read.")
+    fetched_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "meli_claim"
+        ordering = ["due_at", "-opened_at"]
+        constraints = [
+            models.UniqueConstraint(fields=["organization", "claim_id"], name="uniq_meli_claim_org_claim"),
+        ]
+        indexes = [
+            models.Index(fields=["organization", "status", "due_at"], name="meli_claim_org_status_due"),
+        ]
+
+    def __str__(self):
+        return f"Claim {self.claim_id} ({self.status})"
+
+    def is_open(self):
+        return self.status == "opened"
+
+    def sale_url(self):
+        """The sale's detail on Mercado Libre, where the seller answers the claim."""
+        if self.resource == "order" and self.resource_id:
+            return f"https://www.mercadolibre.com.ar/ventas/{self.resource_id}/detalle"
+        return ""
+
+
+class MeliClaimSync(models.Model):
+    """The last Refresh of one organization's open claims."""
+
+    organization = models.OneToOneField(
+        "accounts.Organization",
+        on_delete=models.CASCADE,
+        related_name="meli_claim_sync",
+    )
+    state = models.CharField(max_length=16, choices=MeliListingSync.State.choices, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    total = models.PositiveIntegerField(default=0)
+    error = models.CharField(max_length=300, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "meli_claim_sync"
+
+    def busy(self):
+        if self.state not in {MeliListingSync.State.QUEUED, MeliListingSync.State.RUNNING}:
+            return False
+        return self.updated_at > timezone.now() - timedelta(minutes=10)
