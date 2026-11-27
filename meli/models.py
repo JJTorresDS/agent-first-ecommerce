@@ -771,6 +771,7 @@ class ListingChange(models.Model):
         STATUS = "status", "Status"
         PRICE = "price", "Price"
         QUANTITY = "available_quantity", "Available"
+        PACKAGE = "package", "Package"
 
     class Reason(models.TextChoices):
         OUT_OF_STOCK = "out_of_stock", "Out of stock"

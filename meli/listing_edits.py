@@ -133,7 +133,83 @@ def apply_change(organization, change_id):
         rows = rows.filter(pk=listing.pk)
     rows.update(**{change.field: value, "action_error": ""})
     change.finish()
+    if change.field == ListingChange.Field.QUANTITY:
+        send_package(organization, change, listing)
     try:
         refresh_listing(organization, change.item_id)
     except Exception as error:
         logger.warning("Listing %s changed but wasn't read back: %s", change.item_id, describe_failure(error))
+
+
+def _measure(text):
+    """ "17 cm", "17.0 cm" and "17 CM" read the same: (17.0, "cm"); None when it isn't a number and a unit."""
+    parts = str(text or "").strip().replace(",", ".").split()
+    if len(parts) != 2:
+        return None
+    try:
+        return float(parts[0]), parts[1].lower()
+    except ValueError:
+        return None
+
+
+def package_update(listing):
+    """The SELLER_PACKAGE_ attributes to send so the listing carries its product's package, or [].
+
+    Only from a product or combo with all four measures, and only when one differs from the listing's.
+    """
+    from catalog.models import package_missing
+
+    from .drafts import package_attributes
+
+    listed = listing.product if listing.product_id else listing.combo
+    if listed is None or package_missing(listed):
+        return []
+    wanted = package_attributes(listed)
+    current = {
+        attribute.get("id"): _measure(attribute.get("value_name"))
+        for attribute in (listing.payload or {}).get("attributes") or []
+        if isinstance(attribute, dict)
+    }
+    if all(current.get(attribute["id"]) == _measure(attribute["value_name"]) for attribute in wanted):
+        return []
+    return wanted
+
+
+def _package_text(attributes):
+    values = {attribute["id"]: attribute.get("value_name") or "" for attribute in attributes}
+    size = " × ".join(
+        values.get(key, "?").removesuffix(" cm")
+        for key in ("SELLER_PACKAGE_HEIGHT", "SELLER_PACKAGE_WIDTH", "SELLER_PACKAGE_LENGTH")
+    )
+    return f"{size} cm, {values.get('SELLER_PACKAGE_WEIGHT', '?')}"[:64]
+
+
+def send_package(organization, change, listing):
+    """After a stock change: the product's package to the listing too, as its own logged change.
+
+    A refusal is noted on the row and in the log; the quantity change stays done.
+    """
+    from .client import update_item
+    from .listing_templates import _token
+
+    wanted = package_update(listing)
+    if not wanted:
+        return
+    current = [
+        attribute for attribute in (listing.payload or {}).get("attributes") or []
+        if isinstance(attribute, dict) and attribute.get("id") in {item["id"] for item in wanted}
+    ]
+    logged = ListingChange.objects.create(
+        organization=organization, item_id=change.item_id, title=change.title, field=ListingChange.Field.PACKAGE,
+        old_value=_package_text(current) if current else "", new_value=_package_text(wanted),
+        reason=change.reason, note="Sent with the stock change.", user=change.user,
+    )
+    try:
+        update_item(_token(organization), change.item_id, {"attributes": wanted})
+    except Exception as error:
+        logger.warning("Package of %s not updated: %s", change.item_id, describe_failure(error))
+        message = f"Stock set; package not updated: {_reason(error)}"[:300]
+        MeliListing.objects.filter(organization=organization, item_id=change.item_id).update(action_error=message)
+        logged.finish(message)
+        return
+    logged.finish()

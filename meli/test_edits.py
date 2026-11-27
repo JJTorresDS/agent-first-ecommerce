@@ -163,3 +163,70 @@ class ListingEditTests(TestCase):
         self.assertEqual(read_price("1234.5"), Decimal("1234.50"))
         self.assertIsNone(read_price("1.2345"))
         self.assertIsNone(read_price("NaN"))
+
+
+class PackageWithStockTests(TestCase):
+    """A stock change also brings the listing's package in line with its product's."""
+
+    api = ListingEditTests.api
+    edit = ListingEditTests.edit
+
+    def setUp(self):
+        ListingEditTests.setUp(self)
+        self.item.weight_g = 310
+        self.item.height_cm = Decimal("17.0")
+        self.item.width_cm = Decimal("7.5")
+        self.item.length_cm = Decimal("3.0")
+        self.item.save()
+
+    def package(self):
+        return {"attributes": [
+            {"id": "SELLER_PACKAGE_HEIGHT", "value_name": "17 cm"}, {"id": "SELLER_PACKAGE_WIDTH", "value_name": "7.5 cm"},
+            {"id": "SELLER_PACKAGE_LENGTH", "value_name": "3 cm"}, {"id": "SELLER_PACKAGE_WEIGHT", "value_name": "310 g"},
+        ]}
+
+    def test_a_stock_change_sends_the_products_package_and_logs_it(self):
+        MeliListing.objects.filter(pk=self.single.pk).update(payload={"attributes": [
+            {"id": "SELLER_PACKAGE_HEIGHT", "value_name": "10 cm"}, {"id": "SELLER_PACKAGE_WIDTH", "value_name": "10 cm"},
+            {"id": "SELLER_PACKAGE_LENGTH", "value_name": "10 cm"}, {"id": "SELLER_PACKAGE_WEIGHT", "value_name": "200 g"},
+        ]})
+        self.edit(self.single, "available_quantity", "2", reason="out_of_stock")
+        self.assertEqual(self.puts, [("MLA1", {"available_quantity": 2}), ("MLA1", self.package())])
+        logged = ListingChange.objects.get(field="package")
+        self.assertEqual((logged.old_value, logged.new_value, logged.state, logged.reason),
+                         ("10 × 10 × 10 cm, 200 g", "17 × 7.5 × 3 cm, 310 g", "done", "out_of_stock"))
+
+    def test_nothing_extra_when_the_listing_already_has_it_or_the_product_lacks_it(self):
+        MeliListing.objects.filter(pk=self.single.pk).update(payload={"attributes": [
+            {"id": "SELLER_PACKAGE_HEIGHT", "value_name": "17.0 cm"}, {"id": "SELLER_PACKAGE_WIDTH", "value_name": "7.5 cm"},
+            {"id": "SELLER_PACKAGE_LENGTH", "value_name": "3 cm"}, {"id": "SELLER_PACKAGE_WEIGHT", "value_name": "310 g"},
+        ]})
+        self.edit(self.single, "available_quantity", "2")
+        self.assertEqual(self.puts, [("MLA1", {"available_quantity": 2})])
+        self.item.width_cm = None
+        self.item.save()
+        MeliListing.objects.filter(pk=self.single.pk).update(payload={})
+        self.edit(self.single, "available_quantity", "1")
+        self.assertEqual(self.puts[-1], ("MLA1", {"available_quantity": 1}))
+        self.assertFalse(ListingChange.objects.filter(field="package").exists())
+
+    def test_a_price_change_sends_no_package(self):
+        self.edit(self.single, "price", "900")
+        self.assertEqual(self.puts, [("MLA1", {"price": 900.0})])
+
+    def test_a_refused_package_keeps_the_stock_change(self):
+        from . import listing_edits
+
+        original = listing_edits.send_package
+
+        def refuse_package(*args):
+            self.refuse = "The packaging attributes are too small"
+            original(*args)
+
+        with patch("meli.listing_edits.send_package", side_effect=refuse_package):
+            response = self.edit(self.single, "available_quantity", "2")
+        self.assertEqual(ListingChange.objects.get(field="available_quantity").state, "done")
+        logged = ListingChange.objects.get(field="package")
+        self.assertEqual(logged.state, "failed")
+        self.assertIn("package not updated: The packaging attributes are too small", logged.error)
+        self.assertContains(response, "package not updated")
