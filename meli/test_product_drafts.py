@@ -120,7 +120,7 @@ class ProductDraftTests(PerfumeDraftCase):
         self.product.save()
         actions = self.client.get(f"/catalog/meli/products/{self.product.pk}/")
         self.assertContains(actions, "Fill in the package weight and size first.")
-        self.assertContains(actions, 'href="#package"')
+        self.assertContains(actions, f'hx-get="/catalog/meli/products/{self.product.pk}/ready/"')
         self.assertNotContains(actions, "Create Mercado Libre listing")
         self.assertEqual(self.create().status_code, 400)
         self.assertFalse(ListingDraft.objects.exists())
@@ -252,7 +252,7 @@ class ProductDraftTests(PerfumeDraftCase):
                 "attr_key": ["PERFUME_TYPE"], "attr_value": ["Eau de parfum"],
             },
         )
-        self.assertRedirects(response, "/catalog/meli/new/")
+        self.assertRedirects(response, f"/catalog/meli/new/{draft.pk}/")
         draft.refresh_from_db()
         self.assertEqual(draft.status, ListingDraft.Status.READY, draft.error)
         self.assertEqual(draft.attributes, {"PERFUME_TYPE": "Eau de parfum"})

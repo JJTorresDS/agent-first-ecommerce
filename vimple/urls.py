@@ -33,9 +33,10 @@ from meli.draft_views import (
     meli_listed,
     meli_listing_pick,
     meli_product_actions,
+    meli_product_progress,
 )
 from meli.category_views import meli_categories
-from meli.import_views import catalog_import
+from meli.import_views import catalog_import, catalog_new
 from meli.listing_views import meli_listing_history, meli_listing_row, meli_listings
 from meli.views import (
     mercadolibre_callback,
@@ -101,6 +102,7 @@ urlpatterns = [
     path("catalog/meli/history/<str:item_id>/", meli_listing_history, name="meli_listing_history"),
     path("catalog/meli/row/<int:pk>/", meli_listing_row, name="meli_listing_row"),
     path("catalog/import/", catalog_import, name="catalog_import"),
+    path("catalog/new/", catalog_new, name="catalog_new"),
     path("catalog/meli/new/", meli_drafts, name="meli_drafts"),
     path("catalog/meli/new/scraped/<int:pk>/", meli_draft_from_prospect, name="meli_draft_from_prospect"),
     path("catalog/meli/new/scraped/<int:pk>/fast/", meli_draft_fast, name="meli_draft_fast"),
@@ -114,6 +116,7 @@ urlpatterns = [
     path("catalog/meli/new/<int:pk>/fix/apply/", meli_draft_fix_apply, name="meli_draft_fix_apply"),
     path("catalog/meli/new/<int:pk>/fix/remove/", meli_draft_fix_remove, name="meli_draft_fix_remove"),
     path("catalog/meli/products/<uuid:pk>/", meli_product_actions, name="meli_product_actions"),
+    path("catalog/meli/products/<uuid:pk>/progress/", meli_product_progress, name="meli_product_progress"),
     path("catalog/meli/products/<uuid:pk>/competitors/", meli_product_competitors, name="meli_product_competitors"),
     path("catalog/meli/products/<uuid:pk>/ready/", meli_product_ready, name="meli_product_ready"),
     path("catalog/meli/products/<uuid:pk>/draft/", meli_draft_from_product, name="meli_draft_from_product"),

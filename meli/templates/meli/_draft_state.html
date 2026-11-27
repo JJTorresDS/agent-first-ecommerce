@@ -1,0 +1,25 @@
+{% comment %}
+  Where the draft stands, and Post once it's ready. While the worker checks or posts, it polls the
+  draft page (poll=state answers 204 until it's done) and swaps itself for the answer.
+{% endcomment %}
+<div class="draft-state" id="draft-state"{% if draft.status == "checking" or draft.status == "queued" or draft.status == "publishing" %} hx-get="{% url 'meli_draft' draft.pk %}?poll=state" hx-trigger="every 2s" hx-select="#draft-state" hx-target="this" hx-swap="outerHTML"{% endif %}>
+  <p class="muted">
+    {% if draft.status == "checking" %}Checking with Mercado Libre…
+    {% elif draft.status == "queued" or draft.status == "publishing" %}Posting to Mercado Libre…
+    {% elif draft.status == "ready" %}Ready to post.
+    {% elif draft.status == "needs_fix" %}Needs a fix: change what's below and Save and check.
+    {% elif draft.status == "published" %}Published{% if draft.item_id %} as <span class="mono">{{ draft.item_id }}</span>{% endif %}.
+    {% elif draft.status == "failed" %}Mercado Libre refused it.
+    {% else %}Not checked yet: Save and check.{% endif %}
+  </p>
+  {% if draft.error %}<p class="{% if draft.status == 'ready' or draft.status == 'published' %}muted{% else %}error{% endif %}">{{ draft.error }}</p>{% endif %}
+  {% include "meli/_error_details.html" %}
+  {% if can_edit and draft.status == "ready" %}
+    <form method="post" class="post-form">
+      {% csrf_token %}
+      <button type="submit" name="action" value="post" class="accent">Post to Mercado Libre</button>
+      <label class="check-label" title="Paused right after it's posted, so nothing sells until you reactivate it from Listings."><input type="checkbox" name="pause_after" value="1"> Post paused, to review on Mercado Libre first</label>
+    </form>
+    <p class="help">Posts what was last checked. Changed something below? Save and check first.</p>
+  {% endif %}
+</div>

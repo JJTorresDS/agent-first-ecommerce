@@ -8,8 +8,7 @@
     <h1>Products</h1>
     {% if can_edit %}
       <div class="head-actions">
-        <a class="button" href="{% url 'catalog_import' %}">Import from Mercado Libre</a>
-        <a class="accent" href="{% url 'catalog_model_new' %}">New model</a>
+        <a class="accent" href="{% url 'catalog_new' %}">New model</a>
       </div>
     {% endif %}
   </div>

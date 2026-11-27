@@ -4,6 +4,7 @@ from django.conf import settings
 from django.db import transaction
 from django.http import HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 
 from accounts.access import require_app
 from accounts.models import AppAccess, can_edit_products, membership_for
@@ -26,6 +27,15 @@ def _unlinked(organization):
     return MeliListingProspect.objects.filter(organization=organization, product__isnull=True).exclude(
         status=MeliListingProspect.Status.DISMISSED
     )
+
+
+@require_app(AppAccess.App.CATALOG)
+def catalog_new(request):
+    """New model: opens on From a scraped listing while some wait for a product, else on From scratch."""
+    membership = membership_for(request.user)
+    if can_edit_products(membership) and _unlinked(membership.organization).exists():
+        return redirect(f"{reverse('catalog_import')}?start=scraped")
+    return redirect("catalog_model_new")
 
 
 @require_app(AppAccess.App.CATALOG)
