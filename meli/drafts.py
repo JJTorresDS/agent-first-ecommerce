@@ -152,9 +152,38 @@ def build_item(draft, settings, user_products=False, overrides=True):
         attributes.extend(product_attributes(draft))
     if draft.category_id:
         body["category_id"] = draft.category_id
+    # Taxes first, so a value from the product or the draft replaces them.
+    attributes[:0] = tax_defaults(draft)
     # One value per attribute: the draft's own, added last, wins.
     body["attributes"] = list({attribute["id"]: attribute for attribute in attributes}.values())
     return apply_overrides(draft, body) if overrides else body
+
+
+# What this seller pays on every sale unless a product or draft says otherwise: IVA 21 %, no
+# Impuesto interno (only luxury goods carry it). Mercado Libre requires them in some categories.
+TAX_DEFAULTS = {"VALUE_ADDED_TAX": "21 %", "IMPORT_DUTY": "0 %"}
+
+
+def tax_defaults(draft):
+    """IVA and Impuesto interno by their ids on the category's own lists, for the ones the category has.
+
+    A tax left out on the draft (null) isn't sent.
+    """
+    schema = {attribute["id"]: attribute for attribute in draft.category_schema or []}
+    left_out = {key for key, value in (draft.attributes or {}).items() if value is None}
+    defaults = []
+    for attribute_id, name in TAX_DEFAULTS.items():
+        value_id = _allowed_id(schema.get(attribute_id), name)
+        if value_id and attribute_id not in left_out:
+            defaults.append({"id": attribute_id, "value_id": value_id})
+    return defaults
+
+
+def off_list(attribute, value_id):
+    """True when a value_id isn't on this fixed-list attribute's own values (another attribute's id, a guess)."""
+    if not attribute or attribute.get("type") not in FIXED_TYPES or not attribute.get("value_ids"):
+        return False
+    return str(value_id) not in {str(known) for known in attribute["value_ids"]} and str(value_id) not in SENT_IDS
 
 
 # Fields an AI fix never changes: Vimple owns them, and stock, the sync and the post depend on them.
@@ -200,8 +229,13 @@ def apply_overrides(draft, body):
         else:
             body[key] = value
     by_id = {attribute["id"]: attribute for attribute in body.get("attributes") or []}
+    schema = {attribute["id"]: attribute for attribute in draft.category_schema or []}
     for attribute_id, value in (overrides.get("attributes") or {}).items():
         if attribute_id in LOCKED_ATTRIBUTES:
+            continue
+        if isinstance(value, dict) and value.get("value_id") and off_list(schema.get(attribute_id), value["value_id"]):
+            # A fix naming an id from another attribute's list (IVA's 27 % as Impuesto interno) is
+            # refused by Mercado Libre: the draft's, product's or default value stays.
             continue
         if value is None:
             by_id.pop(attribute_id, None)
@@ -472,6 +506,8 @@ NO_GTIN_REASON_ID = "17055161"
 # The brand Mercado Libre accepts without a barcode (id from a perfume listing it took).
 GENERIC_BRAND = "Generic"
 GENERIC_BRAND_ID = "35977846"
+# Ids Vimple sends on purpose that a category's stored list may not carry.
+SENT_IDS = {GENERIC_BRAND_ID, NO_GTIN_REASON_ID}
 
 # Attribute types whose values must come from Mercado Libre's list; others only suggest values.
 FIXED_TYPES = {"list", "boolean"}
@@ -493,7 +529,11 @@ def invalid_values(draft, body):
     wrong = []
     for attribute in body.get("attributes") or []:
         known = schema.get(attribute["id"])
-        if not known or "value_name" not in attribute or attribute["id"] in OWN_ATTRIBUTES:
+        if not known or attribute["id"] in OWN_ATTRIBUTES:
+            continue
+        if "value_name" not in attribute:
+            if attribute.get("value_id") and off_list(known, attribute["value_id"]):
+                wrong.append({**known, "value": f"id {attribute['value_id']}"})
             continue
         if known.get("type") == "number_unit" and not NUMBER_UNIT.match(attribute["value_name"]):
             # "ML" or "treinta": Mercado Libre wants "30 mL".

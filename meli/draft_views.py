@@ -342,10 +342,11 @@ def guided_fields(draft, attributes):
     Each field: the schema item plus its value (the draft's, else the product's), and for number_unit its
     number and unit. Free rows are the draft's attributes the guided fields don't cover.
     """
-    from .drafts import OWN_ATTRIBUTES
+    from .drafts import OWN_ATTRIBUTES, TAX_DEFAULTS
 
     listed = draft.listed()
-    product_values = dict(getattr(listed, "attributes", None) or {})
+    # IVA 21 % and Impuesto interno 0 % unless the product says otherwise: what build_item sends.
+    product_values = {**TAX_DEFAULTS, **dict(getattr(listed, "attributes", None) or {})}
     skipped = not_guided(draft)
     required, recommended, guided = [], [], set()
     for item in draft.category_schema or []:
