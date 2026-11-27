@@ -33,6 +33,10 @@ class ProductPageFlowTests(PerfumeDraftCase):
         self.assertEqual(response["HX-Refresh"], "true")
         self.assertContains(self.actions(), "Create Mercado Libre listing")
 
+    def test_the_card_reloads_when_the_stock_card_saves(self):
+        actions = self.actions()
+        self.assertContains(actions, f'hx-get="/catalog/meli/products/{self.product.pk}/" hx-trigger="stock-changed from:body"')
+
     def test_create_listing_starts_from_the_linked_scraped_listing(self):
         scraped = prospect_for(self.organization, product=self.product, category_id="MLA1271", category_path="Belleza > Perfumes")
         actions = self.actions()

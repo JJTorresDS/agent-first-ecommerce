@@ -1,4 +1,5 @@
-<div class="listing-actions" id="listing-actions">
+{# A saved stock change on the page (Stock card: Adjust, Count, Send to Full) fires stock-changed: the card reads it again. #}
+<div class="listing-actions" id="listing-actions" hx-get="{% url 'meli_product_actions' product.pk %}" hx-trigger="stock-changed from:body" hx-swap="outerHTML" hx-disinherit="*">
   <p class="muted">Mercado Libre: {% include "meli/_listed_link.html" with summary=listing_summary pk=listed.pk %}</p>
   {% include "meli/_listed_dialog.html" %}
   {% if progress %}{% include "meli/_product_progress.html" %}{% endif %}

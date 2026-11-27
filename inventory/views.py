@@ -260,7 +260,7 @@ def product_stock(request, pk):
             error = " ".join(failure.messages)
     units = ledger.on_hand(product)
     recent = product.stock_movements.filter(organization=organization).select_related("location")[:10]
-    return render(
+    response = render(
         request,
         "inventory/_product_stock.html",
         {
@@ -274,3 +274,7 @@ def product_stock(request, pk):
             "can_edit": can_edit,
         },
     )
+    if request.method == "POST" and not error:
+        # The product page's Mercado Libre card reads the stock too ("No stock in the Depósito to list"): it reloads.
+        response["HX-Trigger"] = "stock-changed"
+    return response

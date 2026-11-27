@@ -283,9 +283,12 @@ class InventoryPageTests(TestCase):
         self.client.post(url, {"action": "full", "units": "3", "note": "Envío 123"})
         card = self.client.post(url, {"action": "adjust", "kind": "damage", "units": "1", "note": "Broken"})
         self.assertContains(card, "Stock updated.")
+        # The page's Mercado Libre card reloads on it; a refused change fires nothing.
+        self.assertEqual(card["HX-Trigger"], "stock-changed")
         self.assertEqual(ledger.on_hand(self.item), {OWN: 4, FULL: 3})
         bad = self.client.post(url, {"action": "full", "units": "0"})
         self.assertContains(bad, "Send at least one unit.")
+        self.assertNotIn("HX-Trigger", bad)
         self.assertEqual(self.client.get(f"/inventory/products/{self.theirs.pk}/").status_code, 404)
         movements = self.client.get("/inventory/movements/?kind=transfer_in")
         self.assertContains(movements, "Arrived at Full")
